@@ -6,8 +6,9 @@ module Genetics.Browser.Feature
        ) where
 
 import Prelude
-
 import Data.Newtype (class Newtype)
+import Genetics.Browser.Types (View)
+
 
 newtype Feature r = Feature { min :: Number
                             , max :: Number
@@ -27,5 +28,5 @@ scaleFeature x (Feature f) = Feature $ f { min = f.min * x
                                          }
 
 
-chrToScreen :: ∀ r. Number -> Number -> Feature r -> Feature r
-chrToScreen scale viewStart = scaleFeature scale <<< translateFeature viewStart
+chrToScreen :: ∀ r. View -> Feature r -> Feature r
+chrToScreen v = scaleFeature v.scale <<< translateFeature v.viewStart

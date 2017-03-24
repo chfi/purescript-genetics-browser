@@ -3,7 +3,7 @@ module Genetics.Browser.Renderer.GWAS
        ) where
 
 import Prelude
-
+import Math as Math
 import Control.Error.Util (hush)
 import Control.Monad.Except (runExcept)
 import Data.Foldable (foldr)
@@ -16,12 +16,15 @@ import Data.Traversable (sequence)
 import Genetics.Browser.Feature (Feature(Feature), chrToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
 import Genetics.Browser.GlyphF.Interpret (writeGlyph)
+import Genetics.Browser.Types (View, Renderer)
 import Global (readFloat, infinity)
-import Math as Math
 
 type GWASRow = (score :: Number)
 type GWASFeature = Feature GWASRow
 
+
+-- TODO: convert pValue to negative log here?
+-- or at least add function to do it for us
 readGWASFeature :: Foreign -> F GWASFeature
 readGWASFeature f = do
   fMin <- readProp "min" f
@@ -29,10 +32,6 @@ readGWASFeature f = do
   score <- prop "pValue" f >>= readString <#> readFloat
   pure $ Feature { min: fMin, max: fMax, score: score }
 
-type View = { viewStart :: Number
-            , scale :: Number
-            , height :: Number
-            }
 
 glyphifyFeature :: String -> Number -> GWASFeature -> Glyph Unit
 glyphifyFeature col h (Feature f) = do
@@ -42,7 +41,7 @@ glyphifyFeature col h (Feature f) = do
 
 featureToForeign :: View -> F GWASFeature -> Foreign
 featureToForeign v f =
-  let tf = (chrToScreen v.scale v.viewStart) <$> f
+  let tf = chrToScreen v <$> f
       g = glyphifyFeature "#2222dd" v.height <$> tf
       f' = hush $ runExcept f
   in writeGlyph f' g
@@ -51,10 +50,14 @@ writeFeatures :: View -> Array Foreign -> Foreign
 writeFeatures v fs = toForeign $ featureToForeign v <<< readGWASFeature <$> fs
 
 quant :: Array GWASFeature -> { min :: Number, max :: Number }
-quant = foldr (\(Feature cur) {min, max} -> { min: Math.min cur.score min
-                                            , max: Math.max cur.score max})
-             { min: infinity, max: (-infinity)}
+quant = foldr (\(Feature cur) {min, max} ->
+                let score' = (Math.log cur.score) / (Math.log 10.0)
+                    -- max/min are reversed since the score is negative
+                in { min: Math.max score' min
+                   , max: Math.min score' max })
+             { min: (-infinity), max: infinity}
 
+-- TODO: this could be a function in a generic module
 writeResult :: Foreign -> Maybe { min :: Number, max :: Number } -> Foreign
 writeResult g q = toForeign { glyphs: g
                             , quant: q'
@@ -62,7 +65,9 @@ writeResult g q = toForeign { glyphs: g
                   where q' = case q of Just x  -> toForeign x
                                        Nothing -> writeNull
 
-render :: View -> Array Foreign -> Foreign
+-- TODO right now all other data in the feature is thrown away in the parsing...
+-- we should send the original Foreign value as the feature!
+render :: Renderer
 render v fs =
   let fs' = readGWASFeature <$> fs
       gs = toForeign $ featureToForeign v <$> fs'
