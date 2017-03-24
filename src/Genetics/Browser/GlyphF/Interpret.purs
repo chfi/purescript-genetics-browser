@@ -34,7 +34,8 @@ writeGlyph' f g = writeObject [ unsafeProp "draw" $ unsafePerformEff <<< \ctx ->
           unsafeProp k v = Prop { key: k, value: toForeign v }
 
 
-
+-- If the Glyph is wrapped in an F, and there is an error,
+-- the error is propagated to the browser and the user is informed
 writeGlyph :: ∀ a r. Maybe (Feature r) -> F (Glyph a) -> Foreign
 writeGlyph f fG = case runExcept fG of
   Left errors -> toForeign $ fold $ renderForeignError <$> errors
