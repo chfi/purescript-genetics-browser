@@ -10,7 +10,8 @@ import Data.Newtype (class Newtype)
 import Genetics.Browser.Types (View)
 
 
-newtype Feature r = Feature { min :: Number
+newtype Feature r = Feature { chr :: String
+                            , min :: Number
                             , max :: Number
                             | r
                             }

@@ -20,10 +20,11 @@ type LineFeature = Feature LineRow
 
 readLineFeature :: Foreign -> F LineFeature
 readLineFeature f = do
+  chr <- readProp "chr" f
   fMin <- readProp "min" f
   fMax <- readProp "max" f
   score <- prop "score" f >>= readString <#> readFloat
-  pure $ Feature { min: fMin, max: fMax, score: score }
+  pure $ Feature { chr: chr, min: fMin, max: fMax, score: score }
 
 
 -- TODO: error out on invalid configurations (parse using Foreign?)

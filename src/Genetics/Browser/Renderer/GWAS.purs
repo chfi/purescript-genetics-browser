@@ -27,10 +27,11 @@ type GWASFeature = Feature GWASRow
 -- or at least add function to do it for us
 readGWASFeature :: Foreign -> F GWASFeature
 readGWASFeature f = do
+  chr <- readProp "chr" f
   fMin <- readProp "min" f
   fMax <- readProp "max" f
   score <- prop "pValue" f >>= readString <#> readFloat
-  pure $ Feature { min: fMin, max: fMax, score: score }
+  pure $ Feature { chr: chr, min: fMin, max: fMax, score: score }
 
 
 glyphifyFeature :: String -> Number -> GWASFeature -> Glyph Unit
