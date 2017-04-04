@@ -1,19 +1,18 @@
 module Genetics.Browser.Feature
        ( Feature
+       , ScreenFeature
+       , featureToScreen
        , feature
        , unwrapFeature
        , withFeature
        , withFeature'
        , translateFeature
        , scaleFeature
-       -- , chrToScreen
        ) where
 
 import Prelude
-
-import Genetics.Browser.Units
-import Data.Newtype (class Newtype, over, under, unwrap, wrap)
-import Genetics.Browser.Types (View)
+import Genetics.Browser.Units (class HCoordinate, toScreen)
+import Data.Newtype (class Newtype, wrap)
 
 
 type FeatureRecord c r = { chr :: String
@@ -23,6 +22,8 @@ type FeatureRecord c r = { chr :: String
                          }
 
 newtype Feature c r = Feature (FeatureRecord c r)
+
+type ScreenFeature r = Feature Number r
 
 
 feature :: ∀ c r. HCoordinate c => FeatureRecord c r -> Feature c r
@@ -37,24 +38,18 @@ withFeature g (Feature f) = g f
 withFeature' :: ∀ a c r. Feature c r -> (FeatureRecord c r -> a)  -> a
 withFeature' = flip withFeature
 
-
--- derive instance newtypeFeature :: Newtype (Feature c r) _
-
--- instance newtypeFeature :: Newtype (Feature r) r where
---   wrap {chr, min, max} = Feature {chr, min, max}
---   unwrap (Feature f) = f
+featureToScreen :: ∀ c r. HCoordinate c => c -> c -> Feature c r -> ScreenFeature r
+featureToScreen offset scale (Feature f) =
+  Feature $ f { min = toScreen offset scale f.min
+              , max = toScreen offset scale f.max
+              }
 
 translateFeature :: ∀ c r. (Newtype c Number, HCoordinate c) => Number -> Feature c r -> Feature c r
 translateFeature x (Feature f) = Feature $ f { min = f.min - wrap x
                                              , max = f.max - wrap x
                                              }
 
--- scaleFeature :: ∀ r. Number -> Feature r -> Feature r
 scaleFeature :: ∀ c r. (Newtype c Number, HCoordinate c) => Number -> Feature c r -> Feature c r
 scaleFeature x (Feature f) = Feature $ f { min = f.min * wrap x
                                          , max = f.max * wrap x
                                          }
-
-
--- chrToScreen :: ∀ c r. (Newtype c Number, HCoordinate c) => View -> Feature c r -> Feature c r
--- chrToScreen v = scaleFeature v.scale <<< translateFeature v.viewStart
