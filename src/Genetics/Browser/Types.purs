@@ -7,6 +7,7 @@ type Point = { x :: Number, y :: Number}
 type View = { viewStart :: Number
             , scale :: Number
             , height :: Number
+            , chr :: String
             }
 
 -- TODO: replace Array Foreign with Array ForeignFeature
