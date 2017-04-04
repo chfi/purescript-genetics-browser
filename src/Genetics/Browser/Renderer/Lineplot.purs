@@ -2,29 +2,32 @@ module Genetics.Browser.Renderer.Lineplot
        where
 
 import Prelude
-import Control.Error.Util (hush)
+import Control.Alt ((<|>))
 import Data.Foreign (F, Foreign, readString, toForeign)
 import Data.Foreign.Class (readProp)
 import Data.Foreign.Index (prop)
 import Data.Foreign.Null (writeNull)
 import Data.Maybe (Maybe(..))
 import Data.Traversable (sequence)
-import Genetics.Browser.Feature (Feature(Feature), chrToScreen)
-import Genetics.Browser.Glyph (Glyph, fill, path, stroke)
+import Genetics.Browser.Feature (Feature, ScreenFeature, feature, featureToScreen, withFeature)
+import Genetics.Browser.Glyph (Glyph, path, stroke)
 import Genetics.Browser.GlyphF.Interpret (writeGlyph)
 import Genetics.Browser.Types (Renderer)
+import Genetics.Browser.Units (Bp(..))
 import Global (readFloat)
 
 type LineRow = (score :: Number)
-type LineFeature = Feature LineRow
+type LineFeature = Feature Bp LineRow
+type LineScreenFeature = ScreenFeature LineRow
 
-readLineFeature :: Foreign -> F LineFeature
-readLineFeature f = do
-  chr <- readProp "chr" f
-  fMin <- readProp "min" f
-  fMax <- readProp "max" f
-  score <- prop "score" f >>= readString <#> readFloat
-  pure $ Feature { chr: chr, min: fMin, max: fMax, score: score }
+  -- TODO: refactor into separate module, handle both string encoded regular numbers as well as string encoded exponential numbers, _and_ regular numbers
+readLineFeature :: String -> Foreign -> F LineFeature
+readLineFeature chr f = do
+  fMin <- Bp <$> readProp "min" f
+  fMax <- Bp <$> readProp "max" f
+  score <- (readProp "score" f) <|>
+           (prop "score" f >>= readString <#> readFloat)
+  pure $ feature { chr: chr, min: fMin, max: fMax, score: score }
 
 
 -- TODO: error out on invalid configurations (parse using Foreign?)
@@ -38,10 +41,10 @@ normalizeScore :: LinePlotConfig -> Number -> Number -> Number
 normalizeScore conf h y = ((y - conf.minScore) / (conf.maxScore - conf.minScore)) * h
 
 
-linePlot :: LinePlotConfig -> Number -> Array LineFeature -> Glyph Unit
+linePlot :: LinePlotConfig -> Number -> Array LineScreenFeature -> Glyph Unit
 linePlot cfg h fs = do
   stroke cfg.color
-  let ps = (\(Feature f) -> { x: f.min, y: h - (normalizeScore cfg h f.score) } ) <$> fs
+  let ps = withFeature (\f -> { x: f.min, y: h - (normalizeScore cfg h f.score) } ) <$> fs
   path ps
 
 
@@ -53,12 +56,11 @@ writeResult g q = toForeign { glyphs: [g]
                                        Nothing -> writeNull
 
 
-
-
-
 render :: LinePlotConfig -> Renderer
 render cfg v fs =
-  let fs' = sequence $ map (chrToScreen v) <$> readLineFeature <$> fs
+  let fs' :: _
+      fs' = sequence $ map (featureToScreen (Bp v.viewStart) (Bp v.scale)) <$>
+            (readLineFeature v.chr <$> fs)
       g = linePlot cfg v.height <$> fs'
   in writeResult
       (writeGlyph Nothing g)
