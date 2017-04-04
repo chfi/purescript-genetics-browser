@@ -1,7 +1,9 @@
 module Test.Main where
 
 import Prelude
-
+import Genetics.Browser.GlyphF.Canvas as Canvas
+import Genetics.Browser.GlyphF.SVG as SVG
+import Test.QuickCheck.Laws.Data as Data
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (log)
 import DOM (DOM)
@@ -9,15 +11,14 @@ import DOM.Node.Types (Element)
 import Data.Foreign (Foreign)
 import Data.Maybe (Maybe(..))
 import Data.Traversable (traverse_)
-import Genetics.Browser.Feature (Feature(..), scaleFeature, translateFeature)
+import Genetics.Browser.Feature (Feature, ScreenFeature, feature, featureToScreen, withFeature)
 import Genetics.Browser.Glyph (Glyph, circle, fill, rect, stroke)
-import Genetics.Browser.GlyphF.Canvas as Canvas
-import Genetics.Browser.GlyphF.SVG as SVG
 import Genetics.Browser.GlyphPosition (GlyphPosition)
+import Genetics.Browser.Units (Bp(..), MBp(..))
 import Graphics.Canvas (getCanvasElementById, getContext2D, translate)
 import Test.QuickCheck.Laws (QC)
-import Test.QuickCheck.Laws.Data as Data
 import Type.Proxy (Proxy(..))
+import Test.Units as Units
 
 
 foreign import testGlyphPos :: Foreign -> String
@@ -39,29 +40,30 @@ exGlyph = do
   rect {x: 0.0, y: 10.0} {x: 400.0, y: 15.0}
 
 
-exFeature1 :: Feature ()
-exFeature1 = Feature { min: -5.0, max: 5.0 }
-exFeature2 :: Feature ()
-exFeature2 = Feature { min: 10.0, max: 20.0 }
-exFeature3 :: Feature ()
-exFeature3 = Feature { min: 600.0, max: 610.0 }
+exFeature1 :: Feature MBp ()
+exFeature1 = feature { chr: "1", min: MBp (-5.0), max: MBp 5.0 }
+exFeature2 :: Feature MBp ()
+exFeature2 = feature { chr: "1", min: MBp 10.0, max: MBp 20.0 }
+exFeature3 :: Feature Bp ()
+exFeature3 = feature { chr: "1", min: Bp 60000.0, max: Bp 61000.0 }
 
 
 glyph1 :: Glyph Unit
-glyph1 = glyphify 0.0 (translateFeature 0.0 (scaleFeature 5.0 exFeature1))
+glyph1 = glyphify 0.0 (featureToScreen (MBp 0.0) (MBp 5.0) exFeature1)
 
 glyph2 :: Glyph Unit
-glyph2 = glyphify 50.0 (translateFeature 0.0 (scaleFeature 5.0 exFeature2))
+glyph2 = glyphify 50.0 (featureToScreen (MBp 0.0) (MBp 5.0) exFeature2)
 
 glyph3 :: Glyph Unit
-glyph3 = glyphify 100.0 (translateFeature 0.0 (scaleFeature 5.0 exFeature3))
+glyph3 = glyphify 100.0 (featureToScreen (Bp 0.0) (Bp 5.0) exFeature3)
 
 
-glyphify :: Number -> Feature () -> Glyph Unit
-glyphify y (Feature f) = do
+glyphify :: Number -> ScreenFeature () -> Glyph Unit
+glyphify y = withFeature $ \f -> do
   stroke "#ff0000"
   fill "#555555"
   rect { x: f.min, y: y } { x: f.max, y: y + 40.0 }
+
 
 
 checkGlyphPosInstances :: ∀ e. QC e Unit
@@ -91,3 +93,4 @@ main :: QC _ Unit
 main = do
   checkGlyphPosInstances
   setOnLoad runBrowserTest
+  Units.main

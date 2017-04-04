@@ -2,6 +2,7 @@ module Genetics.Browser.Units where
 
 import Prelude
 import Data.Newtype (class Newtype, unwrap)
+import Test.QuickCheck (class Arbitrary)
 
 newtype Bp = Bp Number
 derive instance newtypeBp :: Newtype Bp _
@@ -10,12 +11,16 @@ derive newtype instance ordBp :: Ord Bp
 derive newtype instance fieldBp :: Field Bp
 derive newtype instance semiringBp :: Semiring Bp
 derive newtype instance ringBp :: Ring Bp
+derive newtype instance arbitraryBp :: Arbitrary Bp
 
 newtype MBp = MBp Number
 derive instance newtypeMBp :: Newtype MBp _
 derive newtype instance eqMBp :: Eq MBp
 derive newtype instance ordMBp :: Ord MBp
 derive newtype instance fieldMBp :: Field MBp
+derive newtype instance semiringMBp :: Semiring MBp
+derive newtype instance ringMBp :: Ring MBp
+derive newtype instance arbitraryMBp :: Arbitrary MBp
 
 
 class Field a <= HCoordinate a where
@@ -30,7 +35,7 @@ toScreen offset scale x = unwrap ((x' - offset') * scale')
 
 instance hCoordBp :: HCoordinate Bp where
   bp = id
-  mbp (Bp x) = MBp (x * 0.0000001)
+  mbp (Bp x) = MBp (x * 0.000001)
 
 instance hCoordMBp :: HCoordinate MBp where
   bp (MBp x) = Bp (x * 1000000.0)
