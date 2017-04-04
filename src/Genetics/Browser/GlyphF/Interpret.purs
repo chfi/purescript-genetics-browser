@@ -19,15 +19,15 @@ import Genetics.Browser.GlyphF.Position (glyphToGlyphPosition)
 import Genetics.Browser.GlyphF.SVG as SVG
 
 
-writeGlyph' :: ∀ a r. Maybe (Feature r) -> Glyph a -> Foreign
+writeGlyph' :: ∀ a c r. Maybe (Feature c r) -> Glyph a -> Foreign
 writeGlyph' f g = writeObject [ unsafeProp "draw" $ unsafePerformEff <<< \ctx -> Canvas.renderGlyph ctx g
-                             , unsafeProp "min" $ const p.min
-                             , unsafeProp "max" $ const p.max
-                             , unsafeProp "minY" $ const p.minY
-                             , unsafeProp "maxY" $ const p.maxY
-                             , unsafeProp "feature" f'
-                             , unsafeProp "toSVG" $ unsafePerformEff <<< \_ -> SVG.renderGlyph g
-                             ]
+                              , unsafeProp "min" $ const p.min
+                              , unsafeProp "max" $ const p.max
+                              , unsafeProp "minY" $ const p.minY
+                              , unsafeProp "maxY" $ const p.maxY
+                              , unsafeProp "feature" f'
+                              , unsafeProp "toSVG" $ unsafePerformEff <<< \_ -> SVG.renderGlyph g
+                              ]
     where p = unwrap $ glyphToGlyphPosition g
           f' = fromMaybe writeNull (toForeign <$> f)
           unsafeProp :: ∀ x. String -> x -> Prop
@@ -36,7 +36,7 @@ writeGlyph' f g = writeObject [ unsafeProp "draw" $ unsafePerformEff <<< \ctx ->
 
 -- If the Glyph is wrapped in an F, and there is an error,
 -- the error is propagated to the browser and the user is informed
-writeGlyph :: ∀ a r. Maybe (Feature r) -> F (Glyph a) -> Foreign
+writeGlyph :: ∀ a c r. Maybe (Feature c r) -> F (Glyph a) -> Foreign
 writeGlyph f fG = case runExcept fG of
   Left errors -> toForeign $ fold $ renderForeignError <$> errors
   Right glyph -> writeGlyph' f glyph
