@@ -13,7 +13,7 @@ import Data.Foreign.Index (prop)
 import Data.Foreign.Null (writeNull)
 import Data.Maybe (Maybe(..))
 import Data.Traversable (sequence)
-import Genetics.Browser.Feature (Feature, ScreenFeature, feature, featureToScreen, withFeature')
+import Genetics.Browser.Feature (Feature, ScreenFeature, feature, featureToScreen, withFeature, withFeature')
 import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
 import Genetics.Browser.GlyphF.Interpret (writeGlyph)
 import Genetics.Browser.Types (View, Renderer)
@@ -29,7 +29,6 @@ type GWASScreenFeature = ScreenFeature GWASRow
 -- or at least add function to do it for us
 readGWASFeature :: String -> Foreign -> F GWASFeature
 readGWASFeature chr f = do
-  -- chr <- readProp "chr" f
   fMin <- Bp <$> readProp "min" f
   fMax <- Bp <$> readProp "max" f
   score <- prop "pValue" f >>= readString <#> readFloat
@@ -40,10 +39,10 @@ readGWASFeature chr f = do
   -- in this case we _do_ need to have screen coordinates as HCoordinates. hm.
   -- maybe we can do something fugly to fix it.
 glyphifyFeature :: String -> Number -> GWASScreenFeature -> Glyph Unit
-glyphifyFeature col h f = withFeature' f $ \f' -> do
+glyphifyFeature col h = withFeature $ \f -> do
   stroke col
   fill col
-  circle { x: f'.min, y: h + 10.0 * (Math.log f'.score / Math.log 10.0) } 3.0
+  circle { x: f.min, y: h + 10.0 * (Math.log f.score / Math.log 10.0) } 3.0
 
 featureToForeign :: View -> F GWASFeature -> Foreign
 featureToForeign v f =
@@ -53,6 +52,7 @@ featureToForeign v f =
   in writeGlyph f' g
 
 quant :: Array GWASFeature -> { min :: Number, max :: Number }
+                                     -- ugly :|
 quant = foldr (\cur {min, max} -> withFeature' cur $ \cur' ->
                 let score' = (Math.log cur'.score) / (Math.log 10.0)
                     -- max/min are reversed since the score is negative
