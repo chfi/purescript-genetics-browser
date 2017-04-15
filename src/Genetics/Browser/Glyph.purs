@@ -10,6 +10,8 @@ import Control.Monad.Free (Free, liftF)
 import Genetics.Browser.GlyphF (GlyphF(..))
 import Genetics.Browser.Types (Point)
 
+
+
 type Glyph = Free GlyphF
 
 

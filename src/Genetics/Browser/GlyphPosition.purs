@@ -11,6 +11,16 @@ import Global (infinity)
 import Math as Math
 import Test.QuickCheck (class Arbitrary, arbitrary)
 
+
+-- this is really a silly way of checking whether the user has clicked on a glyph or not.
+-- instead of simply using rectangular bounding boxes (encoded with constant functions??)
+-- we should have a general collide(x,y) function. that function should return true if
+-- (x,y) is within the glyph, and false otherwise. How it is calculated is up to the glyph.
+
+-- for example a haplotype plot would use a simple rectangle check, but a QTL plot could
+-- check to see if the click was within some radius of the data point (right now lineplots
+-- can't really have positions!)
+
 newtype GlyphPosition = GlyphPos { min :: Number
                                  , max :: Number
                                  , minY :: Number

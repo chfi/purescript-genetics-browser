@@ -1,7 +1,8 @@
 module Graphics.SVG where
 
 import Prelude
-
+import DOM.Node.Document as Document
+import DOM.Node.Element as Element
 import Control.Monad.Eff (Eff)
 import Control.Monad.State (get, put)
 import Control.Monad.State.Trans (StateT)
@@ -10,15 +11,13 @@ import DOM (DOM)
 import DOM.HTML (window)
 import DOM.HTML.Types (htmlDocumentToDocument)
 import DOM.HTML.Window (document)
-import DOM.Node.Document as Document
-import DOM.Node.Element as Element
 import DOM.Node.Node (appendChild)
 import DOM.Node.Types (Element, elementToNode)
 import Data.Array (uncons)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Maybe (Maybe(..))
-import Data.Nullable (toNullable)
+-- import Data.Nullable (toNullable)
 import Data.Traversable (intercalate, traverse_)
 import Data.Tuple (Tuple(..))
 
@@ -27,7 +26,7 @@ createElementSVG tag = do
   win <- window
   doc <- document win
   Document.createElementNS
-    (toNullable $ Just "http://www.w3.org/2000/svg")
+    (Just "http://www.w3.org/2000/svg")
     tag
     (htmlDocumentToDocument doc)
 

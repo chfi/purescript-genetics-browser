@@ -8,11 +8,11 @@ import Control.Monad.Aff (Aff, launchAff)
 import Data.Array (fromFoldable, mapMaybe)
 import Data.Either (Either(..))
 import Data.Foreign (Foreign)
-import Data.Foreign.Null (writeNull)
 import Data.Function.Uncurried (Fn4, Fn7, mkFn7, runFn4)
 import Data.Map (Map)
 import Data.Maybe (Maybe(..))
-import Genetics.Browser.Feature (Feature, feature, withFeature)
+import Data.Nullable (Nullable, toNullable)
+import Genetics.Browser.Feature (Feature(..), feature)
 import Genetics.Browser.Units (Bp, MBp(MBp), bp)
 import Global (readFloat)
 import Network.HTTP.Affjax (AJAX, get)
@@ -20,7 +20,7 @@ import Text.Parsing.CSV (defaultParsers)
 import Text.Parsing.Parser (parseErrorMessage, runParser)
 import Unsafe.Coerce (unsafeCoerce)
 
-type QTLFeature = Feature Bp (score :: Number)
+type QTLFeature = Feature Bp {score :: Number}
 
                   -- the first Foreign should be Nullable Feature or similar
 type FetchCallback = Fn4 String Foreign Number Foreign (Aff (ajax :: AJAX) Unit)
@@ -48,13 +48,18 @@ type Source = ∀ eff. Fn7 String Number Number
 -- type AnySource = ∀ r. (String -> Array (Feature r)) -> String -> Source
 
 
+null :: ∀ a. Nullable a
+null = toNullable Nothing
+
 -- fetch :: Source
 fetch :: _
 fetch uri = mkFn7 $ fetchImpl uri
 
 featureFilter :: String -> QTLFeature -> Maybe QTLFeature
-featureFilter chr f' = if (withFeature (\f -> f.chr == chr) f') then Just f' else Nothing
+featureFilter chr f@(Feature fChr _ _ _) = if fChr == chr then Just f else Nothing
 
+-- fetchImpl :: ∀ c. HCoordinate c =>
+--              _something -> String -> c -> c -> Number? -> _F -> _F -> Callback
 fetchImpl :: _
 fetchImpl uri chr pmin pmax scale types pool f = launchAff $ do
   res <- get uri
@@ -67,9 +72,9 @@ fetchImpl uri chr pmin pmax scale types pool f = launchAff $ do
 
   case fromFoldable <$> results of
     Left  er -> unsafeCoerce $
-                runFn4 f (parseErrorMessage er) writeNull 0.0 writeNull
+                runFn4 f (parseErrorMessage er) null 0.0 null
     Right fs -> unsafeCoerce $ let fs' = mapMaybe id fs -- filtering away Nothings
-                in runFn4 f "" (unsafeCoerce fs') 0.0 writeNull
+                in runFn4 f "" (unsafeCoerce fs') 0.0 null
 
 
 -- not very safe or stable (case sensitive, numbers as strings...)
@@ -79,4 +84,5 @@ lineToFeature m = do
     -- Convert MBp to Bp in a type safe manner
   min <- bp <$> MBp <$> readFloat <$> Map.lookup "Mb" m
   score <- readFloat <$> (Map.lookup "LRS" m <|> Map.lookup "LOD" m)
-  pure $ feature { chr: chr, min: min, max: min, score: score }
+  pure $ Feature chr min min { score }
+  -- pure $ feature { chr: chr, min: min, max: min, score: score }

@@ -5,6 +5,7 @@ import Prelude
 import Math as Math
 import Data.Foldable (foldr)
 import Data.Foreign (Foreign, F)
+import Data.Profunctor (class Profunctor)
 import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
 import Genetics.Browser.Types (View, Quant)
@@ -12,10 +13,29 @@ import Genetics.Browser.Units (class HCoordinate)
 import Global (infinity)
 
 
+-- a Track r a b can parse a's into r's, and then r's into b's.
+-- however... this doesn't quite cover what a track does.
+-- a track /fetches/ and parses. Meaning the first argument to the data constructor
+-- should really be an Eff (??) r ... or an Aff?
+-- so I suppose that means it should be any contravariant functor?
+-- is Eff contravariant? I doubt it.
+-- indeed, it doesn't make much sense for this to be structured like it is.
+-- we want something that produces r's. That's it.
+-- so it's another bifunctor, really!
+data Track r a b = Track (a -> r) (r -> b)
 
--- a Track is something that makes a's into b's,
--- where the a's may be fetched remotely, and the b's are something that can be Glyphified.
--- data Track a b = Track a b
+data Track' r f b = Track' (f r) (r -> b)
+-- then we need to use a smart constructor?
+
+type BDTrack r = Track r Foreign (Glyph Unit)
+
+instance functorTrack :: Functor (Track r a) where
+  map f (Track p r) = Track p (f <$> r)
+
+instance profunctorTrack :: Profunctor (Track r) where
+  dimap f g (Track parse render) = Track (parse <<< f) (render >>> g)
+
+
 
 -- rather, it's something that can fetch from a and render to a track.
 -- we don't even need a b - rather, the b doesn't define the output, not exactly.
@@ -29,12 +49,12 @@ import Global (infinity)
 -- renderTrack = ?r
 
 -- first we parse the feature
-readFeature :: ∀ c r. Foreign -> F (Feature c r)
-readFeature = ?r
+-- readFeature :: ∀ c r. Foreign -> F (Feature c r)
+-- readFeature = ?r
 
 
-glyphifyFeature :: ∀ conf r. conf -> ScreenFeature r -> Glyph Unit
-glyphifyFeature = ?g
+-- glyphifyFeature :: ∀ conf r. conf -> ScreenFeature r -> Glyph Unit
+-- glyphifyFeature = ?g
 
 
 
@@ -42,8 +62,9 @@ type Glyphifier conf c r = conf -> Feature c r -> Glyph Unit
 -- glyphify :: ∀ c r. Feature c r -> Glyph Unit
 -- glyphify = ?g
 
--- glyphify after transforming into canvas coordinates
-glyphifyGWAS :: (Number -> Number) -> Glyphifier { col :: String } Number (score :: Number)
+-- glyphify after transforming into canvas coordinate s
+-- glyphifyGWAS :: (Number -> Number) -> Glyphifier { col :: String } Number (score :: Number)
+glyphifyGWAS :: _
 glyphifyGWAS f {col} (Feature chr xl _ r) = do
   stroke col
   fill col
@@ -54,15 +75,10 @@ glyphifyGWAS f {col} (Feature chr xl _ r) = do
 
 -- this is basically just (writeGlyph <<< glyphifyFeature <<< toScreen)
 -- though we need to send some configuration around.
-featureToForeign :: ∀ c r. View -> Feature c r -> Foreign
-featureToForeign = ?f2f
+-- featureToForeign :: ∀ c r. View -> Feature c r -> Foreign
+-- featureToForeign = ?f2f
 
 
--- this isn't quite enough - it needs a way to go from Feature c r to a score,
--- possibly with a config, much like glyphifyFeature has.
--- should there be a middle step where we get that data?
--- I suppose Features could be categorised into (at least) quant and non-quant Features.
-  -- GADTs would be nice for that!
 quant :: ∀ c r. (r -> Number) -> Array (Feature c r) -> Quant
 quant f = foldr (\(Feature _ _ _ r) {min, max} -> let y = f r in
                   { min: Math.max y min

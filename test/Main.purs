@@ -11,7 +11,7 @@ import DOM.Node.Types (Element)
 import Data.Foreign (Foreign)
 import Data.Maybe (Maybe(..))
 import Data.Traversable (traverse_)
-import Genetics.Browser.Feature (Feature, ScreenFeature, feature, featureToScreen, withFeature)
+import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, rect, stroke)
 import Genetics.Browser.GlyphPosition (GlyphPosition)
 import Genetics.Browser.Units (Bp(..), MBp(..))
@@ -40,12 +40,12 @@ exGlyph = do
   rect {x: 0.0, y: 10.0} {x: 400.0, y: 15.0}
 
 
-exFeature1 :: Feature MBp ()
-exFeature1 = feature { chr: "1", min: MBp (-5.0), max: MBp 5.0 }
-exFeature2 :: Feature MBp ()
-exFeature2 = feature { chr: "1", min: MBp 10.0, max: MBp 20.0 }
-exFeature3 :: Feature Bp ()
-exFeature3 = feature { chr: "1", min: Bp 60000.0, max: Bp 61000.0 }
+exFeature1 :: Feature MBp Unit
+exFeature1 = Feature "1" (MBp (-5.0)) (MBp 5.0) unit
+exFeature2 :: Feature MBp Unit
+exFeature2 = Feature "1" (MBp 10.0) (MBp 20.0) unit
+exFeature3 :: Feature Bp Unit
+exFeature3 = Feature "1" (Bp 60000.0) (Bp 61000.0) unit
 
 
 glyph1 :: Glyph Unit
@@ -58,11 +58,11 @@ glyph3 :: Glyph Unit
 glyph3 = glyphify 100.0 (featureToScreen (Bp 0.0) (Bp 5.0) exFeature3)
 
 
-glyphify :: Number -> ScreenFeature () -> Glyph Unit
-glyphify y = withFeature $ \f -> do
+glyphify :: Number -> ScreenFeature Unit -> Glyph Unit
+glyphify y (Feature _ xl xr _) = do
   stroke "#ff0000"
   fill "#555555"
-  rect { x: f.min, y: y } { x: f.max, y: y + 40.0 }
+  rect { x: xl, y: y } { x: xr, y: y + 40.0 }
 
 
 
@@ -80,7 +80,7 @@ runBrowserTest = do
     Nothing -> log "couldn't find canvas"
     Just c  -> do
       ctx <- getContext2D c
-      translate {translateX: -200.0, translateY: 0.0} ctx
+      _ <- translate {translateX: -200.0, translateY: 0.0} ctx
       log "rendering glyph to canvas"
       traverse_ (Canvas.renderGlyph ctx) [glyph1, glyph2, glyph3]
 
