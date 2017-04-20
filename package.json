@@ -1,0 +1,14 @@
+{
+  "name": "purescript-genetics-browser",
+  "version": "0.0.1",
+  "description": "Genetics network browser written in Purescript",
+  "dependencies": {
+    "cytoscape": "^3.0.0"
+  },
+  "devDependencies": {},
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chfi/purescript-genetics-browser.git"
+  }
+}
