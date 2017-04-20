@@ -3,58 +3,39 @@ module Genetics.Browser.Renderer.Renderer
 
 import Prelude
 import Math as Math
+import Control.Monad.Eff (Eff)
+import Data.Bifunctor (class Bifunctor)
 import Data.Foldable (foldr)
 import Data.Foreign (Foreign, F)
+import Data.Lens.Iso (iso)
+import Data.Lens.Types (Iso')
 import Data.Profunctor (class Profunctor)
 import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
 import Genetics.Browser.Types (View, Quant)
 import Genetics.Browser.Units (class HCoordinate)
 import Global (infinity)
+import Unsafe.Coerce (unsafeCoerce)
 
 
--- a Track r a b can parse a's into r's, and then r's into b's.
--- however... this doesn't quite cover what a track does.
--- a track /fetches/ and parses. Meaning the first argument to the data constructor
--- should really be an Eff (??) r ... or an Aff?
--- so I suppose that means it should be any contravariant functor?
--- is Eff contravariant? I doubt it.
--- indeed, it doesn't make much sense for this to be structured like it is.
--- we want something that produces r's. That's it.
--- so it's another bifunctor, really!
-data Track r a b = Track (a -> r) (r -> b)
-
-data Track' r f b = Track' (f r) (r -> b)
--- then we need to use a smart constructor?
-
-type BDTrack r = Track r Foreign (Glyph Unit)
-
-instance functorTrack :: Functor (Track r a) where
-  map f (Track p r) = Track p (f <$> r)
-
-instance profunctorTrack :: Profunctor (Track r) where
-  dimap f g (Track parse render) = Track (parse <<< f) (render >>> g)
+newtype BDFeature = BDFeature Foreign
 
 
+-- don't think this can be a functor. Feature c r is both covariant and contravariant...
+-- well, this one absolutely cannot be a functor.
+data Track eff c r = Track
+                     (String -> c -> c -> Eff eff (Feature c r))
+                     (Iso' (Feature c r) BDFeature)
+                     (Feature c r -> Array (Glyph Unit))
 
--- rather, it's something that can fetch from a and render to a track.
--- we don't even need a b - rather, the b doesn't define the output, not exactly.
--- it could rather define the features kept in it.
--- what would the a be? a fetcher?
--- an URI?
--- an (a -> b)?
+-- Would be nice with some way to tag the `b` value as something that gets serialized. idk
+-- same way with `f` being a functor. oh well
+-- i guess it's an isomorphism sort of. eh.
+data Track2 f a b = Track2
+                    (f a)
+                    (Iso' a b)
+                    (a -> Glyph Unit)
 
-
--- renderTrack :: ∀ a b. Track a b -> Foreign
--- renderTrack = ?r
-
--- first we parse the feature
--- readFeature :: ∀ c r. Foreign -> F (Feature c r)
--- readFeature = ?r
-
-
--- glyphifyFeature :: ∀ conf r. conf -> ScreenFeature r -> Glyph Unit
--- glyphifyFeature = ?g
 
 
 
@@ -63,14 +44,11 @@ type Glyphifier conf c r = conf -> Feature c r -> Glyph Unit
 -- glyphify = ?g
 
 -- glyphify after transforming into canvas coordinate s
--- glyphifyGWAS :: (Number -> Number) -> Glyphifier { col :: String } Number (score :: Number)
-glyphifyGWAS :: _
+glyphifyGWAS :: (Number -> Number) -> Glyphifier { col :: String } Number {score :: Number}
 glyphifyGWAS f {col} (Feature chr xl _ r) = do
   stroke col
   fill col
   circle { x: xl, y: f r.score } 3.0
-
-
 
 
 -- this is basically just (writeGlyph <<< glyphifyFeature <<< toScreen)
