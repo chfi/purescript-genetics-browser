@@ -8,7 +8,7 @@ import Data.Foreign.Index (readProp)
 import Data.Maybe (Maybe(..))
 import Data.Nullable (toNullable)
 import Data.Traversable (sequence)
-import Genetics.Browser.Feature (Feature(..), ScreenFeature, feature, featureToScreen)
+import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, path, stroke)
 import Genetics.Browser.GlyphF.Interpret (writeGlyph)
 import Genetics.Browser.Types (Renderer)
@@ -19,14 +19,13 @@ type LineData = { score :: Number }
 type LineFeature = Feature Bp LineData
 type LineScreenFeature = ScreenFeature LineData
 
+
   -- TODO: refactor into separate module, handle both string encoded regular numbers as well as string encoded exponential numbers, _and_ regular numbers
 readLineFeature :: String -> Foreign -> F LineFeature
 readLineFeature chr f = do
   fMin <- Bp <$> (readProp "min" f >>= readNumber)
   fMax <- Bp <$> (readProp "max" f >>= readNumber)
-  -- score <- readProp "score" f >>= (\(x :: _) -> x <|> readString x <#> readFloat)
-  score <- (readProp "score" f >>= readNumber)
-           -- (readProp "score" f >>= readString <#> readFloat)
+  score <- (readProp "score" f >>= (\x -> readNumber x <|> (readFloat <$> readString x)))
   pure $ Feature chr fMin fMax { score }
 
 
