@@ -1,8 +1,15 @@
 module Genetics.Browser.Cytoscape where
 
 import Prelude
-
+import Control.Monad.Aff (Aff, launchAff)
+import Control.Monad.Aff.Console (log)
 import Control.Monad.Eff (Eff, kind Effect)
+import Control.Monad.Eff.Class (liftEff)
+import Data.Foreign (Foreign)
+import Data.Function.Uncurried (Fn2, mkFn2)
+import Data.Nullable (Nullable)
+import Network.HTTP.Affjax (AJAX, Affjax, get)
+import Unsafe.Coerce (unsafeCoerce)
 
 foreign import data Cytoscape :: Type
 foreign import data BioDalliance :: Type
@@ -14,11 +21,33 @@ foreign import data CY :: Effect
 -- elements : An array of elements specified as plain objects. For convenience, this option can alternatively be specified as a promise that resolves to the elements JSON.
 
 -- TODO should be an Eff, using DOM at least
-foreign import cytoscape :: String -> Cytoscape
 
-foreign import setOn :: Cytoscape -> Eff () Unit
+foreign import cytoscape :: String -> Nullable (CyCollection CyElement) -> Cytoscape
+foreign import cyAdd :: ∀ eff. Cytoscape
+                     -> CyCollection CyElement
+                     -> Eff (cy :: CY | eff) (CyCollection CyElement)
 
-foreign import setBDOn :: BioDalliance -> Cytoscape -> Eff () Unit
+-- ajaxCytoscape :: String -> String -> Eff (ajax :: AJAX) Cytoscape
+ajaxCytoscape :: _
+ajaxCytoscape div url = launchAff $ do
+  resp <- get url :: Affjax _ Foreign
+  pure $ cytoscape div $ unsafeCoerce resp.response
+
+ajaxAddEles :: _
+ajaxAddEles cy url = launchAff $ do
+  resp <- get url :: Affjax _ Foreign
+  _ <- liftEff $ cyAdd cy $ unsafeCoerce resp.response
+  pure unit
+
+-- foreign import setOn :: ∀ eff. Cytoscape -> Eff (cy :: CY | eff) Unit
+-- TODO: the callback should really be an Eff too, but w/e
+foreign import setOn :: ∀ eff.
+                        Cytoscape
+                     -> String
+                     -> (CyEvent -> Unit)
+                     -> Eff (cy :: CY | eff) Unit
+
+foreign import setBDOn :: ∀ eff. BioDalliance -> Cytoscape -> Eff (cy :: CY | eff) Unit
 
 -- need to be able to specify stylesheet, elements. other config?
 {-
@@ -31,10 +60,18 @@ eleObjs An array of elements specified by plain objects.
 cy.add( eles )
 Add the specified elements to the graph.
 eles A collection of elements.
--}
 
+-- these all return the added elements...
+-- ... meaning `cy` is modified.
+
+-- `Collections` are immutable.
+-}
+-- TODO: we really want this to connect with BD, so Features should be here too.
+-- would simplify the BD<->Cy interface, at least.
 foreign import data CyElement :: Type
 foreign import data CyCollection :: Type -> Type
+foreign import data CyId :: Type
+foreign import data CyEvent :: Type
 -- foreign import
 
 
@@ -50,8 +87,40 @@ foreign import data CyCollection :: Type -> Type
 -- http://js.cytoscape.org/#events/collection-events
 -- e.g. events for selecting an element from a collection.
 
-data CyThing a  = CyCore Cytoscape
-                | CyCollection a
-                | CyLayout
-                | CyAni
-                | CyThing a
+-- effectfully removing elements from a collection...
+-- removing doesn't delete the elements, it only removes them from the visible graph. hence Eff
+
+foreign import removeElements :: ∀ eff.
+                                 CyCollection CyElement
+                              -> Eff (cy :: CY | eff) (CyCollection CyElement)
+
+foreign import filterElements :: ∀ a.
+                                 Fn2 a Int Boolean
+                              -> CyCollection a
+                              -> CyCollection a
+
+filterElements' :: ∀ a. (a -> Int -> Boolean) -> CyCollection a -> CyCollection a
+filterElements' p = filterElements (mkFn2 p)
+
+foreign import elesOn :: ∀ eff. String
+                      -> (CyEvent -> Unit)
+                      -> CyCollection CyElement
+                      -> Eff (cy :: CY | eff) Unit
+-- foreign import isRemoved :: ∀ eff. CyElement -> Eff (cy :: CY | eff) Boolean
+-- isInside :: ∀ eff. CyElement -> Eff (cy :: CY | eff) Boolean
+-- isInside el = not <$> isRemoved el
+-- foreign import restoreElements :: ∀ a eff. CyCollection a -> Eff (cy :: CY | eff) Unit
+-- foreign import cloneElements :: ∀ a eff. CyCollection a ->
+
+-- TODO: there's more to move() than this.
+
+-- foreign import moveElements :: ∀ a. CyCollection a -> CyId -> CyCollection a
+-- set function as callback
+-- foreign import elesOn :: ∀ a b eff. CyCollection a -> (CyEvent -> b) -> Eff (cy :: CY | eff) Unit
+-- foreign import eleId :: CyElement -> CyId
+
+-- data CyThing a  = CyCore Cytoscape
+--                 | CyCollection a
+--                 | CyLayout
+--                 | CyAni
+--                 | CyThing a

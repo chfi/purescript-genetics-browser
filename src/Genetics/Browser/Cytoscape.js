@@ -1,19 +1,10 @@
 exports.cytoscape = function(div) {
-    var cy = require("cytoscape")({
+    return function(eles) {
+        var cy = require("cytoscape")({
 
         container: document.getElementById(div), // container to render in
 
-        elements: [ // list of graph elements to start with
-            { // node a
-                data: { id: 'a' }
-            },
-            { // node b
-                data: { id: 'b' }
-            },
-            { // edge ab
-                data: { id: 'ab', source: 'a', target: 'b' }
-            }
-        ],
+        elements: eles,
 
         style: [ // the stylesheet for the graph
             {
@@ -27,29 +18,35 @@ exports.cytoscape = function(div) {
             {
                 selector: 'edge',
                 style: {
-                    'width': 3,
-                    'line-color': '#ccc',
-                    'target-arrow-color': '#ccc',
-                    'target-arrow-shape': 'triangle'
+                    'curve-style': 'haystack',
+                    'haystack-radius': 0,
+                    'width': 5,
+                    'opacity': 0.5,
+                    'label': 'data(maxLRS)',
+                    'line-color': '#ccc'
+                    // 'target-arrow-color': '#ccc',
+                    // 'target-arrow-shape': 'triangle'
                 }
             }
         ],
 
         layout: {
-            name: 'grid',
-            rows: 1
+            name: 'circle'
         }
 
-    });
-
-    return cy;
+        });
+        return cy;
+    };
 };
 
 exports.setOn = function(cy) {
-    cy.on('tap', function(evt){
-        console.log(evt);
-        console.log( 'tap ' + evt.target.id() );
-    });
+    return function(evs) {
+        return function(callback) {
+            return function() {
+                cy.on(evs, callback);
+            };
+        };
+    };
 };
 
 exports.setBDOn = function(bd) {
@@ -65,5 +62,33 @@ exports.setBDOn = function(bd) {
                 bd.setLocation(null, 14000000, 20000000);
             }
         });
+    };
+};
+
+exports.elesOn = function(evs) {
+    return function(callback) {
+        return function(eles) {
+            return function() {
+                eles.on(evs, callback);
+            };
+        };
+    };
+};
+
+exports.cyAdd = function(cy) {
+    return function(eles) {
+        return cy.add(eles);
+    };
+};
+
+exports.removeElements = function(eles) {
+    return function() {
+        return eles.remove();
+    };
+};
+
+exports.filterElements = function(pred) {
+    return function(eles) {
+        return eles.filter(pred);
     };
 };

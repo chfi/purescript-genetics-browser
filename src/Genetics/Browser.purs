@@ -23,3 +23,8 @@ qtlFetch = fetch
 cytoscape = Cytoscape.cytoscape
 setOn = Cytoscape.setOn
 setBDOn = Cytoscape.setBDOn
+
+ajaxCytoscape = Cytoscape.ajaxCytoscape
+ajaxAddEles = Cytoscape.ajaxAddEles
+filterElements = Cytoscape.filterElements
+elesOn = Cytoscape.elesOn
