@@ -10,11 +10,9 @@ import Data.Function.Uncurried (Fn2, mkFn2)
 import Data.Nullable (Nullable)
 import Network.HTTP.Affjax (AJAX, Affjax, get)
 import Unsafe.Coerce (unsafeCoerce)
+import Genetics.Browser.Types (Cytoscape, CY, Biodalliance)
 
-foreign import data Cytoscape :: Type
-foreign import data BioDalliance :: Type
 
-foreign import data CY :: Effect
 
 
 -- from cy docs:
@@ -33,11 +31,11 @@ ajaxCytoscape div url = launchAff $ do
   resp <- get url :: Affjax _ Foreign
   pure $ cytoscape div $ unsafeCoerce resp.response
 
+  -- Cytoscape -> String ->
 ajaxAddEles :: _
 ajaxAddEles cy url = launchAff $ do
-  resp <- get url :: Affjax _ Foreign
-  _ <- liftEff $ cyAdd cy $ unsafeCoerce resp.response
-  pure unit
+  resp <- get url :: ∀ eff. Affjax (cy :: CY | eff) Foreign
+  liftEff $ cyAdd cy $ unsafeCoerce resp.response
 
 -- foreign import setOn :: ∀ eff. Cytoscape -> Eff (cy :: CY | eff) Unit
 -- TODO: the callback should really be an Eff too, but w/e

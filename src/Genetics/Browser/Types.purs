@@ -1,5 +1,6 @@
 module Genetics.Browser.Types where
 
+import Control.Monad.Eff (kind Effect)
 import Data.Foreign (Foreign)
 
 type Point = { x :: Number, y :: Number}
@@ -17,3 +18,7 @@ type Renderer = View -> Array Foreign -> Foreign
 type Quant = { min :: Number
              , max :: Number
              }
+foreign import data Cytoscape :: Type
+foreign import data CY :: Effect
+
+foreign import data Biodalliance :: Type
