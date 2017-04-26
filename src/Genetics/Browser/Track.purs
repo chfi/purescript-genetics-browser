@@ -1,4 +1,4 @@
-module Genetics.Browser.Renderer.Renderer
+module Genetics.Browser.Track
        where
 
 import Prelude
@@ -24,7 +24,7 @@ newtype BDFeature = BDFeature Foreign
 -- don't think this can be a functor. Feature c r is both covariant and contravariant...
 -- well, this one absolutely cannot be a functor.
 data Track eff c r = Track
-                     (String -> c -> c -> Eff eff (Feature c r))
+                     (GenRange c -> Eff eff (Feature c r))
                      (Iso' (Feature c r) BDFeature)
                      (Feature c r -> Array (Glyph Unit))
 
