@@ -92,3 +92,47 @@ exports.filterElements = function(pred) {
         return eles.filter(pred);
     };
 };
+
+exports.cyFilterElements = function(cy) {
+    return function(pred) {
+        return function() {
+            return cy.filter(pred);
+        };
+    };
+};
+
+exports.cyFilterByString = function(cy) {
+    return function(chr) {
+        return function() {
+            var es = cy.filter(function(e,y) {
+                return e.group() == "edges" && e.data().lrsLoc.chr != ("Chr" + chr);
+            });
+            es.remove()
+                .targets()
+                .remove();
+        };
+    };
+};
+
+exports.elDataImpl = function(just) {
+    return function(nothing) {
+        return function(el) {
+            var loc = el.data().lrsLoc;
+            console.log(el);
+            console.log("element data:");
+            console.log(el.data());
+            if (loc.chr && loc.pos) {
+                return just({chr: loc.chr,
+                             pos: loc.pos
+                            });
+            } else {
+                return nothing;
+            }
+        };
+    };
+};
+
+
+exports.evtTarget = function(evt) {
+    return evt.target;
+};

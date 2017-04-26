@@ -22,3 +22,5 @@ foreign import data Cytoscape :: Type
 foreign import data CY :: Effect
 
 foreign import data Biodalliance :: Type
+foreign import data BD :: Effect
+newtype BDFeature = BDFeature Foreign

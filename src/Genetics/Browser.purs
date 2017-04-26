@@ -8,6 +8,7 @@ import Genetics.Browser.Source.QTL (fetch)
 import Genetics.Browser.Types (Renderer)
 
 import Genetics.Browser.Cytoscape as Cytoscape
+import Genetics.Browser.Biodalliance as Biodalliance
 
 -- TODO: ugly that the LinePlotConfig is referred to at all outside Lineplot.purs...
 qtlGlyphify :: LinePlotConfig -> Renderer
@@ -22,9 +23,12 @@ qtlFetch = fetch
 
 cytoscape = Cytoscape.cytoscape
 setOn = Cytoscape.setOn
-setBDOn = Cytoscape.setBDOn
+-- setBDOn = Cytoscape.setBDOn
 
 ajaxCytoscape = Cytoscape.ajaxCytoscape
 ajaxAddEles = Cytoscape.ajaxAddEles
 filterElements = Cytoscape.filterElements
 elesOn = Cytoscape.elesOn
+
+addCyFilter = Biodalliance.addCyFilter
+addBdScrollCallback = Biodalliance.addCyCallback

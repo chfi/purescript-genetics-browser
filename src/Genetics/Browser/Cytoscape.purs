@@ -7,10 +7,13 @@ import Control.Monad.Eff (Eff, kind Effect)
 import Control.Monad.Eff.Class (liftEff)
 import Data.Foreign (Foreign)
 import Data.Function.Uncurried (Fn2, mkFn2)
+import Data.Maybe (Maybe(..))
 import Data.Nullable (Nullable)
+import Genetics.Browser.Feature (Feature(..))
+import Genetics.Browser.Types (Cytoscape, CY, Biodalliance)
+import Genetics.Browser.Units (class HCoordinate, Bp(..), MBp(..), bp)
 import Network.HTTP.Affjax (AJAX, Affjax, get)
 import Unsafe.Coerce (unsafeCoerce)
-import Genetics.Browser.Types (Cytoscape, CY, Biodalliance)
 
 
 
@@ -39,13 +42,20 @@ ajaxAddEles cy url = launchAff $ do
 
 -- foreign import setOn :: ∀ eff. Cytoscape -> Eff (cy :: CY | eff) Unit
 -- TODO: the callback should really be an Eff too, but w/e
-foreign import setOn :: ∀ eff.
+foreign import setOn :: ∀ cbEff eff.
                         Cytoscape
                      -> String
-                     -> (CyEvent -> Unit)
+                     -> (CyEvent -> Eff cbEff Unit)
                      -> Eff (cy :: CY | eff) Unit
 
-foreign import setBDOn :: ∀ eff. BioDalliance -> Cytoscape -> Eff (cy :: CY | eff) Unit
+onClick :: ∀ cbEff eff.
+           Cytoscape
+        -> (CyEvent -> Eff cbEff Unit)
+        -> Eff (cy :: CY | eff) Unit
+onClick cy = setOn cy "click"
+
+
+-- foreign import setBDOn :: ∀ eff. Biodalliance -> Cytoscape -> Eff (cy :: CY | eff) Unit
 
 -- need to be able to specify stylesheet, elements. other config?
 {-
@@ -122,3 +132,33 @@ foreign import elesOn :: ∀ eff. String
 --                 | CyLayout
 --                 | CyAni
 --                 | CyThing a
+
+foreign import cyFilterElements :: ∀ eff.
+                                   Cytoscape
+                                -> (CyElement -> Boolean)
+                                -> Eff (cy :: CY | eff) (CyCollection CyElement)
+
+
+
+-- Filters by chromosome -- by appending "Chr" to the current chromosome...
+-- TODO: terrible!
+foreign import cyFilterByString :: ∀ eff.
+                                   Cytoscape
+                                -> String
+                                -> Eff (cy :: CY | eff) Unit
+
+
+-- TODO: this is shitty and unsafe
+-- it doesn't even take the coordinate unit into account!
+-- CyElement should probably have the extra data in a type parameter
+type P = { chr :: String, pos :: MBp }
+foreign import elDataImpl :: (P -> Maybe P) -> (Maybe P)
+                          -> CyElement
+                          -> Maybe P
+
+
+elData :: CyElement -> Maybe P
+elData = elDataImpl Just Nothing
+
+-- this type is false: sometimes the evt target is the core, or a collection. maybe.
+foreign import evtTarget :: CyEvent -> CyElement
