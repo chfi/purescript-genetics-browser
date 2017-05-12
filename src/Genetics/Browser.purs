@@ -110,6 +110,46 @@ bdComponent =
 data BDSlot = BDSlot
 derive instance eqBDSlot :: Eq BDSlot
 derive instance ordBDSlot :: Ord BDSlot
+
+
+type CyState = { cy :: Maybe Cytoscape }
+
+data CyQuery a
+  = InitializeCy Cytoscape a
+
+type CyEffects eff = (cy :: CY | eff)
+
+cyComponent :: ∀ eff. H.Component HH.HTML CyQuery Unit Void (Aff (CyEffects eff))
+cyComponent =
+  H.component
+    { initialState: const initialState
+    , render
+    , eval
+    , receiver: const Nothing
+    }
+  where
+
+  initialState :: CyState
+  initialState = { cy: Nothing }
+
+  -- doesn't actually render anything...
+  render :: CyState -> H.ComponentHTML CyQuery
+  render = const $ HH.div [ HP.ref (H.RefLabel "cy") ] []
+
+  eval :: CyQuery ~> H.ComponentDSL CyState CyQuery Void (Aff (CyEffects eff))
+  -- eval :: AceQuery ~> H.ComponentDSL AceState AceQuery AceOutput (Aff (AceEffects eff))
+  eval = case _ of
+    InitializeCy cy next -> do
+      H.modify (_ { cy = Just cy })
+      pure next
+      -- pure next
+
+data CySlot = CySlot
+derive instance eqCySlot :: Eq CySlot
+derive instance ordCySlot :: Ord CySlot
+
+type Slot = Either BDSlot CySlot
+
 component :: ∀ eff. H.Component HH.HTML Query Unit Void (Aff (BDEffects eff))
 component =
   H.parentComponent
