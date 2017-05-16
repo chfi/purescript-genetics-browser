@@ -12,16 +12,17 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Control.Monad.Aff (Aff)
+import Control.Monad.Aff.Class (liftAff)
+import Control.Monad.Aff.Console (log)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
 import Data.Const (Const(..))
 import Data.Either.Nested (Either2)
 import Data.Functor.Coproduct.Nested (type (<\/>), Coproduct2)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap)
 import Data.Nullable (toNullable)
-import Genetics.Browser.Cytoscape (ajaxAddEles, cytoscape)
+import Genetics.Browser.Cytoscape (ajaxAddEles, cytoscape, resize, runLayout)
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
 import Genetics.Browser.Source.QTL (fetch)
 import Genetics.Browser.Types (BD, Biodalliance, CY, Cytoscape, Renderer)
@@ -30,10 +31,14 @@ import Global.Unsafe (unsafeStringify)
 import Halogen.VDom.Driver (runUI)
 
 
-type State = { cy :: Maybe Cytoscape }
+-- TODO: elemsUrl should be safer. Maybe it should cache too, idk
+type State = { cy :: Maybe Cytoscape
+             , elemsUrl :: String
+             }
 
 data Query a
   = Initialize String a
+  | Reset a
 
 type CyEffects eff = (cy :: CY | eff)
 
@@ -49,22 +54,51 @@ component =
   where
 
   initialState :: State
-  initialState = { cy: Nothing }
+  initialState = { cy: Nothing
+                 , elemsUrl: ""
+                 }
 
-  -- doesn't actually render anything...
+  -- TODO: set css here instead of pgb.html
   render :: State -> H.ComponentHTML Query
-  render = const $ HH.div [ HP.ref (H.RefLabel "cy") ] []
+  render = const $ HH.div [ HP.ref (H.RefLabel "cy")
+                          , HP.id_ "cyHolder"
+                          ] []
 
   eval :: Query ~> H.ComponentDSL State Query Void (Aff _)
   -- eval :: AceQuery ~> H.ComponentDSL AceState AceQuery AceOutput (Aff (AceEffects eff))
   eval = case _ of
-    Initialize div next -> do
-      let cy = cytoscape div (toNullable Nothing)
-      _ <- liftEff $ ajaxAddEles cy "http://localhost:8080/eles.json"
-      _ <- liftEff $ log "what the hek"
-      H.modify (_ { cy = Just cy })
+    Initialize url next -> do
+      H.getHTMLElementRef (H.RefLabel "cy") >>= case _ of
+        Nothing -> pure unit
+        Just el' -> do
+          cy <- liftEff $ cytoscape el' (toNullable Nothing)
+          _ <- liftEff $ ajaxAddEles cy url
+          H.modify (_ { cy = Just cy
+                      , elemsUrl = url
+                      })
+          liftEff $ do
+            runLayout cy Cytoscape.circle
+            resize cy
       pure next
-      -- pure next
+    Reset next -> do
+      H.gets _.cy >>= case _ of
+        Nothing -> pure unit
+        Just cy -> do
+          H.gets _.elemsUrl >>= case _ of
+            "" -> do
+              liftAff $ log "no element URL; can't reset"
+              pure unit
+            url -> do
+              -- remove all elements
+              -- refetch all elements
+              liftAff $ log $ "resetting with stored URL " <> url
+              pure unit
+
+          liftEff $ do
+            runLayout cy Cytoscape.circle
+            resize cy
+      pure next
+
 
 data Slot = Slot
 derive instance eqCySlot :: Eq Slot
