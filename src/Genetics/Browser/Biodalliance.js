@@ -16,7 +16,9 @@ exports.setLocationImpl = function(bd) {
     return function(chr) {
         return function(xl) {
             return function(xr) {
-                bd.setLocation(chr.slice(3), xl, xr);
+                return function() {
+                    bd.setLocation(chr.slice(3), xl, xr);
+                };
             };
         };
     };
@@ -24,9 +26,11 @@ exports.setLocationImpl = function(bd) {
 
 exports.scrollViewImpl = function(bd) {
     return function(x) {
-        var xl = (bd.viewStart|0) + x;
-        var xr = (bd.viewEnd|0) + x;
-        bd.setLocation(null, xl, xr);
+        return function() {
+            var xl = (bd.viewStart|0) + x;
+            var xr = (bd.viewEnd|0) + x;
+            bd.setLocation(null, xl, xr);
+        };
     };
 };
 
