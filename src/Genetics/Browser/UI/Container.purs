@@ -56,6 +56,7 @@ data Query a
   | BDScroll Number a
   | BDJump String Number Number a
   | CreateCy String a
+  | ResetCy a
 
 type ChildSlot = Either2 UIBD.Slot UICy.Slot
 
@@ -87,7 +88,12 @@ component =
         [  HE.onClick (HE.input_ (BDScroll 1000000.0))
         ]
         [ HH.text "Scroll right 1MBp" ]
+      , HH.button
+        [  HE.onClick (HE.input_ ResetCy)
+        ]
+        [ HH.text "Reset cytoscape" ]
       , HH.slot' CP.cp1 UIBD.Slot UIBD.component unit absurd
+      , HH.slot' CP.cp2 UICy.Slot UICy.component unit absurd
       ]
 
   eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void (Aff _)
@@ -106,6 +112,9 @@ component =
     CreateCy div next -> do
       _ <- H.query' CP.cp2 UICy.Slot $ H.action (UICy.Initialize div)
       pure next
+    ResetCy next -> do
+      _ <- H.query' CP.cp2 UICy.Slot $ H.action UICy.Reset
+      pure next
 
 
 -- main :: Eff (HA.HalogenEffects ()) Unit
@@ -113,7 +122,7 @@ component =
 main :: Biodalliance -> Eff _ Unit
 main bd = HA.runHalogenAff do
   liftEff $ log "running main"
-  -- _ <- HA.awaitLoad
+  HA.awaitLoad
   el <- HA.selectElement (wrap "#psgbHolder")
   case el of
     Nothing -> do
@@ -126,8 +135,8 @@ main bd = HA.runHalogenAff do
       liftEff $ log "moving to chr 3"
       liftEff $ log ":("
       liftEff $ log "well this is crazy"
-      io.query $ H.action (BDJump "Chr3" 1000000.0 10000000.0)
+      -- io.query $ H.action (BDJump "Chr3" 1000000.0 10000000.0)
       liftEff $ log "wait it blocks after moving???"
       liftEff $ log "creating Cy.js"
-      io.query $ H.action (CreateCy "cyHolder")
+      io.query $ H.action (CreateCy "http://localhost:8080/eles.json")
       liftEff $ log "created cy!"
