@@ -93,9 +93,13 @@ component =
         [  HE.onClick (HE.input_ ResetCy)
         ]
         [ HH.text "Reset cytoscape" ]
-      , HH.slot' CP.cp1 UIBD.Slot UIBD.component unit absurd
+      , HH.slot' CP.cp1 UIBD.Slot UIBD.component unit handleBDMessage
       , HH.slot' CP.cp2 UICy.Slot UICy.component unit absurd
       ]
+
+
+  handleBDMessage :: UIBD.Message -> Maybe (Query Unit)
+  handleBDMessage UIBD.Initialized = Just $ ResetCy unit
 
   eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void (Aff _)
   eval = case _ of

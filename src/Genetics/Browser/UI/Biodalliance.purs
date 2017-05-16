@@ -12,6 +12,7 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Control.Monad.Aff (Aff)
+import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
@@ -35,10 +36,13 @@ data Query a
   = Scroll Number a
   | Jump String Number Number a
   | Initialize (forall eff. HTMLElement -> Eff eff Biodalliance) a
+  | InitializeCallback (H.SubscribeStatus -> a)
 
-type BDEffects eff = (bd :: BD | eff)
+data Message = Initialized
 
-component :: ∀ eff. H.Component HH.HTML Query Unit Void (Aff (BDEffects eff))
+type BDEffects eff = (avar :: AVAR, bd :: BD | eff)
+
+component :: ∀ eff. H.Component HH.HTML Query Unit Message (Aff (BDEffects eff))
 component =
   H.component
     { initialState: const initialState
@@ -57,7 +61,7 @@ component =
                           , HP.id_ "svgHolder"
                           ] []
 
-  eval :: Query ~> H.ComponentDSL State Query Void (Aff (BDEffects eff))
+  eval :: Query ~> H.ComponentDSL State Query Message (Aff (BDEffects eff))
   -- eval :: AceQuery ~> H.ComponentDSL AceState AceQuery AceOutput (Aff (AceEffects eff))
   eval = case _ of
     Initialize mkBd next -> do
@@ -65,6 +69,7 @@ component =
         Nothing -> pure unit
         Just el -> do
           bd <- liftEff $ mkBd el
+          H.subscribe $ H.eventSource_ (Biodalliance.onInit bd) (H.request InitializeCallback)
           H.modify (_ { bd = Just bd })
       pure next
     Scroll n next -> do
@@ -74,7 +79,6 @@ component =
         Just bd -> do
           liftEff $ Biodalliance.scrollView bd (Bp n)
           pure next
-      -- pure next
     Jump chr xl xr next -> do
       mbd <- H.gets _.bd
       case mbd of
@@ -82,6 +86,9 @@ component =
         Just bd -> do
           liftEff $ Biodalliance.setLocation bd chr (Bp xl) (Bp xr)
           pure next
+    InitializeCallback reply -> do
+      H.raise $ Initialized
+      pure $ (reply H.Listening)
 
 
 data Slot = Slot
