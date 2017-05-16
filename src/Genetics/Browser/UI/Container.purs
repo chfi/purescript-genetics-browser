@@ -10,6 +10,7 @@ import Genetics.Browser.UI.Biodalliance as UIBD
 import Genetics.Browser.UI.Cytoscape as UICy
 import Halogen as H
 import Halogen.Aff as HA
+import Halogen.Component.ChildPath as CP
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
@@ -17,6 +18,7 @@ import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
+import DOM.HTML.Types (HTMLElement)
 import Data.Const (Const(..))
 import Data.Either.Nested (Either2)
 import Data.Functor.Coproduct.Nested (type (<\/>), Coproduct2)
@@ -27,7 +29,6 @@ import Genetics.Browser.Source.QTL (fetch)
 import Genetics.Browser.Types (BD, Biodalliance, CY, Cytoscape, Renderer)
 import Genetics.Browser.Units (Bp(..))
 import Global.Unsafe (unsafeStringify)
-import Halogen.Component.ChildPath as CP
 import Halogen.VDom.Driver (runUI)
 
 qtlGlyphify :: LinePlotConfig -> Renderer
@@ -52,7 +53,7 @@ type State = Unit
 
 data Query a
   = Nop a
-  | SetBD Biodalliance a
+  | CreateBD (forall eff. HTMLElement -> Eff eff Biodalliance) a
   | BDScroll Number a
   | BDJump String Number Number a
   | CreateCy String a
@@ -100,7 +101,7 @@ component =
   eval = case _ of
     Nop next -> do
       pure next
-    SetBD bd next -> do
+    CreateBD bd next -> do
       _ <- H.query' CP.cp1 UIBD.Slot $ H.action (UIBD.Initialize bd)
       pure next
     BDScroll dist next -> do
@@ -119,8 +120,8 @@ component =
 
 -- main :: Eff (HA.HalogenEffects ()) Unit
 -- TODO: creating BD should be in a promise or something.
-main :: Biodalliance -> Eff _ Unit
-main bd = HA.runHalogenAff do
+main :: (forall eff. HTMLElement -> Eff eff Biodalliance) -> Eff _ Unit
+main mkBd = HA.runHalogenAff do
   liftEff $ log "running main"
   HA.awaitLoad
   el <- HA.selectElement (wrap "#psgbHolder")
@@ -129,14 +130,9 @@ main bd = HA.runHalogenAff do
       liftEff $ log "no element for browser!"
     Just el' -> do
       io <- runUI component unit el'
-      liftEff $ log "attaching BD"
-      io.query $ H.action (SetBD bd)
-      liftEff $ log "attached!"
-      liftEff $ log "moving to chr 3"
-      liftEff $ log ":("
-      liftEff $ log "well this is crazy"
-      -- io.query $ H.action (BDJump "Chr3" 1000000.0 10000000.0)
-      liftEff $ log "wait it blocks after moving???"
+      liftEff $ log "creating BD"
+      io.query $ H.action (CreateBD mkBd)
+      liftEff $ log "created BD!"
       liftEff $ log "creating Cy.js"
       io.query $ H.action (CreateCy "http://localhost:8080/eles.json")
       liftEff $ log "created cy!"

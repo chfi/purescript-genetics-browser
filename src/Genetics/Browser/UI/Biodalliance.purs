@@ -15,6 +15,7 @@ import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
+import DOM.HTML.Types (HTMLElement)
 import Data.Const (Const(..))
 import Data.Either.Nested (Either2)
 import Data.Functor.Coproduct.Nested (type (<\/>), Coproduct2)
@@ -33,7 +34,7 @@ type State = { bd :: Maybe Biodalliance }
 data Query a
   = Scroll Number a
   | Jump String Number Number a
-  | Initialize Biodalliance a
+  | Initialize (forall eff. HTMLElement -> Eff eff Biodalliance) a
 
 type BDEffects eff = (bd :: BD | eff)
 
@@ -52,13 +53,19 @@ component =
 
   -- doesn't actually render anything...
   render :: State -> H.ComponentHTML Query
-  render = const $ HH.div [ HP.ref (H.RefLabel "bd") ] []
+  render = const $ HH.div [ HP.ref (H.RefLabel "bd")
+                          , HP.id_ "svgHolder"
+                          ] []
 
   eval :: Query ~> H.ComponentDSL State Query Void (Aff (BDEffects eff))
   -- eval :: AceQuery ~> H.ComponentDSL AceState AceQuery AceOutput (Aff (AceEffects eff))
   eval = case _ of
-    Initialize bd next -> do
-      H.modify (_ { bd = Just bd })
+    Initialize mkBd next -> do
+      H.getHTMLElementRef (H.RefLabel "bd") >>= case _ of
+        Nothing -> pure unit
+        Just el -> do
+          bd <- liftEff $ mkBd el
+          H.modify (_ { bd = Just bd })
       pure next
     Scroll n next -> do
       mbd <- H.gets _.bd
