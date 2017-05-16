@@ -81,6 +81,12 @@ exports.cyAdd = function(cy) {
     };
 };
 
+exports.cyFilter = function(pred) {
+    return function(cy) {
+        return cy.filter(pred);
+    };
+};
+
 exports.removeElements = function(eles) {
     return function() {
         return eles.remove();

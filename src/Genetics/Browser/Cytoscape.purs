@@ -21,12 +21,17 @@ import Unsafe.Coerce (unsafeCoerce)
 -- from cy docs:
 -- elements : An array of elements specified as plain objects. For convenience, this option can alternatively be specified as a promise that resolves to the elements JSON.
 
--- TODO should be an Eff, using DOM at least
-
-foreign import cytoscape :: String -> Nullable (CyCollection CyElement) -> Cytoscape
+-- TODO should be an Eff, using DOM at least!!
+foreign import cytoscape :: ∀ eff. String
+                         -> Nullable (CyCollection CyElement)
+                         -> Eff (cy :: CY | eff) Cytoscape
 foreign import cyAdd :: ∀ eff. Cytoscape
                      -> CyCollection CyElement
                      -> Eff (cy :: CY | eff) (CyCollection CyElement)
+foreign import cyFilter :: ∀ a.
+                           Fn2 a Int Boolean
+                        -> Cytoscape
+                        -> CyCollection a
 
 -- ajaxCytoscape :: String -> String -> Eff (ajax :: AJAX) Cytoscape
 ajaxCytoscape :: _
@@ -53,6 +58,14 @@ onClick :: ∀ cbEff eff.
         -> (CyEvent -> Eff cbEff Unit)
         -> Eff (cy :: CY | eff) Unit
 onClick cy = setOn cy "click"
+
+
+-- this doesn't work -- has to keep track of removed elements, or reload elements from scratch.
+resetFilter :: _
+               -- ... applicative for ->?
+resetFilter cy = cyAdd cy $ cyFilter (mkFn2 $ \_ _ -> true) cy
+-- resetFilter cy = cyAdd cy $ cyFilter (mkFn2 $ const true) cy
+
 
 
 -- foreign import setBDOn :: ∀ eff. Biodalliance -> Cytoscape -> Eff (cy :: CY | eff) Unit
