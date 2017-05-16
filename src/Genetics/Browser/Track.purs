@@ -23,10 +23,10 @@ newtype BDFeature = BDFeature Foreign
 
 -- don't think this can be a functor. Feature c r is both covariant and contravariant...
 -- well, this one absolutely cannot be a functor.
-data Track eff c r = Track
-                     (GenRange c -> Eff eff (Feature c r))
-                     (Iso' (Feature c r) BDFeature)
-                     (Feature c r -> Array (Glyph Unit))
+-- data Track eff c r = Track
+--                      (GenRange c -> Eff eff (Feature c r))
+--                      (Iso' (Feature c r) BDFeature)
+--                      (Feature c r -> Array (Glyph Unit))
 
 -- Would be nice with some way to tag the `b` value as something that gets serialized. idk
 -- same way with `f` being a functor. oh well
