@@ -12,6 +12,19 @@ exports.addFeatureListener = function(bd) {
 };
 
 
+exports.addInitListener = function(bd) {
+    return function(callback) {
+        return function() {
+            bd.addInitListener(function() {
+                // var browser = this;
+                // callback(browser)();
+                callback();
+            });
+        };
+    };
+};
+
+
 exports.setLocationImpl = function(bd) {
     return function(chr) {
         return function(xl) {

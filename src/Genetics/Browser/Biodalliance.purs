@@ -2,6 +2,7 @@ module Genetics.Browser.Biodalliance where
 
 import Prelude
 import Control.Monad.Eff (Eff)
+import Control.Monad.Eff.Class (class MonadEff)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap)
 import Genetics.Browser.Cytoscape (cyFilterByString, elData, evtTarget, onClick)
@@ -18,10 +19,18 @@ import Genetics.Browser.Units (class HCoordinate, Bp(..), bp)
 -- tier: the Dalliance tier in which the click occurred.
 
 -- for now we only send the feature
-foreign import addFeatureListener :: ∀ cbEff eff.
+foreign import addFeatureListener :: ∀ eff.
                                      Biodalliance
-                                  -> (BDFeature -> Eff cbEff Unit)
+                                  -> (forall eff2. BDFeature -> Eff eff2 Unit)
                                   -> Eff (bd :: BD | eff) Unit
+
+foreign import addInitListener :: forall eff a.
+                                  Biodalliance
+                               -> Eff (bd :: BD | eff) a
+                               -> Eff (bd :: BD | eff) Unit
+
+onInit :: forall eff a. Biodalliance -> Eff (bd :: BD | eff) a -> Eff (bd :: BD | eff) Unit
+onInit bd cb = addInitListener bd cb
 
 
 foreign import setLocationImpl :: ∀ eff.
@@ -56,12 +65,6 @@ foreign import parseBDFeaturePos :: BDFeature -> { chr :: String
 
 feature' { chr, min, max} = Feature chr min max unit
 
-
--- addCyFilter :: ∀ eff. Biodalliance -> Cytoscape -> Eff (bd :: BD | eff) Unit
-addCyFilter :: _
-addCyFilter bd cy = addFeatureListener bd callback
-  where callback :: _
-        callback = (cyFilterByString cy) <<< (_.chr <<< parseBDFeaturePos)
 
 
 addCyCallback :: _
