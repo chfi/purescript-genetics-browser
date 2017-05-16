@@ -1,41 +1,52 @@
-exports.cytoscape = function(div) {
+exports.cytoscape = function(el) {
     return function(eles) {
-        var cy = require("cytoscape")({
+        return function() {
+            var cy = require("cytoscape")({
 
-        container: document.getElementById(div), // container to render in
+                container: el, // container to render in
 
-        elements: eles,
+                elements: eles,
 
-        style: [ // the stylesheet for the graph
-            {
-                selector: 'node',
-                style: {
-                    'background-color': '#666',
-                    'label': 'data(id)'
-                }
-            },
+                style: [ // the stylesheet for the graph
+                    {
+                        selector: 'node',
+                        style: {
+                            'background-color': '#666',
+                            'label': 'data(id)'
+                        }
+                    },
 
-            {
-                selector: 'edge',
-                style: {
-                    'curve-style': 'haystack',
-                    'haystack-radius': 0,
-                    'width': 5,
-                    'opacity': 0.5,
-                    'label': 'data(maxLRS)',
-                    'line-color': '#ccc'
-                    // 'target-arrow-color': '#ccc',
-                    // 'target-arrow-shape': 'triangle'
-                }
-            }
-        ],
+                    {
+                        selector: 'edge',
+                        style: {
+                            'curve-style': 'haystack',
+                            'haystack-radius': 0,
+                            'width': 5,
+                            'opacity': 0.5,
+                            'label': 'data(maxLRS)',
+                            'line-color': '#ccc'
+                            // 'target-arrow-color': '#ccc',
+                            // 'target-arrow-shape': 'triangle'
+                        }
+                    }
+                ],
+            });
+            return cy;
+        };
+    };
+};
 
-        layout: {
-            name: 'circle'
-        }
+exports.runLayout = function(cy) {
+    return function(layout) {
+        return function() {
+            cy.layout({name: layout}).run();
+        };
+    };
+};
 
-        });
-        return cy;
+exports.resize = function(cy) {
+    return function() {
+        cy.resize();
     };
 };
 

@@ -5,6 +5,7 @@ import Control.Monad.Aff (Aff, launchAff)
 import Control.Monad.Aff.Console (log)
 import Control.Monad.Eff (Eff, kind Effect)
 import Control.Monad.Eff.Class (liftEff)
+import DOM.HTML.Types (HTMLElement)
 import Data.Foreign (Foreign)
 import Data.Function.Uncurried (Fn2, mkFn2)
 import Data.Maybe (Maybe(..))
@@ -22,7 +23,7 @@ import Unsafe.Coerce (unsafeCoerce)
 -- elements : An array of elements specified as plain objects. For convenience, this option can alternatively be specified as a promise that resolves to the elements JSON.
 
 -- TODO should be an Eff, using DOM at least!!
-foreign import cytoscape :: ∀ eff. String
+foreign import cytoscape :: ∀ eff. HTMLElement
                          -> Nullable (CyCollection CyElement)
                          -> Eff (cy :: CY | eff) Cytoscape
 foreign import cyAdd :: ∀ eff. Cytoscape
@@ -32,6 +33,16 @@ foreign import cyFilter :: ∀ a.
                            Fn2 a Int Boolean
                         -> Cytoscape
                         -> CyCollection a
+
+foreign import runLayout :: forall eff.
+                            Cytoscape
+                         -> Layout
+                         -> Eff (cy :: CY | eff) Unit
+foreign import resize :: forall eff. Cytoscape -> Eff (cy :: CY | eff) Unit
+
+newtype Layout = Layout String
+
+circle = Layout "circle"
 
 -- ajaxCytoscape :: String -> String -> Eff (ajax :: AJAX) Cytoscape
 ajaxCytoscape :: _
