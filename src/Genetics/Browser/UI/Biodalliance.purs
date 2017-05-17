@@ -40,9 +40,13 @@ data Query a
 
 data Message = Initialized
 
-type BDEffects eff = (avar :: AVAR, bd :: BD | eff)
+type Effects eff = (avar :: AVAR, bd :: BD | eff)
 
-component :: ∀ eff. H.Component HH.HTML Query Unit Message (Aff (BDEffects eff))
+data Slot = Slot
+derive instance eqBDSlot :: Eq Slot
+derive instance ordBDSlot :: Ord Slot
+
+component :: ∀ eff. H.Component HH.HTML Query Unit Message (Aff (Effects eff))
 component =
   H.component
     { initialState: const initialState
@@ -55,14 +59,12 @@ component =
   initialState :: State
   initialState = { bd: Nothing }
 
-  -- doesn't actually render anything...
   render :: State -> H.ComponentHTML Query
   render = const $ HH.div [ HP.ref (H.RefLabel "bd")
                           , HP.id_ "svgHolder"
                           ] []
 
-  eval :: Query ~> H.ComponentDSL State Query Message (Aff (BDEffects eff))
-  -- eval :: AceQuery ~> H.ComponentDSL AceState AceQuery AceOutput (Aff (AceEffects eff))
+  eval :: Query ~> H.ComponentDSL State Query Message (Aff (Effects eff))
   eval = case _ of
     Initialize mkBd next -> do
       H.getHTMLElementRef (H.RefLabel "bd") >>= case _ of
@@ -89,8 +91,3 @@ component =
     InitializeCallback reply -> do
       H.raise $ Initialized
       pure $ (reply H.Listening)
-
-
-data Slot = Slot
-derive instance eqBDSlot :: Eq Slot
-derive instance ordBDSlot :: Ord Slot

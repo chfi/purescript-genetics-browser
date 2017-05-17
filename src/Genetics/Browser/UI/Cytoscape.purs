@@ -13,9 +13,10 @@ import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Control.Monad.Aff (Aff)
 import Control.Monad.Aff.Class (liftAff)
-import Control.Monad.Aff.Console (log)
+import Control.Monad.Aff.Console (CONSOLE, log)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Exception (EXCEPTION)
 import Data.Const (Const(..))
 import Data.Either.Nested (Either2)
 import Data.Functor.Coproduct.Nested (type (<\/>), Coproduct2)
@@ -29,6 +30,7 @@ import Genetics.Browser.Types (BD, Biodalliance, CY, Cytoscape, Renderer)
 import Genetics.Browser.Units (Bp(..))
 import Global.Unsafe (unsafeStringify)
 import Halogen.VDom.Driver (runUI)
+import Network.HTTP.Affjax (AJAX)
 
 
 -- TODO: elemsUrl should be safer. Maybe it should cache too, idk
@@ -40,10 +42,16 @@ data Query a
   = Initialize String a
   | Reset a
 
-type CyEffects eff = (cy :: CY | eff)
+type Effects eff = ( cy :: CY
+                   , ajax :: AJAX
+                   , console :: CONSOLE
+                   , exception :: EXCEPTION | eff)
 
+data Slot = Slot
+derive instance eqCySlot :: Eq Slot
+derive instance ordCySlot :: Ord Slot
 
-component :: ∀ eff. H.Component HH.HTML Query Unit Void (Aff _)
+component :: ∀ eff. H.Component HH.HTML Query Unit Void (Aff (Effects eff))
 component =
   H.component
     { initialState: const initialState
@@ -64,25 +72,25 @@ component =
                           , HP.id_ "cyHolder"
                           ] []
 
-  eval :: Query ~> H.ComponentDSL State Query Void (Aff _)
-  -- eval :: AceQuery ~> H.ComponentDSL AceState AceQuery AceOutput (Aff (AceEffects eff))
+  eval :: Query ~> H.ComponentDSL State Query Void (Aff (Effects eff))
   eval = case _ of
     Initialize url next -> do
       H.getHTMLElementRef (H.RefLabel "cy") >>= case _ of
         Nothing -> pure unit
         Just el' -> do
+          -- TODO: figure out Aff. right now it just runs straight through, running the layout before elements have loaded
           cy <- liftEff $ cytoscape el' (toNullable Nothing)
-          _ <- liftEff $ ajaxAddEles cy url
+          liftEff $ do
+            _ <- ajaxAddEles cy url
+            runLayout cy Cytoscape.circle
+            resize cy
           H.modify (_ { cy = Just cy
                       , elemsUrl = url
                       })
-          liftEff $ do
-            runLayout cy Cytoscape.circle
-            resize cy
       pure next
     Reset next -> do
       H.gets _.cy >>= case _ of
-        Nothing -> pure unit
+        Nothing -> (liftAff $ log "No cytoscape found!.") *> pure unit
         Just cy -> do
           H.gets _.elemsUrl >>= case _ of
             "" -> do
@@ -98,8 +106,3 @@ component =
             runLayout cy Cytoscape.circle
             resize cy
       pure next
-
-
-data Slot = Slot
-derive instance eqCySlot :: Eq Slot
-derive instance ordCySlot :: Ord Slot

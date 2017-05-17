@@ -37,17 +37,6 @@ qtlGlyphify = QTL.render
 gwasGlyphify :: Renderer
 gwasGlyphify = GWAS.render
 
-cytoscape = Cytoscape.cytoscape
-setOn = Cytoscape.setOn
-
-ajaxCytoscape = Cytoscape.ajaxCytoscape
-ajaxAddEles = Cytoscape.ajaxAddEles
-filterElements = Cytoscape.filterElements
-elesOn = Cytoscape.elesOn
-cyFilter = Cytoscape.cyFilter
-cyReset = Cytoscape.resetFilter
-
-
 
 type State = Unit
 
@@ -63,9 +52,9 @@ type ChildSlot = Either2 UIBD.Slot UICy.Slot
 
 type ChildQuery = UIBD.Query <\/> UICy.Query <\/> Const Void
 
--- type Effects e = _
+type Effects eff = UIBD.Effects (UICy.Effects eff)
 
-component :: ∀ eff. H.Component HH.HTML Query Unit Void (Aff _)
+component :: ∀ eff. H.Component HH.HTML Query Unit Void (Aff (Effects eff))
 component =
   H.parentComponent
     { initialState: const initialState
@@ -78,30 +67,38 @@ component =
   initialState :: State
   initialState = unit
 
-  render :: State -> H.ParentHTML Query ChildQuery ChildSlot (Aff _)
+  render :: State -> H.ParentHTML Query ChildQuery ChildSlot (Aff (Effects eff))
   render state =
     HH.div_
-      [ HH.button
-        [  HE.onClick (HE.input_ (BDScroll (-1000000.0)))
+      [ HH.div_
+        [ HH.button
+          [  HE.onClick (HE.input_ (BDScroll (-1000000.0)))
+          ]
+          [ HH.text "Scroll left 1MBp" ]
+        , HH.button
+          [  HE.onClick (HE.input_ (BDScroll 1000000.0))
+          ]
+          [ HH.text "Scroll right 1MBp" ]
+        , HH.button
+          [  HE.onClick (HE.input_ ResetCy)
+          ]
+          [ HH.text "Reset cytoscape" ]
+        , HH.slot' CP.cp1 UIBD.Slot UIBD.component unit handleBDMessage
+        , HH.slot' CP.cp2 UICy.Slot UICy.component unit absurd
         ]
-        [ HH.text "Scroll left 1MBp" ]
-      , HH.button
-        [  HE.onClick (HE.input_ (BDScroll 1000000.0))
-        ]
-        [ HH.text "Scroll right 1MBp" ]
-      , HH.button
-        [  HE.onClick (HE.input_ ResetCy)
-        ]
-        [ HH.text "Reset cytoscape" ]
-      , HH.slot' CP.cp1 UIBD.Slot UIBD.component unit handleBDMessage
-      , HH.slot' CP.cp2 UICy.Slot UICy.component unit absurd
+      -- , HH.div
+      --     [
+      --       -- fix stylesheet - should be on the right hand side, not too wide...
+      --     ]
+      --     [
+      --     ]
       ]
 
 
   handleBDMessage :: UIBD.Message -> Maybe (Query Unit)
   handleBDMessage UIBD.Initialized = Just $ ResetCy unit
 
-  eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void (Aff _)
+  eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void (Aff (Effects eff))
   eval = case _ of
     Nop next -> do
       pure next
@@ -122,8 +119,6 @@ component =
       pure next
 
 
--- main :: Eff (HA.HalogenEffects ()) Unit
--- TODO: creating BD should be in a promise or something.
 main :: (forall eff. HTMLElement -> Eff eff Biodalliance) -> Eff _ Unit
 main mkBd = HA.runHalogenAff do
   liftEff $ log "running main"
