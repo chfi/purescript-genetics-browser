@@ -5,7 +5,6 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap)
-import Genetics.Browser.Cytoscape (cyFilterByString, elData, evtTarget, onClick)
 import Genetics.Browser.Feature (Feature(..))
 import Genetics.Browser.Types (BD, BDFeature, Biodalliance, Cytoscape)
 import Genetics.Browser.Units (class HCoordinate, Bp(..), bp)
@@ -54,20 +53,3 @@ scrollView :: ∀ c eff. HCoordinate c =>
            -> c
            -> Eff (bd :: BD | eff) Unit
 scrollView bd = scrollViewImpl bd <<< bp
-
-
--- TODO: pretty bad, assumes Bp, etc.
-foreign import parseBDFeaturePos :: BDFeature -> { chr :: String
-                                                 , min :: Bp
-                                                 , max :: Bp
-                                                 }
-
-
-feature' { chr, min, max} = Feature chr min max unit
-
-
-
-addCyCallback :: _
-addCyCallback bd cy = onClick cy $ \evt -> case elData (evtTarget evt) of
-        Nothing -> pure unit
-        Just { chr, pos } -> setLocation bd chr ((bp pos) - (Bp 1000000.0)) ((bp pos) + (Bp 1000000.0))
