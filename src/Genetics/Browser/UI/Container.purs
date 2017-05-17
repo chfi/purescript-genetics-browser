@@ -83,8 +83,11 @@ component =
           [  HE.onClick (HE.input_ ResetCy)
           ]
           [ HH.text "Reset cytoscape" ]
-        , HH.slot' CP.cp1 UIBD.Slot UIBD.component unit handleBDMessage
-        , HH.slot' CP.cp2 UICy.Slot UICy.component unit absurd
+          -- these divs are used to control the sizes of the subcomponents without having to query the children
+        , HH.div
+            [] [HH.slot' CP.cp1 UIBD.Slot UIBD.component unit handleBDMessage]
+        , HH.div
+            [] [HH.slot' CP.cp2 UICy.Slot UICy.component unit handleCyMessage]
         ]
       -- , HH.div
       --     [

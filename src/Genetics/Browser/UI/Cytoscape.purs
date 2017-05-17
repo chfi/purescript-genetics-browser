@@ -69,7 +69,7 @@ component =
   -- TODO: set css here instead of pgb.html
   render :: State -> H.ComponentHTML Query
   render = const $ HH.div [ HP.ref (H.RefLabel "cy")
-                          , HP.id_ "cyHolder"
+                          , HP.id_ "cyDiv"
                           ] []
 
   eval :: Query ~> H.ComponentDSL State Query Void (Aff (Effects eff))

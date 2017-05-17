@@ -61,7 +61,7 @@ component =
 
   render :: State -> H.ComponentHTML Query
   render = const $ HH.div [ HP.ref (H.RefLabel "bd")
-                          , HP.id_ "svgHolder"
+                          , HP.id_ "bdDiv"
                           ] []
 
   eval :: Query ~> H.ComponentDSL State Query Message (Aff (Effects eff))
