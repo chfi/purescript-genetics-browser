@@ -10,17 +10,24 @@ import Data.Either (Either(..))
 import Data.Foreign (Foreign)
 import Data.Function.Uncurried (Fn2, mkFn2)
 import Data.Maybe (Maybe(..))
-import Data.Nullable (Nullable)
+import Data.Nullable (Nullable, toNullable)
 import Genetics.Browser.Feature (Feature(..))
 import Genetics.Browser.Types (Cytoscape, CY, Biodalliance)
 import Genetics.Browser.Units (class HCoordinate, Bp(..), MBp(..), bp)
-import Network.HTTP.Affjax (AJAX, Affjax, get)
+import Global.Unsafe (unsafeStringify)
+import Network.HTTP.Affjax (AJAX, Affjax, AffjaxResponse, get)
 import Unsafe.Coerce (unsafeCoerce)
 
 
-foreign import cytoscape :: ∀ eff. HTMLElement
-                         -> Nullable (CyCollection CyElement)
-                         -> Eff (cy :: CY | eff) Cytoscape
+foreign import cytoscapeImpl :: ∀ eff. HTMLElement
+                             -> Nullable (CyCollection CyElement)
+                             -> Eff (cy :: CY | eff) Cytoscape
+
+cytoscape :: forall eff.
+             HTMLElement
+          -> Maybe (CyCollection CyElement)
+          -> Aff (cy :: CY | eff) Cytoscape
+cytoscape htmlEl els = liftEff $ cytoscapeImpl htmlEl (toNullable els)
 
 foreign import cyAdd :: ∀ eff. Cytoscape
                      -> CyCollection CyElement
@@ -41,6 +48,7 @@ foreign import resize :: forall eff. Cytoscape -> Eff (cy :: CY | eff) Unit
 -- TODO: move to separate module
 newtype Layout = Layout String
 
+circle :: Layout
 circle = Layout "circle"
 
 
@@ -70,11 +78,14 @@ parseEvent :: CyEvent -> ParsedEvent
 parseEvent = parseEventImpl Left Right
 
 
-  -- Cytoscape -> String ->
-ajaxAddEles :: _
-ajaxAddEles cy url = launchAff $ do
+unsafeParseCollection :: Foreign -> CyCollection CyElement
+unsafeParseCollection = unsafeCoerce
+
+-- ajaxAddEles :: forall eff. Cytoscape -> String -> Aff _ (CyCollection CyElement)
+ajaxAddEles :: forall eff. Cytoscape -> String -> Aff (cy :: CY, ajax :: AJAX | eff) (CyCollection CyElement)
+ajaxAddEles cy url = do
   resp <- get url :: ∀ eff. Affjax (cy :: CY | eff) Foreign
-  liftEff $ cyAdd cy $ unsafeCoerce resp.response
+  pure $ unsafeParseCollection resp.response
 
 -- foreign import setOn :: ∀ eff. Cytoscape -> Eff (cy :: CY | eff) Unit
 -- TODO: the callback should really be an Eff too, but w/e
@@ -83,10 +94,6 @@ foreign import onEventImpl :: ∀ eff a.
                            -> String
                            -> (CyEvent -> Eff (cy :: CY | eff) a)
                            -> Eff (cy :: CY | eff) Unit
-                     --    Cytoscape
-                     --    -> String
-                     -- -> (CyEvent -> Eff cbEff Unit)
-                     -- -> Eff (cy :: CY | eff) Unit
 
 onEvent :: forall a eff.
            Cytoscape

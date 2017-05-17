@@ -1,6 +1,6 @@
 "use strict";
 
-exports.cytoscape = function(el) {
+exports.cytoscapeImpl = function(el) {
     return function(eles) {
         return function() {
             var cy = require("cytoscape")({
@@ -50,11 +50,14 @@ exports.resize = function(cy) {
     };
 };
 
-exports.onEventImpl = function(evs) {
-    return function(cy) {
+exports.onEventImpl = function(cy) {
+    return function(evs) {
         return function(callback) {
             return function() {
-                cy.on(evs, callback);
+                // Need to wrap callback since it's effectful, and PS wraps Eff in nullary functions.
+                cy.on(evs, function(e) {
+                    callback(e)();
+                });
             };
         };
     };
@@ -62,7 +65,9 @@ exports.onEventImpl = function(evs) {
 
 exports.cyAdd = function(cy) {
     return function(eles) {
-        return cy.add(eles);
+        return function() {
+            return cy.add(eles);
+        };
     };
 };
 
@@ -105,9 +110,9 @@ exports.parseEventImpl = function(left) {
             var result = {};
             result.cy = ev.cy;
             if (ev.cy === ev.target) {
-                result.target = left(ev.target);
-            } else {
                 result.target = right(ev.cy);
+            } else {
+                result.target = left(ev.target);
             }
             return result;
         };
