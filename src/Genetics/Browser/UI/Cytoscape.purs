@@ -12,18 +12,20 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Control.Monad.Aff (Aff)
+import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Aff.Class (liftAff)
-import Control.Monad.Aff.Console (CONSOLE, log)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (EXCEPTION)
 import Data.Const (Const(..))
+import Data.Either (Either(..))
 import Data.Either.Nested (Either2)
 import Data.Functor.Coproduct.Nested (type (<\/>), Coproduct2)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap)
 import Data.Nullable (toNullable)
-import Genetics.Browser.Cytoscape (ajaxAddEles, cytoscape, resize, runLayout)
+import Genetics.Browser.Cytoscape (ParsedEvent(..), ajaxAddEles, cytoscape, resize, runLayout)
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
 import Genetics.Browser.Source.QTL (fetch)
 import Genetics.Browser.Types (BD, Biodalliance, CY, Cytoscape, Renderer)
@@ -41,17 +43,23 @@ type State = { cy :: Maybe Cytoscape
 data Query a
   = Initialize String a
   | Reset a
+  | Filter (Cytoscape.CyElement -> Boolean) a
+  | Click Cytoscape.ParsedEvent (H.SubscribeStatus -> a)
+
+data Output
+  = Clicked Cytoscape.ParsedEvent
 
 type Effects eff = ( cy :: CY
                    , ajax :: AJAX
                    , console :: CONSOLE
-                   , exception :: EXCEPTION | eff)
+                   , exception :: EXCEPTION
+                   , avar :: AVAR | eff)
 
 data Slot = Slot
 derive instance eqCySlot :: Eq Slot
 derive instance ordCySlot :: Ord Slot
 
-component :: ∀ eff. H.Component HH.HTML Query Unit Void (Aff (Effects eff))
+component :: ∀ eff. H.Component HH.HTML Query Unit Output (Aff (Effects eff))
 component =
   H.component
     { initialState: const initialState
@@ -70,39 +78,59 @@ component =
   render :: State -> H.ComponentHTML Query
   render = const $ HH.div [ HP.ref (H.RefLabel "cy")
                           , HP.id_ "cyDiv"
+                          -- , HP.prop
                           ] []
 
-  eval :: Query ~> H.ComponentDSL State Query Void (Aff (Effects eff))
+  eval :: Query ~> H.ComponentDSL State Query Output (Aff (Effects eff))
   eval = case _ of
     Initialize url next -> do
       H.getHTMLElementRef (H.RefLabel "cy") >>= case _ of
         Nothing -> pure unit
         Just el' -> do
           -- TODO: figure out Aff. right now it just runs straight through, running the layout before elements have loaded
-          cy <- liftEff $ cytoscape el' (toNullable Nothing)
+          cy <- liftEff $ Cytoscape.cytoscapeImpl el' (toNullable Nothing)
+          liftEff $ log "Fetching elements"
+          eles <- liftAff $ ajaxAddEles cy url
+          liftEff $ log "Adding elements"
+          _ <- liftEff $ Cytoscape.cyAdd cy eles
+          liftEff $ log "Elements added"
+          -- H.subscribe $ H.eventSource (Cytoscape.onClick cy) $ H.request $ const (Just H.Listening)
+          H.subscribe $ H.eventSource (Cytoscape.onClick cy) $ Just <<< H.request <<< Click
+
           liftEff $ do
-            _ <- ajaxAddEles cy url
             runLayout cy Cytoscape.circle
             resize cy
+            Cytoscape.onClick cy $ \(ParsedEvent ev) -> case ev.target of
+              Left el -> log "Clicked element!"
+              Right _ -> log "Clicked cy?!"
+
           H.modify (_ { cy = Just cy
                       , elemsUrl = url
                       })
+          -- s <- H.get
+          -- liftEff $ log $ unsafeStringify s
       pure next
     Reset next -> do
       H.gets _.cy >>= case _ of
-        Nothing -> (liftAff $ log "No cytoscape found!.") *> pure unit
+        Nothing -> (liftEff $ log "No cytoscape found!.") *> pure unit
         Just cy -> do
           H.gets _.elemsUrl >>= case _ of
             "" -> do
-              liftAff $ log "no element URL; can't reset"
+              liftEff $ log "no element URL; can't reset"
               pure unit
             url -> do
               -- remove all elements
               -- refetch all elements
-              liftAff $ log $ "resetting with stored URL " <> url
+              liftEff $ log $ "resetting with stored URL " <> url
               pure unit
 
           liftEff $ do
             runLayout cy Cytoscape.circle
             resize cy
+            Cytoscape.onClick cy $ \_ -> log "what's up"
       pure next
+    Filter pred next -> do
+      pure next
+    Click el reply -> do
+      H.raise $ Clicked el
+      pure $ reply H.Listening

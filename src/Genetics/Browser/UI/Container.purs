@@ -20,6 +20,7 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import DOM.HTML.Types (HTMLElement)
 import Data.Const (Const(..))
+import Data.Either (Either(..))
 import Data.Either.Nested (Either2)
 import Data.Functor.Coproduct.Nested (type (<\/>), Coproduct2)
 import Data.Maybe (Maybe(..))
@@ -47,6 +48,7 @@ data Query a
   | BDJump String Number Number a
   | CreateCy String a
   | ResetCy a
+  | CyClicked Cytoscape.ParsedEvent a
 
 type ChildSlot = Either2 UIBD.Slot UICy.Slot
 
@@ -66,6 +68,18 @@ component =
 
   initialState :: State
   initialState = unit
+
+
+            -- #svgHolder {
+            --     width: 100%,
+            --     float: left;
+            -- }
+            -- #cyHolder {
+            --     width: 100%;
+            --     height: 300px;
+            --     float: left;
+            --     display: block;
+            -- }
 
   render :: State -> H.ParentHTML Query ChildQuery ChildSlot (Aff (Effects eff))
   render state =
@@ -101,6 +115,9 @@ component =
   handleBDMessage :: UIBD.Message -> Maybe (Query Unit)
   handleBDMessage UIBD.Initialized = Just $ ResetCy unit
 
+  handleCyMessage :: UICy.Output -> Maybe (Query Unit)
+  handleCyMessage (UICy.Clicked ev) = Just $ CyClicked ev unit
+
   eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void (Aff (Effects eff))
   eval = case _ of
     Nop next -> do
@@ -119,6 +136,11 @@ component =
       pure next
     ResetCy next -> do
       _ <- H.query' CP.cp2 UICy.Slot $ H.action UICy.Reset
+      pure next
+    CyClicked (Cytoscape.ParsedEvent ev) next -> do
+      case ev.target of
+        Left _ -> liftEff $ log "Main container saw Left"
+        Right _ -> liftEff $ log "Main container saw Right"
       pure next
 
 
