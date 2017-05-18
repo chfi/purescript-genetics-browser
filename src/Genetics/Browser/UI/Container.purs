@@ -2,6 +2,7 @@ module Genetics.Browser.UI.Container
        where
 
 import Prelude
+import Data.StrMap as StrMap
 import Genetics.Browser.Biodalliance as Biodalliance
 import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Renderer.GWAS as GWAS
@@ -22,15 +23,18 @@ import DOM.HTML.Types (HTMLElement)
 import Data.Const (Const(..))
 import Data.Either (Either(..))
 import Data.Either.Nested (Either2)
+import Data.Foreign (Foreign, readString)
 import Data.Functor.Coproduct.Nested (type (<\/>), Coproduct2)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap)
+import Data.StrMap (StrMap)
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
 import Genetics.Browser.Source.QTL (fetch)
 import Genetics.Browser.Types (BD, Biodalliance, CY, Cytoscape, Renderer)
 import Genetics.Browser.Units (Bp(..))
 import Global.Unsafe (unsafeStringify)
 import Halogen.VDom.Driver (runUI)
+import Unsafe.Coerce (unsafeCoerce)
 
 qtlGlyphify :: LinePlotConfig -> Renderer
 qtlGlyphify = QTL.render
@@ -139,8 +143,22 @@ component =
       pure next
     CyClicked (Cytoscape.ParsedEvent ev) next -> do
       case ev.target of
-        Left _ -> liftEff $ log "Main container saw Left"
-        Right _ -> liftEff $ log "Main container saw Right"
+        Left el -> do
+          d <- liftEff $ Cytoscape.eleGetAllData el
+          case StrMap.lookup "lrsLoc" d of
+            Nothing -> liftEff $ log "no location found"
+            Just loc -> do
+              let loc' = unsafeCoerce loc :: StrMap Foreign
+                  chr = case StrMap.lookup "chr" loc' of
+                    Nothing -> "10"
+                    Just c  -> unsafeCoerce c
+                  pos = case StrMap.lookup "pos" loc' of
+                    Nothing -> 0.0
+                    Just p  -> unsafeCoerce p
+              _ <- H.query' CP.cp1 UIBD.Slot $ H.action (UIBD.Jump chr (pos * 1000000.0 - 5000000.0) (pos * 1000000.0 + 5000000.0))
+              pure unit
+
+        Right cy -> liftEff $ log "Clicked outside element"
       pure next
 
 
