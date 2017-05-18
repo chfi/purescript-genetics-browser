@@ -29,9 +29,25 @@ exports.cytoscapeImpl = function(el) {
                             'line-color': '#ccc'
                         }
                     }
-                ],
+                ]
             });
             return cy;
+        };
+    };
+};
+
+exports.coreAddCollection = function(cy) {
+    return function(eles) {
+        return function() {
+            return cy.add(eles);
+        };
+    };
+};
+
+exports.coreFilterImpl = function(pred) {
+    return function(cy) {
+        return function() {
+            return cy.filter(pred);
         };
     };
 };
@@ -63,47 +79,6 @@ exports.onEventImpl = function(cy) {
     };
 };
 
-exports.cyAdd = function(cy) {
-    return function(eles) {
-        return function() {
-            return cy.add(eles);
-        };
-    };
-};
-
-exports.cyFilter = function(pred) {
-    return function(cy) {
-        return cy.filter(pred);
-    };
-};
-
-exports.removeElements = function(eles) {
-    return function() {
-        return eles.remove();
-    };
-};
-
-exports.removeAllElements = function(cy) {
-    return function() {
-        cy.elements().remove();
-    };
-};
-
-exports.filterElements = function(pred) {
-    return function(eles) {
-        return eles.filter(pred);
-    };
-};
-
-exports.cyFilterElements = function(cy) {
-    return function(pred) {
-        return function() {
-            return cy.filter(pred);
-        };
-    };
-};
-
-
 exports.parseEventImpl = function(left) {
     return function(right) {
         return function(ev) {
@@ -116,5 +91,17 @@ exports.parseEventImpl = function(left) {
             }
             return result;
         };
+    };
+};
+
+exports.collRemoveElements = function(eles) {
+    return function() {
+        return eles.remove();
+    };
+};
+
+exports.coreRemoveAllElements = function(cy) {
+    return function() {
+        cy.elements().remove();
     };
 };
