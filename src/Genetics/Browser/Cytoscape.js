@@ -105,3 +105,18 @@ exports.coreRemoveAllElements = function(cy) {
         cy.elements().remove();
     };
 };
+
+
+exports.eleGetAllData = function(ele) {
+    return function() {
+        return ele.data();
+    };
+};
+
+exports.eleGetDataImpl = function(ele) {
+    return function(key) {
+        return function() {
+            return ele.data(key);
+        };
+    };
+};

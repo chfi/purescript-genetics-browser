@@ -1,7 +1,6 @@
 module Genetics.Browser.Cytoscape where
 
 import Prelude
-
 import Control.Monad.Eff (Eff, kind Effect)
 import Control.Monad.Eff.Class (liftEff)
 import DOM.HTML.Types (HTMLElement)
@@ -9,7 +8,8 @@ import Data.Either (Either(..))
 import Data.Foreign (Foreign)
 import Data.Function.Uncurried (Fn2)
 import Data.Maybe (Maybe)
-import Data.Nullable (Nullable, toNullable)
+import Data.Nullable (Nullable, toMaybe, toNullable)
+import Data.StrMap (StrMap)
 import Genetics.Browser.Types (CY, Cytoscape)
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -107,3 +107,16 @@ foreign import collRemoveElements :: ∀ eff.
                               -> Eff (cy :: CY | eff) (CyCollection CyElement)
 
 foreign import coreRemoveAllElements :: forall eff. Cytoscape -> Eff (cy :: CY | eff) Unit
+
+
+foreign import eleGetAllData :: forall eff.
+                                CyElement
+                             -> Eff (cy :: CY | eff) (StrMap Foreign)
+
+foreign import eleGetDataImpl :: forall eff.
+                              CyElement
+                           -> String
+                           -> Eff (cy :: CY | eff) (Nullable Foreign)
+
+eleGetData :: forall eff. CyElement -> String -> Eff (cy :: CY | eff) (Maybe Foreign)
+eleGetData el key = toMaybe <$> eleGetDataImpl el key
