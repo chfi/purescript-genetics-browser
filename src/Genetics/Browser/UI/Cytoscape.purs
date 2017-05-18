@@ -2,36 +2,21 @@ module Genetics.Browser.UI.Cytoscape
        where
 
 import Prelude
-import Genetics.Browser.Biodalliance as Biodalliance
 import Genetics.Browser.Cytoscape as Cytoscape
-import Genetics.Browser.Renderer.GWAS as GWAS
-import Genetics.Browser.Renderer.Lineplot as QTL
 import Halogen as H
-import Halogen.Aff as HA
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
+import Network.HTTP.Affjax as Affjax
 import Control.Monad.Aff (Aff)
 import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Aff.Class (liftAff)
-import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (EXCEPTION)
-import Data.Const (Const(..))
-import Data.Either (Either(..))
-import Data.Either.Nested (Either2)
-import Data.Functor.Coproduct.Nested (type (<\/>), Coproduct2)
 import Data.Maybe (Maybe(..))
-import Data.Newtype (wrap)
-import Data.Nullable (toNullable)
-import Genetics.Browser.Cytoscape (ParsedEvent(..), ajaxAddEles, cytoscape, resize, runLayout)
-import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
-import Genetics.Browser.Source.QTL (fetch)
-import Genetics.Browser.Types (BD, Biodalliance, CY, Cytoscape, Renderer)
-import Genetics.Browser.Units (Bp(..))
-import Global.Unsafe (unsafeStringify)
-import Halogen.VDom.Driver (runUI)
+import Genetics.Browser.Cytoscape (CyCollection, CyElement, resize, runLayout)
+import Genetics.Browser.Types (CY, Cytoscape)
 import Network.HTTP.Affjax (AJAX)
 
 
@@ -81,34 +66,32 @@ component =
                           -- , HP.prop
                           ] []
 
+  getElements :: forall eff'. String -> Aff (ajax :: AJAX | eff') (CyCollection CyElement)
+  getElements url = Affjax.get url <#> (\r -> Cytoscape.unsafeParseCollection r.response)
+
+  getAndSetElements :: forall eff'. String -> Cytoscape -> Aff (ajax :: AJAX, cy :: CY | eff') Unit
+  getAndSetElements url cy = do
+    eles <- getElements url
+    liftEff $ Cytoscape.coreAddCollection cy eles
+
   eval :: Query ~> H.ComponentDSL State Query Output (Aff (Effects eff))
   eval = case _ of
     Initialize url next -> do
       H.getHTMLElementRef (H.RefLabel "cy") >>= case _ of
         Nothing -> pure unit
         Just el' -> do
-          -- TODO: figure out Aff. right now it just runs straight through, running the layout before elements have loaded
-          cy <- liftEff $ Cytoscape.cytoscapeImpl el' (toNullable Nothing)
-          liftEff $ log "Fetching elements"
-          eles <- liftAff $ ajaxAddEles cy url
-          liftEff $ log "Adding elements"
-          _ <- liftEff $ Cytoscape.cyAdd cy eles
-          liftEff $ log "Elements added"
-          -- H.subscribe $ H.eventSource (Cytoscape.onClick cy) $ H.request $ const (Just H.Listening)
-          H.subscribe $ H.eventSource (Cytoscape.onClick cy) $ Just <<< H.request <<< Click
+          cy <- liftEff $ Cytoscape.cytoscape el' Nothing
+
+          liftAff $ getAndSetElements url cy
 
           liftEff $ do
             runLayout cy Cytoscape.circle
             resize cy
-            Cytoscape.onClick cy $ \(ParsedEvent ev) -> case ev.target of
-              Left el -> log "Clicked element!"
-              Right _ -> log "Clicked cy?!"
 
+          H.subscribe $ H.eventSource (Cytoscape.onClick cy) $ Just <<< H.request <<< Click
           H.modify (_ { cy = Just cy
                       , elemsUrl = url
                       })
-          -- s <- H.get
-          -- liftEff $ log $ unsafeStringify s
       pure next
     Reset next -> do
       H.gets _.cy >>= case _ of
@@ -120,14 +103,16 @@ component =
               pure unit
             url -> do
               -- remove all elements
+              liftEff $ Cytoscape.coreRemoveAllElements cy
               -- refetch all elements
+              liftAff $ getAndSetElements url cy
+
               liftEff $ log $ "resetting with stored URL " <> url
               pure unit
 
           liftEff $ do
             runLayout cy Cytoscape.circle
             resize cy
-            Cytoscape.onClick cy $ \_ -> log "what's up"
       pure next
     Filter pred next -> do
       pure next
