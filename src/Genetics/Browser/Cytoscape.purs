@@ -4,6 +4,8 @@ import Prelude
 import Control.Monad.Eff (Eff, kind Effect)
 import Control.Monad.Eff.Class (liftEff)
 import DOM.HTML.Types (HTMLElement)
+import Data.Argonaut (Json)
+import Data.Argonaut.Core (JObject)
 import Data.Either (Either(..))
 import Data.Foreign (Foreign)
 import Data.Function.Uncurried (Fn2)
@@ -43,8 +45,8 @@ foreign import coreAddCollection :: ∀ eff. Cytoscape
 
 -- what does this filter actually do
 foreign import coreFilterImpl :: ∀ eff a.
-                                 Fn2 a Int Boolean
-                              -> Cytoscape
+                                 Cytoscape
+                              -> (JObject -> Boolean)
                               -> Eff (cy :: CY | eff) (CyCollection a)
 
 foreign import runLayout :: forall eff.
@@ -111,12 +113,12 @@ foreign import coreRemoveAllElements :: forall eff. Cytoscape -> Eff (cy :: CY |
 
 foreign import eleGetAllData :: forall eff.
                                 CyElement
-                             -> Eff (cy :: CY | eff) (StrMap Foreign)
+                             -> Eff (cy :: CY | eff) JObject
 
 foreign import eleGetDataImpl :: forall eff.
                               CyElement
                            -> String
-                           -> Eff (cy :: CY | eff) (Nullable Foreign)
+                           -> Eff (cy :: CY | eff) (Nullable Json)
 
-eleGetData :: forall eff. CyElement -> String -> Eff (cy :: CY | eff) (Maybe Foreign)
+eleGetData :: forall eff. CyElement -> String -> Eff (cy :: CY | eff) (Maybe Json)
 eleGetData el key = toMaybe <$> eleGetDataImpl el key

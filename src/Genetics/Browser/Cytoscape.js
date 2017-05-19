@@ -44,8 +44,8 @@ exports.coreAddCollection = function(cy) {
     };
 };
 
-exports.coreFilterImpl = function(pred) {
-    return function(cy) {
+exports.coreFilterImpl = function(cy) {
+    return function(pred) {
         return function() {
             return cy.filter(pred);
         };
