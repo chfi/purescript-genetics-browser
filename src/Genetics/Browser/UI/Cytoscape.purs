@@ -14,6 +14,7 @@ import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (EXCEPTION)
+import Data.Argonaut.Core (JObject)
 import Data.Maybe (Maybe(..))
 import Genetics.Browser.Cytoscape (CyCollection, CyElement, resize, runLayout)
 import Genetics.Browser.Types (CY, Cytoscape)
@@ -28,7 +29,7 @@ type State = { cy :: Maybe Cytoscape
 data Query a
   = Initialize String a
   | Reset a
-  | Filter (Cytoscape.CyElement -> Boolean) a
+  | Filter (JObject -> Boolean) a
   | Click Cytoscape.ParsedEvent (H.SubscribeStatus -> a)
 
 data Output
@@ -114,8 +115,16 @@ component =
             runLayout cy Cytoscape.circle
             resize cy
       pure next
+
     Filter pred next -> do
+      H.gets _.cy >>= case _ of
+        Nothing -> pure unit
+        Just cy -> do
+          eles <- liftEff $ Cytoscape.coreFilterImpl cy pred
+          _ <- liftEff $ Cytoscape.collRemoveElements eles
+          pure unit
       pure next
+
     Click el reply -> do
       H.raise $ Clicked el
       pure $ reply H.Listening
