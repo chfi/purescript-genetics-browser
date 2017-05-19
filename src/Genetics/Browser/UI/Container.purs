@@ -5,6 +5,7 @@ import Prelude
 import Data.StrMap as StrMap
 import Genetics.Browser.Biodalliance as Biodalliance
 import Genetics.Browser.Cytoscape as Cytoscape
+import Genetics.Browser.Feature.Foreign as FF
 import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot as QTL
 import Genetics.Browser.UI.Biodalliance as UIBD
@@ -20,6 +21,7 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import DOM.HTML.Types (HTMLElement)
+import Data.Argonaut.Core (JObject)
 import Data.Const (Const(..))
 import Data.Either (Either(..))
 import Data.Either.Nested (Either2)
@@ -48,11 +50,12 @@ type State = Unit
 data Query a
   = Nop a
   | CreateBD (forall eff. HTMLElement -> Eff eff Biodalliance) a
-  | BDScroll Number a
-  | BDJump String Number Number a
+  | BDScroll Bp a
+  | BDJump String Bp Bp a
   | CreateCy String a
   | ResetCy a
   | CyClicked Cytoscape.ParsedEvent a
+  | BDClicked JObject a
 
 type ChildSlot = Either2 UIBD.Slot UICy.Slot
 
@@ -90,11 +93,11 @@ component =
     HH.div_
       [ HH.div_
         [ HH.button
-          [  HE.onClick (HE.input_ (BDScroll (-1000000.0)))
+          [  HE.onClick (HE.input_ (BDScroll (Bp (-1000000.0))))
           ]
           [ HH.text "Scroll left 1MBp" ]
         , HH.button
-          [  HE.onClick (HE.input_ (BDScroll 1000000.0))
+          [  HE.onClick (HE.input_ (BDScroll (Bp 1000000.0)))
           ]
           [ HH.text "Scroll right 1MBp" ]
         , HH.button
@@ -118,6 +121,7 @@ component =
 
   handleBDMessage :: UIBD.Message -> Maybe (Query Unit)
   handleBDMessage UIBD.Initialized = Just $ ResetCy unit
+  handleBDMessage (UIBD.Clicked obj) = Just $ BDClicked obj unit
 
   handleCyMessage :: UICy.Output -> Maybe (Query Unit)
   handleCyMessage (UICy.Clicked ev) = Just $ CyClicked ev unit
@@ -145,22 +149,43 @@ component =
       case ev.target of
         Left el -> do
           d <- liftEff $ Cytoscape.eleGetAllData el
-          case StrMap.lookup "lrsLoc" d of
-            Nothing -> liftEff $ log "no location found"
-            Just loc -> do
-              let loc' = unsafeCoerce loc :: StrMap Foreign
-                  chr = case StrMap.lookup "chr" loc' of
-                    Nothing -> "10"
-                    Just c  -> unsafeCoerce c
-                  pos = case StrMap.lookup "pos" loc' of
-                    Nothing -> 0.0
-                    Just p  -> unsafeCoerce p
-              _ <- H.query' CP.cp1 UIBD.Slot $ H.action (UIBD.Jump chr (pos * 1000000.0 - 5000000.0) (pos * 1000000.0 + 5000000.0))
+          case getCyLocation d of
+            Left err  -> liftEff $ log err
+            Right loc -> do
+              liftEff $ log $ "cy chr: " <> loc.chr
+              _ <- H.query' CP.cp1 UIBD.Slot $ H.action
+                     (UIBD.Jump loc.chr
+                      (loc.pos * Bp 1000000.0 - Bp 5000000.0)
+                      (loc.pos * Bp 1000000.0 + Bp 5000000.0))
               pure unit
+          pure unit
 
         Right cy -> liftEff $ log "Clicked outside element"
       pure next
 
+    BDClicked obj next -> do
+      case getBDRange obj of
+        Left err -> liftEff $ log err
+        Right r  -> do
+          liftEff $ log $ "bd chr: " <> r.chr
+
+          let f el = case getCyLocation el of
+                Left _-> false
+                Right loc -> loc.chr == "Chr12"
+          _ <- H.query' CP.cp2 UICy.Slot $ H.action (UICy.Filter f)
+          pure unit
+      pure next
+
+
+
+getCyLocation :: JObject -> Either String { chr :: String, pos :: Bp}
+getCyLocation = FF.parseFeatureLocation "lrsLoc"
+
+getBDRange :: JObject -> Either String { chr :: String, xl :: Bp, xr :: Bp }
+getBDRange = FF.parseFeatureRange { chrKey: "chr"
+                                  , xlKey: "min"
+                                  , xrKey: "max"
+                                  }
 
 main :: (forall eff. HTMLElement -> Eff eff Biodalliance) -> Eff _ Unit
 main mkBd = HA.runHalogenAff do
