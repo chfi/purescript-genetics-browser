@@ -18,7 +18,8 @@
     "purescript-generics-rep": "^5.0.0",
     "purescript-orders": "^3.0.0",
     "purescript-newtype": "^2.0.0",
-    "purescript-halogen": "^2.0.1"
+    "purescript-halogen": "^2.0.1",
+    "purescript-argonaut": "^3.0.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0",
