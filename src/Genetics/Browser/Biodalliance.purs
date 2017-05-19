@@ -3,6 +3,7 @@ module Genetics.Browser.Biodalliance where
 import Prelude
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff)
+import Data.Argonaut.Core (JObject)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap)
 import Genetics.Browser.Feature (Feature(..))
@@ -17,10 +18,12 @@ import Genetics.Browser.Units (class HCoordinate, Bp(..), bp)
 -- hit: an array of Feature and Group objects representing the clicked feature plus any parents.
 -- tier: the Dalliance tier in which the click occurred.
 
--- for now we only send the feature
-foreign import addFeatureListener :: ∀ eff.
+-- TODO: should probably be a bit safer than just sending a JObject. future problem tho~~
+-- TODO: Should also handle potential parents of objects, but especially which track was clicked
+--         -- the latter will be relevant to native PS tracks, probably
+foreign import addFeatureListener :: ∀ eff a.
                                      Biodalliance
-                                  -> (forall eff2. BDFeature -> Eff eff2 Unit)
+                                  -> (JObject -> Eff (bd :: BD | eff) a)
                                   -> Eff (bd :: BD | eff) Unit
 
 foreign import addInitListener :: forall eff a.
