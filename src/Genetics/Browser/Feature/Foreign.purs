@@ -8,7 +8,7 @@ import Data.Either (Either(..))
 import Data.Foreign (Foreign, F)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap, wrap)
-import Genetics.Browser.Units (class HCoordinate, Bp(..), CoordRange(..), MBp(..), mbp)
+import Genetics.Browser.Units (class HCoordinate, Bp(..), MBp(..), mbp)
 
 
 -- this assumes a location has the "chr" and "pos" keys...
