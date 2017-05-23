@@ -5,6 +5,7 @@ import Prelude
 import Data.StrMap as StrMap
 import Genetics.Browser.Biodalliance as Biodalliance
 import Genetics.Browser.Cytoscape as Cytoscape
+import Genetics.Browser.Events as GBE
 import Genetics.Browser.Feature.Foreign as FF
 import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot as QTL
@@ -16,6 +17,7 @@ import Halogen.Component.ChildPath as CP
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
+import Control.Coroutine (Consumer, consumer)
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
@@ -43,6 +45,13 @@ qtlGlyphify = QTL.render
 
 gwasGlyphify :: Renderer
 gwasGlyphify = GWAS.render
+
+
+cyConsumer :: forall eff.
+              Consumer GBE.EventLocation _ Unit
+cyConsumer = consumer \(GBE.EventLocation ev) -> do
+  log $ "received ev at chr " <> ev.chr
+  pure Nothing
 
 
 type State = Unit
@@ -149,7 +158,7 @@ component =
       case ev.target of
         Left el -> do
           d <- liftEff $ Cytoscape.eleGetAllData el
-          case getCyLocation d of
+          case UICy.getCyLocation d of
             Left err  -> liftEff $ log err
             Right loc -> do
               liftEff $ log $ "cy chr: " <> loc.chr
@@ -169,7 +178,7 @@ component =
         Right r  -> do
           liftEff $ log $ "bd chr: " <> r.chr
 
-          let f el = case getCyLocation el of
+          let f el = case UICy.getCyLocation el of
                 Left _-> false
                 Right loc -> loc.chr == "Chr12"
           _ <- H.query' CP.cp2 UICy.Slot $ H.action (UICy.Filter f)
@@ -178,8 +187,6 @@ component =
 
 
 
-getCyLocation :: JObject -> Either String { chr :: String, pos :: Bp}
-getCyLocation = FF.parseFeatureLocation "lrsLoc"
 
 getBDRange :: JObject -> Either String { chr :: String, xl :: Bp, xr :: Bp }
 getBDRange = FF.parseFeatureRange { chrKey: "chr"

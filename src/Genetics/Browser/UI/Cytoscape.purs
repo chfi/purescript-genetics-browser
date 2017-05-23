@@ -1,8 +1,12 @@
 module Genetics.Browser.UI.Cytoscape
        where
 
+import Genetics.Browser.Feature.Foreign as FF
 import Prelude
+import Control.Coroutine as CR
+import Control.Coroutine.Aff as CRA
 import Genetics.Browser.Cytoscape as Cytoscape
+import Genetics.Browser.Events as GBE
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
@@ -15,10 +19,32 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (EXCEPTION)
 import Data.Argonaut.Core (JObject)
+import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
-import Genetics.Browser.Cytoscape (CyCollection, CyElement, resize, runLayout)
+import Genetics.Browser.Cytoscape (CyCollection, CyElement, ParsedEvent(..), resize, runLayout)
 import Genetics.Browser.Types (CY, Cytoscape)
+import Genetics.Browser.Units (Bp(..))
+import Global.Unsafe (unsafeStringify)
 import Network.HTTP.Affjax (AJAX)
+
+getCyLocation :: JObject -> Either String { chr :: String, pos :: Bp}
+getCyLocation = FF.parseFeatureLocation { locKeys: ["lrsLoc"]
+                                        , chrKeys: ["chr"]
+                                        , posKeys: ["pos"]
+                                        }
+
+cyProducer :: forall eff. Cytoscape -> CR.Producer GBE.EventLocation _ Unit
+cyProducer cy = CRA.produce \emit -> do
+  Cytoscape.onClick cy (\ (ParsedEvent { cy, target }) -> do
+                           case target of
+                             Left el -> do
+                               d <- Cytoscape.eleGetAllData el
+                               case getCyLocation d of
+                                 Left err  -> pure unit
+                                 Right loc -> emit $ Left $ GBE.EventLocation loc
+                             Right cy -> pure unit
+                           )
+
 
 
 -- TODO: elemsUrl should be safer. Maybe it should cache too, idk
