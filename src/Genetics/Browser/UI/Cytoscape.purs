@@ -1,12 +1,12 @@
 module Genetics.Browser.UI.Cytoscape
        where
 
-import Genetics.Browser.Feature.Foreign as FF
 import Prelude
 import Control.Coroutine as CR
 import Control.Coroutine.Aff as CRA
 import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Events as GBE
+import Genetics.Browser.Feature.Foreign as FF
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
@@ -22,18 +22,20 @@ import Data.Argonaut.Core (JObject)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Genetics.Browser.Cytoscape (CyCollection, CyElement, ParsedEvent(..), resize, runLayout)
+import Genetics.Browser.Events (eventLocation, eventRange, eventScore)
+import Genetics.Browser.Events.Types (Event)
 import Genetics.Browser.Types (CY, Cytoscape)
 import Genetics.Browser.Units (Bp(..))
 import Global.Unsafe (unsafeStringify)
 import Network.HTTP.Affjax (AJAX)
 
-getCyLocation :: JObject -> Either String { chr :: String, pos :: Bp}
-getCyLocation = FF.parseFeatureLocation { locKeys: ["lrsLoc"]
-                                        , chrKeys: ["chr"]
-                                        , posKeys: ["pos"]
-                                        }
+getCyLocation :: JObject -> Either String Event
+getCyLocation = FF.parseFeatureLocation' { locKeys: ["lrsLoc"]
+                                         , chrKeys: ["chr"]
+                                         , posKeys: ["pos"]
+                                         }
 
-cyProducer :: forall eff. Cytoscape -> CR.Producer GBE.EventLocation _ Unit
+cyProducer :: forall eff. Cytoscape -> CR.Producer Event _ Unit
 cyProducer cy = CRA.produce \emit -> do
   Cytoscape.onClick cy (\ (ParsedEvent { cy, target }) -> do
                            case target of
@@ -41,7 +43,7 @@ cyProducer cy = CRA.produce \emit -> do
                                d <- Cytoscape.eleGetAllData el
                                case getCyLocation d of
                                  Left err  -> pure unit
-                                 Right loc -> emit $ Left $ GBE.EventLocation loc
+                                 Right loc -> emit $ Left $ loc
                              Right cy -> pure unit
                            )
 
@@ -57,6 +59,7 @@ data Query a
   | Reset a
   | Filter (JObject -> Boolean) a
   | Click Cytoscape.ParsedEvent (H.SubscribeStatus -> a)
+  | RecvEvent Event a
 
 data Output
   = Clicked Cytoscape.ParsedEvent
@@ -154,3 +157,17 @@ component =
     Click el reply -> do
       H.raise $ Clicked el
       pure $ reply H.Listening
+
+    RecvEvent ev next -> do
+
+      case eventLocation ev of
+        Left err -> pure unit
+        Right l  -> ?scrollL
+      case eventRange ev of
+        Left err -> pure unit
+        Right r  -> ?scrollR
+      case eventScore ev of
+        Left err -> pure unit
+        Right s  -> ?dealWithScore
+
+      pure next

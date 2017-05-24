@@ -155,6 +155,7 @@ component =
       _ <- H.query' CP.cp2 UICy.Slot $ H.action UICy.Reset
       pure next
     CyClicked (Cytoscape.ParsedEvent ev) next -> do
+
       case ev.target of
         Left el -> do
           d <- liftEff $ Cytoscape.eleGetAllData el
@@ -184,6 +185,7 @@ component =
           _ <- H.query' CP.cp2 UICy.Slot $ H.action (UICy.Filter f)
           pure unit
       pure next
+
 
 
 

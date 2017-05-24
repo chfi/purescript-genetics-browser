@@ -2,6 +2,7 @@ module Genetics.Browser.UI.Biodalliance
        where
 
 import Prelude
+import Genetics.Browser.Events.Types
 import Genetics.Browser.Biodalliance as Biodalliance
 import Halogen as H
 import Halogen.HTML as HH
@@ -12,12 +13,15 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut.Core (JObject)
+import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
+import Genetics.Browser.Events (eventLocation, eventRange, eventScore)
 import Genetics.Browser.Types (BD, Biodalliance)
 import Genetics.Browser.Units (Bp)
 
 
-type State = { bd :: Maybe Biodalliance }
+type State = { bd :: Maybe Biodalliance
+             }
 
 data Query a
   = Scroll Bp a
@@ -25,6 +29,7 @@ data Query a
   | Initialize (forall eff. HTMLElement -> Eff eff Biodalliance) a
   | InitializeCallback (H.SubscribeStatus -> a)
   | Click JObject (H.SubscribeStatus -> a)
+  | RecvEvent Event a
 
 data Message
   = Initialized
@@ -90,3 +95,16 @@ component =
     Click obj reply -> do
       H.raise $ Clicked obj
       pure $ reply H.Listening
+    RecvEvent ev next -> do
+
+      case eventLocation ev of
+        Left err -> pure unit
+        Right l  -> ?scrollL
+      case eventRange ev of
+        Left err -> pure unit
+        Right r  -> ?scrollR
+      case eventScore ev of
+        Left err -> pure unit
+        Right s  -> ?dealWithScore
+
+      pure next
