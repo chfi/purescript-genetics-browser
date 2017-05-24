@@ -9,6 +9,7 @@ import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Genetics.Browser.Feature.Foreign (parseFeatureLocation)
 import Genetics.Browser.Units (Bp(..))
+import Genetics.Browser.Events.Types
 
 -- An Event comes from some track, and carries some information.
 -- depending on the track (?), the information may differ.
@@ -29,13 +30,6 @@ and remain type safe like that.
 
 -- so, source track and event types are orthogonal.
 
--- for now the track IDs wil be hardcoded. Later, maybe UUIDs, or generated some other way,
--- with a user-friendly way of defining which tracks are interesting.
-newtype TrackId = TrackId String
-
-derive instance newtypeTrackId :: Newtype TrackId _
-derive instance eqTrackId :: Eq TrackId
-derive instance ordTrackId :: Eq TrackId
 
 -- The data in an event can be anything json-serializable.
 -- The main container tries to parse the event data, to find e.g. a location or loc range,
@@ -43,31 +37,31 @@ derive instance ordTrackId :: Eq TrackId
 
 -- It'd be nice to have this on the type level. Maybe possible using rows and proxies?
 -- need to research.
-type EventData = StrMap Json
-
-newtype Event = Event { sourceTrack :: TrackId
-                      , eventData :: EventData
-                      }
-
--- TODO: identify & extract common/usable event data types...
-newtype EventLocation = EventLocation { chr :: String, pos :: Bp }
-derive instance newtypeEventLocation :: Newtype EventLocation _
-
-newtype EventRange = EventRange { chr :: String, lPos :: Bp, rPos :: Bp }
-derive instance newtypeEventRange :: Newtype EventRange _
-
 
 evLocKeys ::
   { locKeys :: Array String
   , chrKeys :: Array String
   , posKeys :: Array String
   }
-evLocKeys = { locKeys: []
-            , chrKeys: []
-            , posKeys: []
+evLocKeys = { locKeys: ["loc", "locLrs"]
+            , chrKeys: ["chr"]
+            , posKeys: ["pos"]
             }
 
-eventLocation :: Event -> Maybe EventLocation
-eventLocation (Event { sourceTrack, eventData }) = case parseFeatureLocation evLocKeys eventData of
-  Left err  -> Nothing
-  Right loc -> Just $ EventLocation loc
+eventLocation :: Event -> Either String EventLocation
+eventLocation (Event { eventData }) = do
+  chr <- eventData .? "chr"
+  pos <- Bp <$> eventData .? "pos"
+  pure $ EventLocation { chr, pos }
+
+eventRange :: Event -> Either String EventRange
+eventRange (Event { eventData }) = do
+  chr <- eventData .? "chr"
+  minPos <- Bp <$> eventData .? "minPos"
+  maxPos <- Bp <$> eventData .? "maxPos"
+  pure $ EventRange { chr, minPos, maxPos }
+
+eventScore :: Event -> Either String EventScore
+eventScore (Event { eventData }) = do
+  score <- eventData .? "score"
+  pure $ EventScore { score }
