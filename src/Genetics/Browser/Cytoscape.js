@@ -120,3 +120,28 @@ exports.eleGetDataImpl = function(ele) {
         };
     };
 };
+
+
+exports.filterNodes = function(cy) {
+    return function(pred) {
+        return function() {
+            return cy.nodes().filter(function(ele, ind) {
+                return pred(ele.data());
+            });
+        };
+    };
+};
+
+
+
+exports.filterEdgesWithNodes = function(cy) {
+    return function(pred) {
+        return function() {
+            var edges = cy.edges().filter(function(ele, ind) {
+                return pred(ele.data());
+            });
+            var nodes = edges.connectedNodes();
+            return edges.union(nodes);
+        };
+    };
+};

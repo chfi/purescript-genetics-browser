@@ -122,3 +122,22 @@ foreign import eleGetDataImpl :: forall eff.
 
 eleGetData :: forall eff. CyElement -> String -> Eff (cy :: CY | eff) (Maybe Json)
 eleGetData el key = toMaybe <$> eleGetDataImpl el key
+
+
+
+foreign import filterNodes :: ∀ eff
+                            . Cytoscape
+                           -> (JObject -> Boolean)
+                           -> Eff (cy :: CY | eff) (CyCollection CyElement)
+
+
+-- foreign import filterEdges :: ∀ eff
+--                             . (JObject -> Boolean)
+--                            -> Cytoscape
+--                            -> Eff (cy :: CY | eff) (CyCollection CyElement)
+
+
+foreign import filterEdgesWithNodes :: ∀ eff
+                                     . Cytoscape
+                                    -> (JObject -> Boolean)
+                                    -> Eff (cy :: CY | eff) (CyCollection CyElement)
