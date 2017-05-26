@@ -8,7 +8,7 @@ import Control.MonadPlus (guard)
 import Data.Argonaut (class DecodeJson, Json, encodeJson, isObject, toObject, (.?), (:=))
 import Data.Argonaut.Core (JObject)
 import Data.Either (Either(..))
-import Data.Foldable (class Foldable, foldMap)
+import Data.Foldable (class Foldable, foldMap, foldl)
 import Data.Foreign (Foreign, F)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap, wrap)
@@ -90,3 +90,9 @@ parseFeatureScore { scoreKeys } f = do
   case toObject json of
     Nothing -> Left "Error when encoding Score Event"
     Just obj -> Right $ Event { eventData: obj }
+
+
+parsePath :: ∀ f. Foldable f => JObject -> f String -> Either String JObject
+parsePath obj = foldl (\acc cur -> case acc of
+                         Left er -> Left er
+                         Right x -> x .? cur) (Right obj)
