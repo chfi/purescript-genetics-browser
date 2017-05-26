@@ -20,13 +20,15 @@ import Control.Monad.Eff.Exception (EXCEPTION)
 import Data.Argonaut.Core (JObject)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
-import Genetics.Browser.Cytoscape (CyCollection, CyElement, ParsedEvent(..), resize, runLayout)
+import Genetics.Browser.Cytoscape (CyCollection, CyElement, ParsedEvent(..), collRemoveElements, filterEdgesWithNodes, resize, runLayout)
 import Genetics.Browser.Events (eventLocation, eventRange, eventScore)
-import Genetics.Browser.Events.Types (Event, EventLocation(..), EventRange(..))
+import Genetics.Browser.Events.Types (Event, EventLocation(..), EventRange(..), EventScore(..))
+import Genetics.Browser.Feature.Foreign (parsePath)
 import Genetics.Browser.Types (CY, Cytoscape)
 import Genetics.Browser.Units (Bp(..))
 import Global.Unsafe (unsafeStringify)
 import Network.HTTP.Affjax (AJAX)
+import Unsafe.Coerce (unsafeCoerce)
 
 parseEvent :: JObject -> Either String Event
 parseEvent = FF.parseFeatureLocation' { locKeys: ["lrsLoc"]
@@ -181,7 +183,13 @@ component =
 
           case eventLocation ev of
             Left err -> pure unit
-            Right (EventLocation l) -> ?filterLoc
+            Right (EventLocation l) -> do
+              let pred el = case parsePath el ["lrsLoc", "chr"] of
+                    Left _ -> false
+                    Right chr -> unsafeCoerce chr == l.chr
+              eles <- liftEff $ filterEdgesWithNodes cy pred
+              _ <- liftEff $ collRemoveElements eles
+              pure unit
 
           case eventRange ev of
             Left err -> pure unit
