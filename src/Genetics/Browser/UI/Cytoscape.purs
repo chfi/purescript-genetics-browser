@@ -3,7 +3,6 @@ module Genetics.Browser.UI.Cytoscape
 
 import Prelude
 import Control.Coroutine as CR
-import Control.Coroutine.Aff as CRA
 import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Events as GBE
 import Genetics.Browser.Feature.Foreign as FF
@@ -23,29 +22,30 @@ import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
 import Genetics.Browser.Cytoscape (CyCollection, CyElement, ParsedEvent(..), resize, runLayout)
 import Genetics.Browser.Events (eventLocation, eventRange, eventScore)
-import Genetics.Browser.Events.Types (Event)
+import Genetics.Browser.Events.Types (Event, EventLocation(..), EventRange(..))
 import Genetics.Browser.Types (CY, Cytoscape)
 import Genetics.Browser.Units (Bp(..))
 import Global.Unsafe (unsafeStringify)
 import Network.HTTP.Affjax (AJAX)
 
-getCyLocation :: JObject -> Either String Event
-getCyLocation = FF.parseFeatureLocation' { locKeys: ["lrsLoc"]
-                                         , chrKeys: ["chr"]
-                                         , posKeys: ["pos"]
-                                         }
+parseEvent :: JObject -> Either String Event
+parseEvent = FF.parseFeatureLocation' { locKeys: ["lrsLoc"]
+                                      , chrKeys: ["chr"]
+                                      , posKeys: ["pos"]
+                                      }
 
-cyProducer :: forall eff. Cytoscape -> CR.Producer Event _ Unit
-cyProducer cy = CRA.produce \emit -> do
-  Cytoscape.onClick cy (\ (ParsedEvent { cy, target }) -> do
-                           case target of
-                             Left el -> do
-                               d <- Cytoscape.eleGetAllData el
-                               case getCyLocation d of
-                                 Left err  -> pure unit
-                                 Right loc -> emit $ Left $ loc
-                             Right cy -> pure unit
-                           )
+{-
+Create callback, subscriber event source like before (like already exists?)
+In the respective query, parse the event? Or do that before.
+  Cleaner if done in the query, but might be more difficult to generalize,
+  since a generic track won't be able to use them.
+    Doesn't actually matter now! these tracks are different types.
+
+So, send ParsedEvent to Query, then parse to Event... These names are awful
+Raise SendEvent msg with Event
+In Main, send to other track, as a Query (RecvEvent).
+In BD, try to parse received event and act accordingly.
+-}
 
 
 
@@ -58,11 +58,11 @@ data Query a
   = Initialize String a
   | Reset a
   | Filter (JObject -> Boolean) a
-  | Click Cytoscape.ParsedEvent (H.SubscribeStatus -> a)
   | RecvEvent Event a
+  | RaiseEvent Cytoscape.ParsedEvent (H.SubscribeStatus -> a)
 
 data Output
-  = Clicked Cytoscape.ParsedEvent
+  = SendEvent Event
 
 type Effects eff = ( cy :: CY
                    , ajax :: AJAX
@@ -118,11 +118,13 @@ component =
             runLayout cy Cytoscape.circle
             resize cy
 
-          H.subscribe $ H.eventSource (Cytoscape.onClick cy) $ Just <<< H.request <<< Click
+          H.subscribe $ H.eventSource (Cytoscape.onClick cy) $ Just <<< H.request <<< RaiseEvent
           H.modify (_ { cy = Just cy
                       , elemsUrl = url
                       })
       pure next
+
+
     Reset next -> do
       H.gets _.cy >>= case _ of
         Nothing -> (liftEff $ log "No cytoscape found!.") *> pure unit
@@ -145,6 +147,7 @@ component =
             resize cy
       pure next
 
+
     Filter pred next -> do
       H.gets _.cy >>= case _ of
         Nothing -> pure unit
@@ -154,20 +157,38 @@ component =
           pure unit
       pure next
 
-    Click el reply -> do
-      H.raise $ Clicked el
+
+    RaiseEvent (ParsedEvent pev) reply -> do
+
+      case pev.target of
+          Left el -> do
+            d <- liftEff $ Cytoscape.eleGetAllData el
+            case parseEvent d of
+              Left err  -> pure unit
+              Right loc ->
+                H.raise $ SendEvent loc
+
+          Right cy -> pure unit
+
       pure $ reply H.Listening
+
 
     RecvEvent ev next -> do
 
-      case eventLocation ev of
-        Left err -> pure unit
-        Right l  -> ?scrollL
-      case eventRange ev of
-        Left err -> pure unit
-        Right r  -> ?scrollR
-      case eventScore ev of
-        Left err -> pure unit
-        Right s  -> ?dealWithScore
+      H.gets _.cy >>= case _ of
+        Nothing -> pure next
+        Just cy -> do
 
-      pure next
+          case eventLocation ev of
+            Left err -> pure unit
+            Right (EventLocation l) -> ?filterLoc
+
+          case eventRange ev of
+            Left err -> pure unit
+            Right (EventRange r) -> ?filterRange
+
+          case eventScore ev of
+            Left err -> pure unit
+            Right (EventScore s) -> ?filterScore
+
+          pure next

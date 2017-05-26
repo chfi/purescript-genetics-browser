@@ -4,6 +4,7 @@ module Genetics.Browser.UI.Biodalliance
 import Prelude
 import Genetics.Browser.Events.Types
 import Genetics.Browser.Biodalliance as Biodalliance
+import Genetics.Browser.Feature.Foreign as FF
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Properties as HP
@@ -28,12 +29,12 @@ data Query a
   | Jump String Bp Bp a
   | Initialize (forall eff. HTMLElement -> Eff eff Biodalliance) a
   | InitializeCallback (H.SubscribeStatus -> a)
-  | Click JObject (H.SubscribeStatus -> a)
+  | RaiseEvent JObject (H.SubscribeStatus -> a)
   | RecvEvent Event a
 
 data Message
   = Initialized
-  | Clicked JObject
+  | SendEvent Event
 
 type Effects eff = (avar :: AVAR, bd :: BD | eff)
 
@@ -66,11 +67,15 @@ component =
         Nothing -> pure unit
         Just el -> do
           bd <- liftEff $ mkBd el
+
           H.subscribe $ H.eventSource_ (Biodalliance.onInit bd) (H.request InitializeCallback)
-          H.subscribe $ H.eventSource (Biodalliance.addFeatureListener bd) $ Just <<< H.request <<< Click
+
+          H.subscribe $ H.eventSource (Biodalliance.addFeatureListener bd)
+            $ Just <<< H.request <<< RaiseEvent
 
           H.modify (_ { bd = Just bd })
       pure next
+
 
     Scroll n next -> do
       mbd <- H.gets _.bd
@@ -80,6 +85,7 @@ component =
           liftEff $ Biodalliance.scrollView bd n
           pure next
 
+
     Jump chr xl xr next -> do
       mbd <- H.gets _.bd
       case mbd of
@@ -88,23 +94,42 @@ component =
           liftEff $ Biodalliance.setLocation bd chr xl xr
           pure next
 
+
     InitializeCallback reply -> do
       H.raise $ Initialized
-      pure $ (reply H.Listening)
-
-    Click obj reply -> do
-      H.raise $ Clicked obj
       pure $ reply H.Listening
+
+
+    RaiseEvent ev reply -> do
+      case FF.parseFeatureRange' { chrKeys: ["chr"]
+                                 , minKeys: ["min"]
+                                 , maxKeys: ["max"]
+                                 } ev of
+        Left _ -> pure unit
+        Right r -> H.raise $ SendEvent r
+
+      pure $ reply H.Listening
+
+
     RecvEvent ev next -> do
+      mbd <- H.gets _.bd
+      case mbd of
+        Nothing -> pure next
+        Just bd -> do
 
-      case eventLocation ev of
-        Left err -> pure unit
-        Right l  -> ?scrollL
-      case eventRange ev of
-        Left err -> pure unit
-        Right r  -> ?scrollR
-      case eventScore ev of
-        Left err -> pure unit
-        Right s  -> ?dealWithScore
+          case eventLocation ev of
+            Left err -> pure unit
+            Right (EventLocation l) -> do
+              liftEff $ Biodalliance.setLocation bd l.chr l.pos l.pos
 
-      pure next
+          case eventRange ev of
+            Left err -> pure unit
+            Right (EventRange r) -> do
+              liftEff $ Biodalliance.setLocation bd r.chr r.minPos r.maxPos
+
+          case eventScore ev of
+            Left err -> pure unit
+            Right (EventScore s) -> pure unit
+
+
+          pure next

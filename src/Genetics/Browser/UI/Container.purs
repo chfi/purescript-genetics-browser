@@ -47,12 +47,7 @@ gwasGlyphify :: Renderer
 gwasGlyphify = GWAS.render
 
 
-cyConsumer :: forall eff.
-              Consumer GBE.EventLocation _ Unit
-cyConsumer = consumer \(GBE.EventLocation ev) -> do
-  log $ "received ev at chr " <> ev.chr
-  pure Nothing
-
+data Track = BDTrack | CyTrack
 
 type State = Unit
 
@@ -65,6 +60,7 @@ data Query a
   | ResetCy a
   | CyClicked Cytoscape.ParsedEvent a
   | BDClicked JObject a
+  | DistEvent Track GBE.Event a
 
 type ChildSlot = Either2 UIBD.Slot UICy.Slot
 
@@ -132,8 +128,9 @@ component =
   handleBDMessage UIBD.Initialized = Just $ ResetCy unit
   handleBDMessage (UIBD.Clicked obj) = Just $ BDClicked obj unit
 
+     -- TODO the event source track should be handled automatically somehow
   handleCyMessage :: UICy.Output -> Maybe (Query Unit)
-  handleCyMessage (UICy.Clicked ev) = Just $ CyClicked ev unit
+  handleCyMessage (UICy.SendEvent ev) = Just $ DistEvent CyTrack ev unit
 
   eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void (Aff (Effects eff))
   eval = case _ of
@@ -186,6 +183,16 @@ component =
           pure unit
       pure next
 
+    DistEvent from ev next -> do
+
+      case from of
+        BDTrack ->
+          H.query' CP.cp2 UICy.Slot $ H.action (UICy.RecvEvent ev)
+        CyTrack ->
+          H.query' CP.cp1 UIBD.Slot $ H.action (UIBD.RecvEvent ev)
+
+      pure next
+
 
 
 
@@ -195,6 +202,9 @@ getBDRange = FF.parseFeatureRange { chrKey: "chr"
                                   , xlKey: "min"
                                   , xrKey: "max"
                                   }
+
+
+
 
 main :: (forall eff. HTMLElement -> Eff eff Biodalliance) -> Eff _ Unit
 main mkBd = HA.runHalogenAff do
