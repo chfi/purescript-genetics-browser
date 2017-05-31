@@ -7,7 +7,7 @@ import Data.Argonaut.Core (JObject)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap)
 import Genetics.Browser.Feature (Feature(..))
-import Genetics.Browser.Types (BD, BDFeature, Biodalliance, Cytoscape)
+import Genetics.Browser.Types (BD, BDFeature, Biodalliance)
 import Genetics.Browser.Units (class HCoordinate, Bp(..), bp)
 
 -- addFeatureListener(callback)

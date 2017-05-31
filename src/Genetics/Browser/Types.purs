@@ -18,8 +18,6 @@ type Renderer = View -> Array Foreign -> Foreign
 type Quant = { min :: Number
              , max :: Number
              }
-foreign import data Cytoscape :: Type
-foreign import data CY :: Effect
 
 foreign import data Biodalliance :: Type
 foreign import data BD :: Effect

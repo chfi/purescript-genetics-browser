@@ -12,12 +12,9 @@ import Data.Function.Uncurried (Fn2)
 import Data.Maybe (Maybe)
 import Data.Nullable (Nullable, toMaybe, toNullable)
 import Data.StrMap (StrMap)
-import Genetics.Browser.Types (CY, Cytoscape)
+import Genetics.Browser.Cytoscape.Types (CY, CyCollection, CyEvent, Cytoscape, Element)
 import Unsafe.Coerce (unsafeCoerce)
 
-foreign import data CyElement :: Type
-foreign import data CyCollection :: Type -> Type
-foreign import data CyEvent :: Type
 
 -- TODO: move to separate module
 newtype Layout = Layout String
@@ -26,21 +23,21 @@ circle :: Layout
 circle = Layout "circle"
 
 foreign import cytoscapeImpl :: ∀ eff. HTMLElement
-                             -> Nullable (CyCollection CyElement)
+                             -> Nullable (CyCollection)
                              -> Eff (cy :: CY | eff) Cytoscape
 
 cytoscape :: forall eff.
              HTMLElement
-          -> Maybe (CyCollection CyElement)
+          -> Maybe (CyCollection)
           -> Eff (cy :: CY | eff) Cytoscape
 cytoscape htmlEl els = liftEff $ cytoscapeImpl htmlEl (toNullable els)
 
 
-unsafeParseCollection :: Foreign -> CyCollection CyElement
+unsafeParseCollection :: Foreign -> CyCollection
 unsafeParseCollection = unsafeCoerce
 
 foreign import coreAddCollection :: ∀ eff. Cytoscape
-                                 -> CyCollection CyElement
+                                 -> CyCollection
                                  -> Eff (cy :: CY | eff) Unit
 
 -- what does this filter actually do
@@ -74,7 +71,7 @@ foreign import onEventImpl :: ∀ eff a.
 
 -- TODO: move all event stuff to separate module
 newtype ParsedEvent = ParsedEvent { cy :: Cytoscape
-                                  , target :: Either CyElement Cytoscape
+                                  , target :: Either Element Cytoscape
                                   }
 
 foreign import parseEventImpl :: forall a b.
@@ -105,22 +102,22 @@ onClick cy = onEvent cy "click"
 
 
 foreign import collRemoveElements :: ∀ eff.
-                                 CyCollection CyElement
-                              -> Eff (cy :: CY | eff) (CyCollection CyElement)
+                                 CyCollection
+                              -> Eff (cy :: CY | eff) CyCollection
 
 foreign import coreRemoveAllElements :: forall eff. Cytoscape -> Eff (cy :: CY | eff) Unit
 
 
 foreign import eleGetAllData :: forall eff.
-                                CyElement
+                                Element
                              -> Eff (cy :: CY | eff) JObject
 
 foreign import eleGetDataImpl :: forall eff.
-                              CyElement
+                              Element
                            -> String
                            -> Eff (cy :: CY | eff) (Nullable Json)
 
-eleGetData :: forall eff. CyElement -> String -> Eff (cy :: CY | eff) (Maybe Json)
+eleGetData :: forall eff. Element -> String -> Eff (cy :: CY | eff) (Maybe Json)
 eleGetData el key = toMaybe <$> eleGetDataImpl el key
 
 
