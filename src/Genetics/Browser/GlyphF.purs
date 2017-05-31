@@ -3,9 +3,8 @@ module Genetics.Browser.GlyphF
        )
        where
 
-import Prelude
-
 import Genetics.Browser.Types (Point)
+import Prelude
 
 data GlyphF a =
     Circle Point Number a

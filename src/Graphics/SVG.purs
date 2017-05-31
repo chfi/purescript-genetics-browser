@@ -1,8 +1,7 @@
+-- TODO: This deserves to be in a separate package (and better modularized)
+
 module Graphics.SVG where
 
-import Prelude
-import DOM.Node.Document as Document
-import DOM.Node.Element as Element
 import Control.Monad.Eff (Eff)
 import Control.Monad.State (get, put)
 import Control.Monad.State.Trans (StateT)
@@ -11,15 +10,18 @@ import DOM (DOM)
 import DOM.HTML (window)
 import DOM.HTML.Types (htmlDocumentToDocument)
 import DOM.HTML.Window (document)
+import DOM.Node.Document as Document
+import DOM.Node.Element as Element
 import DOM.Node.Node (appendChild)
 import DOM.Node.Types (Element, elementToNode)
 import Data.Array (uncons)
+import Data.Foldable (class Foldable)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Maybe (Maybe(..))
--- import Data.Nullable (toNullable)
 import Data.Traversable (intercalate, traverse_)
 import Data.Tuple (Tuple(..))
+import Prelude
 
 createElementSVG :: ∀ eff. String -> Eff (dom :: DOM | eff) Element
 createElementSVG tag = do
@@ -33,7 +35,7 @@ createElementSVG tag = do
 
 type Attribute = Tuple String String
 
-setAttributes :: ∀ eff. Array Attribute -> Element -> Eff (dom :: DOM | eff) Unit
+setAttributes :: ∀ f eff. Foldable f => f Attribute -> Element -> Eff (dom :: DOM | eff) Unit
 setAttributes attrs ele = traverse_ (\ (Tuple n v) -> Element.setAttribute n v ele) attrs
 
 
@@ -56,7 +58,7 @@ renderSVGElement (SVGElement tag as) = do
   setAttributes as ele
   pure ele
 
-renderSVG :: ∀ eff. Array SVGElement -> Eff (dom :: DOM | eff) Element
+renderSVG :: ∀ f eff. Foldable f => f SVGElement -> Eff (dom :: DOM | eff) Element
 renderSVG as = do
   win <- window
   doc <- document win
@@ -66,6 +68,7 @@ renderSVG as = do
                 rendered <- renderSVGElement svgEle
                 appendChild (elementToNode rendered) parent) as
   pure root
+
 
 derive instance genericSVGElement :: Generic SVGElement _
 derive instance eqSVGElement :: Eq SVGElement
@@ -117,8 +120,11 @@ setFillStyle color = do
   let cur' = cur { fill = color }
   put cur'
 
--- TODO use Point instead...
 
+-- TODO: it feels like these functions can clean up nicely,
+-- using some suitable/more restrictive abstraction, maybe.
+-- there's an obvious pattern to many of them:
+-- cur <- get; ~stuff~; tell [Element tag attribs]
 circle :: Number -> Number -> Number
        -> SVG Unit
 circle x y r = do
@@ -159,6 +165,7 @@ rect x1 y1 x2 y2 = do
               , Tuple "height" (show (y2 - y1))
               ] <> svgToAttribs cur
   tell [SVGElement "rect" rect']
+
 
 translate :: Number -> Number
           -> SVG Unit

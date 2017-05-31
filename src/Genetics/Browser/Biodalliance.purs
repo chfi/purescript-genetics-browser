@@ -2,21 +2,10 @@ module Genetics.Browser.Biodalliance where
 
 import Prelude
 import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (class MonadEff)
 import Data.Argonaut.Core (JObject)
-import Data.Maybe (Maybe(..))
-import Data.Newtype (unwrap)
-import Genetics.Browser.Feature (Feature(..))
-import Genetics.Browser.Types (BD, BDFeature, Biodalliance)
-import Genetics.Browser.Units (class HCoordinate, Bp(..), bp)
+import Genetics.Browser.Types (BD, Biodalliance)
+import Genetics.Browser.Units (class HCoordinate, Bp, bp)
 
--- addFeatureListener(callback)
-
--- Called when the user clicks on a feature. Parameters passed to the callback are:
--- event: the DOM MouseEvent which triggered this callback.
--- feature: the feature which the user clicked on.
--- hit: an array of Feature and Group objects representing the clicked feature plus any parents.
--- tier: the Dalliance tier in which the click occurred.
 
 -- TODO: should probably be a bit safer than just sending a JObject. future problem tho~~
 -- TODO: Should also handle potential parents of objects, but especially which track was clicked

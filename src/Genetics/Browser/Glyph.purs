@@ -4,16 +4,12 @@ module Genetics.Browser.Glyph
        )
        where
 
-import Prelude
-
 import Control.Monad.Free (Free, liftF)
 import Genetics.Browser.GlyphF (GlyphF(..))
 import Genetics.Browser.Types (Point)
-
-
+import Prelude
 
 type Glyph = Free GlyphF
-
 
 circle :: Point -> Number -> Glyph Unit
 circle p r = liftF $ Circle p r unit

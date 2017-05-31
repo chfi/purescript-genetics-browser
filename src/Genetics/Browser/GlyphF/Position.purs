@@ -2,8 +2,6 @@ module Genetics.Browser.GlyphF.Position
        ( glyphToGlyphPosition )
        where
 
-import Prelude
-
 import Control.Monad.Free (foldFree)
 import Control.Monad.RWS (tell)
 import Control.Monad.Writer (Writer, execWriter)
@@ -13,6 +11,7 @@ import Genetics.Browser.GlyphF (GlyphF(..))
 import Genetics.Browser.GlyphPosition (GlyphPosition(GlyphPos))
 import Genetics.Browser.Types (Point)
 import Math as Math
+import Prelude
 
 
 rectanglePos :: Point -> Point -> GlyphPosition

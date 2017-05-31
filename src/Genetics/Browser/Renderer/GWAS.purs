@@ -2,8 +2,6 @@ module Genetics.Browser.Renderer.GWAS
        ( render
        ) where
 
-import Prelude
-import Math as Math
 import Control.Monad.Except (runExcept)
 import Data.Either (Either(..))
 import Data.Foldable (foldr)
@@ -12,12 +10,14 @@ import Data.Foreign.Index (readProp)
 import Data.Maybe (Maybe(..))
 import Data.Nullable (toNullable)
 import Data.Traversable (sequence)
-import Genetics.Browser.Feature (Feature(..), ScreenFeature, feature, featureToScreen)
+import Genetics.Browser.Feature (Feature(Feature), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
 import Genetics.Browser.GlyphF.Interpret (writeGlyph)
 import Genetics.Browser.Types (View, Renderer)
 import Genetics.Browser.Units (Bp(Bp))
 import Global (readFloat, infinity)
+import Math as Math
+import Prelude
 
 type GWASData = {score :: Number}
 type GWASFeature = Feature Bp GWASData

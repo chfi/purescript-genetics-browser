@@ -1,3 +1,5 @@
+-- TODO: To be replaced, like completely
+
 module Genetics.Browser.Source.QTL
        where
 
@@ -5,9 +7,6 @@ import Prelude
 import Data.Map as Map
 import Control.Alternative ((<|>))
 import Control.Monad.Aff (Aff, launchAff)
-import Control.Monad.Aff.Class (liftAff)
-import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
 import Data.Array (fromFoldable, mapMaybe)
 import Data.Either (Either(..))
 import Data.Foreign (Foreign, toForeign)
@@ -18,7 +17,6 @@ import Data.Nullable (Nullable, toNullable)
 import Genetics.Browser.Feature (Feature(..))
 import Genetics.Browser.Units (Bp, MBp(MBp), bp)
 import Global (readFloat)
-import Global.Unsafe (unsafeStringify)
 import Network.HTTP.Affjax (AJAX, get)
 import Text.Parsing.CSV (defaultParsers)
 import Text.Parsing.Parser (parseErrorMessage, runParser)
@@ -70,8 +68,6 @@ qtlToForeign (Feature chr xl xr {score}) = toForeign { "chr": chr
                                                      , "score": score
                                                      }
 
--- fetchImpl :: ∀ c. HCoordinate c =>
---              _something -> String -> c -> c -> Number? -> _F -> _F -> Callback
 fetchImpl :: _
 fetchImpl uri chr pmin pmax scale types pool f = launchAff $ do
   res <- get uri
@@ -87,9 +83,6 @@ fetchImpl uri chr pmin pmax scale types pool f = launchAff $ do
                 in runFn4 f "" (unsafeCoerce fs') 0.0 null
 
 
-
--- more generally this is :: ∀ a m c r. (MonadZero m) => a -> m (Feature c r),
--- since it should work in any monad capable of handling failure.
 
 -- not very safe or stable (case sensitive, numbers as strings...)
 lineToFeature :: Map String String -> Maybe QTLFeature

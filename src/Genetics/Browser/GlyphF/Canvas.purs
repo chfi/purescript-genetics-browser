@@ -2,8 +2,6 @@ module Genetics.Browser.GlyphF.Canvas
        ( renderGlyph )
        where
 
-import Prelude
-
 import Control.Monad.Eff (Eff)
 import Control.Monad.Free (foldFree)
 import Data.Traversable (traverse_)
@@ -12,6 +10,7 @@ import Genetics.Browser.GlyphF (GlyphF(..))
 import Graphics.Canvas (CANVAS, Context2D)
 import Graphics.Canvas as C
 import Math as Math
+import Prelude
 
 
 -- TODO would be nice not to have to throw the contexts away...

@@ -1,15 +1,15 @@
 "use strict";
 
-exports.cytoscapeImpl = function(el) {
+exports.cytoscapeImpl = function(htmlElement) {
     return function(eles) {
         return function() {
             var cy = require("cytoscape")({
 
-                container: el, // container to render in
+                container: htmlElement,
 
                 elements: eles,
 
-                style: [ // the stylesheet for the graph
+                style: [ // the stylesheet for the graph TODO: be configurable
                     {
                         selector: 'node',
                         style: {
@@ -31,12 +31,13 @@ exports.cytoscapeImpl = function(el) {
                     }
                 ]
             });
+
             return cy;
         };
     };
 };
 
-exports.coreAddCollection = function(cy) {
+exports.graphAddCollection = function(cy) {
     return function(eles) {
         return function() {
             return cy.add(eles);
@@ -44,7 +45,7 @@ exports.coreAddCollection = function(cy) {
     };
 };
 
-exports.graphCollection = function(cy) {
+exports.graphGetCollection = function(cy) {
     return function() {
         return cy.collection('*');
     };
@@ -58,7 +59,7 @@ exports.runLayout = function(cy) {
     };
 };
 
-exports.resize = function(cy) {
+exports.resizeContainer = function(cy) {
     return function() {
         cy.resize();
     };
@@ -92,29 +93,14 @@ exports.parseEventImpl = function(left) {
     };
 };
 
-exports.collRemoveElements = function(eles) {
+exports.graphRemoveCollection = function(eles) {
     return function() {
         return eles.remove();
     };
 };
 
-exports.coreRemoveAllElements = function(cy) {
+exports.graphRemoveAll = function(cy) {
     return function() {
         cy.elements().remove();
-    };
-};
-
-
-exports.eleGetAllData = function(ele) {
-    return function() {
-        return ele.data();
-    };
-};
-
-exports.eleGetDataImpl = function(ele) {
-    return function(key) {
-        return function() {
-            return ele.data(key);
-        };
     };
 };

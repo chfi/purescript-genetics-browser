@@ -2,13 +2,12 @@ module Genetics.Browser.GlyphF.Log
        ( showGlyph )
        where
 
-import Prelude
-
 import Control.Monad.Free (foldFree)
 import Control.Monad.Writer (Writer, execWriter, tell)
 import Data.Traversable (traverse_)
 import Genetics.Browser.Glyph (Glyph)
 import Genetics.Browser.GlyphF (GlyphF(..))
+import Prelude
 
 
 glyphLogN :: GlyphF ~> Writer String

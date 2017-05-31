@@ -1,53 +1,38 @@
 module Genetics.Browser.UI.Container
        where
 
-import Prelude
-import Data.StrMap as StrMap
-import Genetics.Browser.Biodalliance as Biodalliance
-import Genetics.Browser.Cytoscape as Cytoscape
-import Genetics.Browser.Events as GBE
-import Genetics.Browser.Feature.Foreign as FF
-import Genetics.Browser.Renderer.GWAS as GWAS
-import Genetics.Browser.Renderer.Lineplot as QTL
-import Genetics.Browser.UI.Biodalliance as UIBD
-import Genetics.Browser.UI.Cytoscape as UICy
-import Halogen as H
-import Halogen.Aff as HA
-import Halogen.Component.ChildPath as CP
-import Halogen.HTML as HH
-import Halogen.HTML.Events as HE
-import Halogen.HTML.Properties as HP
-import Control.Coroutine (Consumer, consumer)
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import DOM.HTML.Types (HTMLElement)
-import Data.Argonaut.Core (JObject)
-import Data.Const (Const(..))
-import Data.Either (Either(..))
+import Data.Const (Const)
 import Data.Either.Nested (Either2)
-import Data.Foreign (Foreign, readString)
-import Data.Functor.Coproduct.Nested (type (<\/>), Coproduct2)
+import Data.Functor.Coproduct.Nested (type (<\/>))
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap)
-import Data.StrMap (StrMap)
-import Genetics.Browser.Cytoscape.Types (CY, Cytoscape)
-import Genetics.Browser.Events.Types (Event(..))
+import Genetics.Browser.Events.Types (Event)
+import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
-import Genetics.Browser.Source.QTL (fetch)
-import Genetics.Browser.Types (BD, Biodalliance, Renderer)
+import Genetics.Browser.Renderer.Lineplot as QTL
+import Genetics.Browser.Types (Biodalliance, Renderer)
+import Genetics.Browser.UI.Biodalliance as UIBD
+import Genetics.Browser.UI.Cytoscape as UICy
 import Genetics.Browser.Units (Bp(..))
-import Global.Unsafe (unsafeStringify)
+import Halogen as H
+import Halogen.Aff as HA
+import Halogen.Component.ChildPath as CP
+import Halogen.HTML as HH
+import Halogen.HTML.Events as HE
 import Halogen.VDom.Driver (runUI)
-import Unsafe.Coerce (unsafeCoerce)
+import Prelude
+
 
 qtlGlyphify :: LinePlotConfig -> Renderer
 qtlGlyphify = QTL.render
 
 gwasGlyphify :: Renderer
 gwasGlyphify = GWAS.render
-
 
 data Track = BDTrack | CyTrack
 
@@ -163,9 +148,7 @@ component =
       pure next
 
 
-
-
-main :: (forall eff. HTMLElement -> Eff eff Biodalliance) -> Eff _ Unit
+main :: (∀ eff. HTMLElement -> Eff eff Biodalliance) -> Eff _ Unit
 main mkBd = HA.runHalogenAff do
   liftEff $ log "running main"
   HA.awaitLoad

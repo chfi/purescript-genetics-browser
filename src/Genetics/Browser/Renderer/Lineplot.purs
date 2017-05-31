@@ -1,7 +1,6 @@
 module Genetics.Browser.Renderer.Lineplot
        where
 
-import Prelude
 import Control.Alt ((<|>))
 import Data.Foreign (F, Foreign, readNumber, readString, toForeign)
 import Data.Foreign.Index (readProp)
@@ -14,6 +13,7 @@ import Genetics.Browser.GlyphF.Interpret (writeGlyph)
 import Genetics.Browser.Types (Renderer)
 import Genetics.Browser.Units (Bp(..))
 import Global (readFloat)
+import Prelude
 
 type LineData = { score :: Number }
 type LineFeature = Feature Bp LineData

@@ -1,13 +1,6 @@
 module Genetics.Browser.UI.Biodalliance
        where
 
-import Prelude
-import Genetics.Browser.Events.Types
-import Genetics.Browser.Biodalliance as Biodalliance
-import Genetics.Browser.Feature.Foreign as FF
-import Halogen as H
-import Halogen.HTML as HH
-import Halogen.HTML.Properties as HP
 import Control.Monad.Aff (Aff)
 import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Eff (Eff)
@@ -16,9 +9,16 @@ import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut.Core (JObject)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
+import Genetics.Browser.Biodalliance as Biodalliance
 import Genetics.Browser.Events (eventLocation, eventRange, eventScore)
+import Genetics.Browser.Events.Types (Event, EventLocation(..), EventRange(..), EventScore(..))
+import Genetics.Browser.Feature.Foreign as FF
 import Genetics.Browser.Types (BD, Biodalliance)
 import Genetics.Browser.Units (Bp)
+import Halogen as H
+import Halogen.HTML as HH
+import Halogen.HTML.Properties as HP
+import Prelude
 
 
 type State = { bd :: Maybe Biodalliance

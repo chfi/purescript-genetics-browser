@@ -1,7 +1,10 @@
 module Genetics.Browser.Units where
 
-import Prelude
+-- TODO: feels like there are better ways of dealing with this (units/dimensions);
+-- need to look for libraries
+
 import Data.Newtype (class Newtype, unwrap)
+import Prelude
 import Test.QuickCheck (class Arbitrary)
 
 newtype Bp = Bp Number

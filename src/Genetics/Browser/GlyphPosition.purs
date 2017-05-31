@@ -2,13 +2,12 @@ module Genetics.Browser.GlyphPosition
        ( GlyphPosition(..) )
        where
 
-import Prelude
-
 import Data.Generic.Rep (class Generic)
 import Data.Monoid (class Monoid)
 import Data.Newtype (class Newtype)
 import Global (infinity)
 import Math as Math
+import Prelude
 import Test.QuickCheck (class Arbitrary, arbitrary)
 
 

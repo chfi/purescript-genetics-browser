@@ -1,18 +1,14 @@
 module Genetics.Browser.Cytoscape where
 
-import Prelude
 import Control.Monad.Eff (Eff, kind Effect)
 import Control.Monad.Eff.Class (liftEff)
 import DOM.HTML.Types (HTMLElement)
-import Data.Argonaut (Json)
-import Data.Argonaut.Core (JObject)
 import Data.Either (Either(..))
 import Data.Foreign (Foreign)
-import Data.Function.Uncurried (Fn2)
 import Data.Maybe (Maybe)
-import Data.Nullable (Nullable, toMaybe, toNullable)
-import Data.StrMap (StrMap)
+import Data.Nullable (Nullable, toNullable)
 import Genetics.Browser.Cytoscape.Types (CY, CyCollection, CyEvent, Cytoscape, Element)
+import Prelude
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -36,11 +32,11 @@ cytoscape htmlEl els = liftEff $ cytoscapeImpl htmlEl (toNullable els)
 unsafeParseCollection :: Foreign -> CyCollection
 unsafeParseCollection = unsafeCoerce
 
-foreign import coreAddCollection :: ∀ eff. Cytoscape
+foreign import graphAddCollection :: ∀ eff. Cytoscape
                                  -> CyCollection
                                  -> Eff (cy :: CY | eff) Unit
 
-foreign import graphCollection :: ∀ eff. Cytoscape -> Eff (cy :: CY | eff) CyCollection
+foreign import graphGetCollection :: ∀ eff. Cytoscape -> Eff (cy :: CY | eff) CyCollection
 
 
 foreign import runLayout :: forall eff.
@@ -48,23 +44,16 @@ foreign import runLayout :: forall eff.
                          -> Layout
                          -> Eff (cy :: CY | eff) Unit
 
-foreign import resize :: forall eff. Cytoscape -> Eff (cy :: CY | eff) Unit
+-- Used to recalculate the container bounds; if the div moves for some reason (other stuff on the page),
+-- mouse clicks are off until this is called.
+foreign import resizeContainer :: forall eff. Cytoscape -> Eff (cy :: CY | eff) Unit
 
-
--- foreign import setOn :: ∀ eff. Cytoscape -> Eff (cy :: CY | eff) Unit
--- TODO: the callback should really be an Eff too, but w/e
 foreign import onEventImpl :: ∀ eff a.
                               Cytoscape
                            -> String
                            -> (CyEvent -> Eff (cy :: CY | eff) a)
                            -> Eff (cy :: CY | eff) Unit
 
-
--- pretty nasty. would be better using Foreign, but we need to compare two things of different types...
--- maybe something like
--- _.target >>= parseCy cy <|> parseEl cy
--- where parseCy :: Cytoscape -> Foreign -> F Cytoscape
--- and   parseEl :: Cytoscape -> Foreign -> F CyElement
 
 -- TODO: move all event stuff to separate module
 newtype ParsedEvent = ParsedEvent { cy :: Cytoscape
@@ -96,22 +85,9 @@ onClick :: ∀ eff.
 onClick cy = onEvent cy "click"
 
 
-
-foreign import collRemoveElements :: ∀ eff.
+-- is `graphRemoveWithCollection` or similar a better name? ...
+foreign import graphRemoveCollection :: ∀ eff.
                                  CyCollection
                               -> Eff (cy :: CY | eff) CyCollection
 
-foreign import coreRemoveAllElements :: forall eff. Cytoscape -> Eff (cy :: CY | eff) Unit
-
-
-foreign import eleGetAllData :: forall eff.
-                                Element
-                             -> Eff (cy :: CY | eff) JObject
-
-foreign import eleGetDataImpl :: forall eff.
-                              Element
-                           -> String
-                           -> Eff (cy :: CY | eff) (Nullable Json)
-
-eleGetData :: forall eff. Element -> String -> Eff (cy :: CY | eff) (Maybe Json)
-eleGetData el key = toMaybe <$> eleGetDataImpl el key
+foreign import graphRemoveAll :: forall eff. Cytoscape -> Eff (cy :: CY | eff) Unit

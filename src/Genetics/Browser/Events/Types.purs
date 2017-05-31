@@ -2,7 +2,7 @@ module Genetics.Browser.Events.Types
        where
 
 import Prelude
-import Data.Newtype
+import Data.Newtype (class Newtype)
 import Data.Argonaut.Core (JObject)
 import Genetics.Browser.Units (Bp)
 
@@ -16,7 +16,8 @@ derive instance ordTrackId :: Eq TrackId
 
 type EventData = JObject
 
-newtype Event = Event { --sourceTrack :: TrackId
+newtype Event = Event { --sourceTrack :: TrackId -- (or just TrackType, or even a type parameter...)
+                        -- or keep track of that in the main Container, as done currently.
                         eventData :: EventData
                       }
 

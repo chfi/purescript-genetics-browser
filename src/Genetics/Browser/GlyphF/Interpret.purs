@@ -18,6 +18,12 @@ import Genetics.Browser.Glyph (Glyph)
 import Genetics.Browser.GlyphF.Position (glyphToGlyphPosition)
 
 -- TODO: this should be dealt with in Feature, in a safer way
+helper :: ∀ c r.
+  Feature c r
+  -> { chr :: String
+     , min :: c
+     , max :: c
+     }
 helper (Feature chr xl xr _) = {chr: chr, min: xl, max: xr}
 
 writeGlyph' :: ∀ a c r. Maybe (Feature c r) -> Glyph a -> Foreign

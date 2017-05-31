@@ -1,9 +1,5 @@
 module Test.Main where
 
-import Prelude
-import Genetics.Browser.GlyphF.Canvas as Canvas
-import Genetics.Browser.GlyphF.SVG as SVG
-import Test.QuickCheck.Laws.Data as Data
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (log)
 import DOM (DOM)
@@ -13,12 +9,16 @@ import Data.Maybe (Maybe(..))
 import Data.Traversable (traverse_)
 import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, rect, stroke)
+import Genetics.Browser.GlyphF.Canvas as Canvas
+import Genetics.Browser.GlyphF.SVG as SVG
 import Genetics.Browser.GlyphPosition (GlyphPosition)
 import Genetics.Browser.Units (Bp(..), MBp(..))
 import Graphics.Canvas (getCanvasElementById, getContext2D, translate)
+import Prelude
 import Test.QuickCheck.Laws (QC)
-import Type.Proxy (Proxy(..))
+import Test.QuickCheck.Laws.Data as Data
 import Test.Units as Units
+import Type.Proxy (Proxy(..))
 
 
 foreign import testGlyphPos :: Foreign -> String

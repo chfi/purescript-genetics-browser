@@ -1,15 +1,11 @@
 module Genetics.Browser.Events
        where
 
-import Prelude
-import Data.Newtype
-import Data.StrMap
-import Data.Argonaut (Json, (.?))
-import Data.Either (Either(..))
-import Data.Maybe (Maybe(..))
-import Genetics.Browser.Feature.Foreign (parseFeatureLocation)
+import Data.Argonaut ((.?))
+import Data.Either (Either)
+import Genetics.Browser.Events.Types (Event(..), EventLocation(..), EventRange(..), EventScore(..))
 import Genetics.Browser.Units (Bp(..))
-import Genetics.Browser.Events.Types
+import Prelude
 
 -- An Event comes from some track, and carries some information.
 -- depending on the track (?), the information may differ.
@@ -25,18 +21,9 @@ The data flow should be
 
 Thus, it will be parsed from JSON into a PS data structure at the very outer edge,
 and remain type safe like that.
-
 -}
 
 -- so, source track and event types are orthogonal.
-
-
--- The data in an event can be anything json-serializable.
--- The main container tries to parse the event data, to find e.g. a location or loc range,
--- and dispatches accordingly.
-
--- It'd be nice to have this on the type level. Maybe possible using rows and proxies?
--- need to research.
 
 evLocKeys ::
   { locKeys :: Array String

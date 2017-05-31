@@ -2,8 +2,6 @@ module Genetics.Browser.GlyphF.SVG
        ( renderGlyph )
        where
 
-import Prelude
-
 import Control.Monad.Eff (Eff)
 import Control.Monad.Free (foldFree)
 import Control.Monad.State (runStateT)
@@ -14,6 +12,7 @@ import Genetics.Browser.Glyph (Glyph)
 import Genetics.Browser.GlyphF (GlyphF(..))
 import Graphics.SVG (SVG, SVGElement)
 import Graphics.SVG as SVG
+import Prelude
 
 interpSVGEff :: GlyphF ~> SVG
 interpSVGEff (Stroke c a)  = do

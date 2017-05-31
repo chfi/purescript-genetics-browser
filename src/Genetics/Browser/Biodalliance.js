@@ -1,29 +1,24 @@
+"use strict";
 
 exports.addFeatureListener = function(bd) {
     return function(callback) {
         return function() {
             bd.addFeatureListener(function(ev, feature, hit, tier) {
-                console.log("clicked on: ");
-                console.log(feature);
                 callback(feature)();
             });
         };
     };
 };
 
-
 exports.addInitListener = function(bd) {
     return function(callback) {
         return function() {
             bd.addInitListener(function() {
-                // var browser = this;
-                // callback(browser)();
                 callback();
             });
         };
     };
 };
-
 
 exports.setLocationImpl = function(bd) {
     return function(chr) {
@@ -45,11 +40,4 @@ exports.scrollViewImpl = function(bd) {
             bd.setLocation(null, xl, xr);
         };
     };
-};
-
-exports.parseBDFeaturePos = function(feature) {
-    return { chr: feature.chr,
-             min: feature.min,
-             max: feature.max
-           };
 };

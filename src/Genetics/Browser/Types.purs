@@ -1,3 +1,6 @@
+-- TODO: Most of this will be obsolete after BD can be better embedded/
+--       native tracks can be used
+
 module Genetics.Browser.Types where
 
 import Control.Monad.Eff (kind Effect)

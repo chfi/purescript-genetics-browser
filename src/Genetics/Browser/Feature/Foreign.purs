@@ -1,18 +1,15 @@
 module Genetics.Browser.Feature.Foreign where
 
-import Prelude
-import Data.Maybe.First
-import Genetics.Browser.Events.Types
-import Data.Argonaut as A
-import Control.MonadPlus (guard)
-import Data.Argonaut (class DecodeJson, Json, encodeJson, isObject, toObject, (.?), (:=))
+import Data.Argonaut (class DecodeJson, encodeJson, toObject, (.?), (:=))
 import Data.Argonaut.Core (JObject)
 import Data.Either (Either(..))
 import Data.Foldable (class Foldable, foldMap, foldl)
-import Data.Foreign (Foreign, F)
 import Data.Maybe (Maybe(..))
-import Data.Newtype (unwrap, wrap)
-import Genetics.Browser.Units (class HCoordinate, Bp(..), MBp(..), mbp)
+import Data.Maybe.First (First(..))
+import Data.Newtype (unwrap)
+import Genetics.Browser.Events.Types (Event(..))
+import Genetics.Browser.Units (Bp(Bp))
+import Prelude
 
 type LocKeys = { locKeys :: Array String
                , chrKeys :: Array String
