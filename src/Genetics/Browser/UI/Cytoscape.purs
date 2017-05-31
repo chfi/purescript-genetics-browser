@@ -108,7 +108,7 @@ component =
       H.getHTMLElementRef (H.RefLabel "cy") >>= case _ of
         Nothing -> pure unit
         Just el' -> do
-          cy <- liftEff $ Cytoscape.cytoscape el' Nothing
+          cy <- liftEff $ Cytoscape.cytoscape (Just el') Nothing
 
           liftAff $ getAndSetElements url cy
 

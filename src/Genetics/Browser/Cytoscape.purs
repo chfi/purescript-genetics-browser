@@ -1,14 +1,15 @@
 module Genetics.Browser.Cytoscape where
 
+import Prelude
 import Control.Monad.Eff (Eff, kind Effect)
 import Control.Monad.Eff.Class (liftEff)
 import DOM.HTML.Types (HTMLElement)
+import Data.Argonaut.Core (JArray)
 import Data.Either (Either(..))
 import Data.Foreign (Foreign)
 import Data.Maybe (Maybe)
 import Data.Nullable (Nullable, toNullable)
 import Genetics.Browser.Cytoscape.Types (CY, CyCollection, CyEvent, Cytoscape, Element)
-import Prelude
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -18,15 +19,18 @@ newtype Layout = Layout String
 circle :: Layout
 circle = Layout "circle"
 
-foreign import cytoscapeImpl :: ∀ eff. HTMLElement
-                             -> Nullable (CyCollection)
+foreign import cytoscapeImpl :: ∀ eff. Nullable HTMLElement
+                             -> Nullable JArray
                              -> Eff (cy :: CY | eff) Cytoscape
 
+-- TODO: just realized the cytoscape constructor actually doesn't take a CyCollection,
+-- but an array of Json...
+-- makes more sense, too, since we need a Cytoscape to create a CyCollection!
 cytoscape :: forall eff.
-             HTMLElement
-          -> Maybe (CyCollection)
+             Maybe HTMLElement
+          -> Maybe JArray
           -> Eff (cy :: CY | eff) Cytoscape
-cytoscape htmlEl els = liftEff $ cytoscapeImpl htmlEl (toNullable els)
+cytoscape htmlEl els = liftEff $ cytoscapeImpl (toNullable htmlEl) (toNullable els)
 
 
 unsafeParseCollection :: Foreign -> CyCollection

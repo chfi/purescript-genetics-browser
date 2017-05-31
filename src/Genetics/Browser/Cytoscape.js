@@ -3,9 +3,14 @@
 exports.cytoscapeImpl = function(htmlElement) {
     return function(eles) {
         return function() {
+            var headlessOpt = false;
+            if (htmlElement === null) {
+                headlessOpt = true;
+            }
             var cy = require("cytoscape")({
 
                 container: htmlElement,
+                headless: headlessOpt,
 
                 elements: eles,
 

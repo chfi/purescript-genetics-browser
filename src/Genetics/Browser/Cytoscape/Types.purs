@@ -1,7 +1,7 @@
 module Genetics.Browser.Cytoscape.Types where
 
 import Control.Monad.Eff (kind Effect)
-import Data.Argonaut.Core (JObject)
+import Data.Argonaut.Core (JObject, JArray)
 
 foreign import data Cytoscape :: Type
 foreign import data CY :: Effect
@@ -12,3 +12,4 @@ foreign import data CyCollection :: Type
 foreign import data CyEvent :: Type
 
 foreign import elementJson :: Element -> JObject
+foreign import collectionJson :: CyCollection -> JArray
