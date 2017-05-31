@@ -40,11 +40,6 @@ foreign import coreAddCollection :: ∀ eff. Cytoscape
                                  -> CyCollection
                                  -> Eff (cy :: CY | eff) Unit
 
--- what does this filter actually do
-foreign import coreFilterImpl :: ∀ eff a.
-                                 Cytoscape
-                              -> (JObject -> Boolean)
-                              -> Eff (cy :: CY | eff) (CyCollection a)
 
 foreign import runLayout :: forall eff.
                             Cytoscape
@@ -84,7 +79,6 @@ parseEvent :: CyEvent -> ParsedEvent
 parseEvent = parseEventImpl Left Right
 
 
-
 onEvent :: forall a eff.
            Cytoscape
         -> String
@@ -119,22 +113,3 @@ foreign import eleGetDataImpl :: forall eff.
 
 eleGetData :: forall eff. Element -> String -> Eff (cy :: CY | eff) (Maybe Json)
 eleGetData el key = toMaybe <$> eleGetDataImpl el key
-
-
-
-foreign import filterNodes :: ∀ eff
-                            . Cytoscape
-                           -> (JObject -> Boolean)
-                           -> Eff (cy :: CY | eff) (CyCollection CyElement)
-
-
--- foreign import filterEdges :: ∀ eff
---                             . (JObject -> Boolean)
---                            -> Cytoscape
---                            -> Eff (cy :: CY | eff) (CyCollection CyElement)
-
-
-foreign import filterEdgesWithNodes :: ∀ eff
-                                     . Cytoscape
-                                    -> (JObject -> Boolean)
-                                    -> Eff (cy :: CY | eff) (CyCollection CyElement)

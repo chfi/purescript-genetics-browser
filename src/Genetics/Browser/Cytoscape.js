@@ -44,14 +44,6 @@ exports.coreAddCollection = function(cy) {
     };
 };
 
-exports.coreFilterImpl = function(cy) {
-    return function(pred) {
-        return function() {
-            return cy.filter(pred);
-        };
-    };
-};
-
 exports.runLayout = function(cy) {
     return function(layout) {
         return function() {
@@ -117,31 +109,6 @@ exports.eleGetDataImpl = function(ele) {
     return function(key) {
         return function() {
             return ele.data(key);
-        };
-    };
-};
-
-
-exports.filterNodes = function(cy) {
-    return function(pred) {
-        return function() {
-            return cy.nodes().filter(function(ele, ind) {
-                return pred(ele.data());
-            });
-        };
-    };
-};
-
-
-
-exports.filterEdgesWithNodes = function(cy) {
-    return function(pred) {
-        return function() {
-            var edges = cy.edges().filter(function(ele, ind) {
-                return pred(ele.data());
-            });
-            var nodes = edges.connectedNodes();
-            return edges.union(nodes);
         };
     };
 };
