@@ -1,29 +1,34 @@
 module Test.Main where
 
+import Genetics.Browser.Cytoscape.Types
+import Genetics.Browser.Cytoscape.Collection
+import Prelude
+import DOM.Node.Types as DOM
+import Genetics.Browser.Cytoscape as Cy
+import Genetics.Browser.GlyphF.Canvas as Canvas
+import Genetics.Browser.GlyphF.SVG as SVG
+import Test.QuickCheck.Laws.Data as Data
+import Test.Units as Units
 import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Console (log)
+import Control.Monad.Eff.Console (log, logShow)
 import DOM (DOM)
-import DOM.Node.Types (Element)
+import Data.Argonaut (jsonParser, toArray)
+import Data.Either (Either(..))
 import Data.Foreign (Foreign)
 import Data.Maybe (Maybe(..))
 import Data.Traversable (traverse_)
 import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, rect, stroke)
-import Genetics.Browser.GlyphF.Canvas as Canvas
-import Genetics.Browser.GlyphF.SVG as SVG
 import Genetics.Browser.GlyphPosition (GlyphPosition)
 import Genetics.Browser.Units (Bp(..), MBp(..))
 import Graphics.Canvas (getCanvasElementById, getContext2D, translate)
-import Prelude
 import Test.QuickCheck.Laws (QC)
-import Test.QuickCheck.Laws.Data as Data
-import Test.Units as Units
 import Type.Proxy (Proxy(..))
 
 
 foreign import testGlyphPos :: Foreign -> String
 foreign import showGlyphSVG :: Foreign -> Unit
-foreign import addElementToDiv :: ∀ eff. String -> Element -> Eff ( dom :: DOM | eff ) Unit
+foreign import addElementToDiv :: ∀ eff. String -> DOM.Element -> Eff ( dom :: DOM | eff ) Unit
 foreign import setOnLoad :: ∀ eff. Eff eff Unit -> Eff eff Unit
 
 
@@ -64,14 +69,34 @@ glyphify y (Feature _ xl xr _) = do
   fill "#555555"
   rect { x: xl, y: y } { x: xr, y: y + 40.0 }
 
-
-
 checkGlyphPosInstances :: ∀ e. QC e Unit
 checkGlyphPosInstances = do
   Data.checkSemigroup prxGlyph
   Data.checkMonoid prxGlyph
   where
     prxGlyph = Proxy :: Proxy GlyphPosition
+
+
+testCytoscape :: Eff _ Unit
+testCytoscape = do
+  case jsonParser "[{\"data\": { \"id\": \"a\" }},{\"data\": { \"id\": \"b\" }},{\"data\": { \"id\": \"ab\", \"source\": \"a\", \"target\": \"b\" }}]" of
+    Left e     -> log $ "Could not parse Cytoscape elements JSON: " <> e
+    Right json -> case toArray json of
+      Nothing    -> log $ "Could not parse Cytoscape elements into Array."
+      Just ar    -> do
+        cy <- Cy.cytoscape Nothing (Just ar)
+        eles <- Cy.graphGetCollection cy
+        let edges = filter isEdge eles
+            nodes = filter isNode eles
+        log $ "All elements"
+        logShow $ collectionJson eles
+        log $ "Filtered edges"
+        logShow $ collectionJson edges
+        log $ "Filtered nodes"
+        logShow $ collectionJson nodes
+        log $ "Union of filtered"
+        logShow $ collectionJson $ edges `union` nodes
+
 
 runBrowserTest :: QC _ Unit
 runBrowserTest = do
@@ -92,5 +117,6 @@ runBrowserTest = do
 main :: QC _ Unit
 main = do
   checkGlyphPosInstances
+  testCytoscape
   setOnLoad runBrowserTest
   Units.main
