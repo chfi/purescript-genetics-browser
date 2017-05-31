@@ -2,6 +2,7 @@ module Genetics.Browser.UI.Cytoscape
        where
 
 import Prelude
+import Genetics.Browser.Cytoscape
 import Control.Coroutine as CR
 import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Events as GBE
@@ -20,11 +21,12 @@ import Control.Monad.Eff.Exception (EXCEPTION)
 import Data.Argonaut.Core (JObject)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
-import Genetics.Browser.Cytoscape (CyCollection, CyElement, ParsedEvent(..), collRemoveElements, filterEdgesWithNodes, resize, runLayout)
+import Genetics.Browser.Cytoscape (ParsedEvent(..), collRemoveElements, resize, runLayout)
+import Genetics.Browser.Cytoscape.Collection (connectedNodes, filter, isEdge, union)
+import Genetics.Browser.Cytoscape.Types (CY, CyCollection, Cytoscape, elementJson)
 import Genetics.Browser.Events (eventLocation, eventRange, eventScore)
 import Genetics.Browser.Events.Types (Event, EventLocation(..), EventRange(..), EventScore(..))
 import Genetics.Browser.Feature.Foreign (parsePath)
-import Genetics.Browser.Types (CY, Cytoscape)
 import Genetics.Browser.Units (Bp(..))
 import Global.Unsafe (unsafeStringify)
 import Network.HTTP.Affjax (AJAX)
@@ -98,7 +100,7 @@ component =
                           -- , HP.prop
                           ] []
 
-  getElements :: forall eff'. String -> Aff (ajax :: AJAX | eff') (CyCollection CyElement)
+  getElements :: forall eff'. String -> Aff (ajax :: AJAX | eff') CyCollection
   getElements url = Affjax.get url <#> (\r -> Cytoscape.unsafeParseCollection r.response)
 
   getAndSetElements :: forall eff'. String -> Cytoscape -> Aff (ajax :: AJAX, cy :: CY | eff') Unit
@@ -154,7 +156,8 @@ component =
       H.gets _.cy >>= case _ of
         Nothing -> pure unit
         Just cy -> do
-          eles <- liftEff $ Cytoscape.coreFilterImpl cy pred
+          graphColl <- liftEff $ Cytoscape.graphCollection cy
+          let eles = filter (pred <<< elementJson) graphColl
           _ <- liftEff $ Cytoscape.collRemoveElements eles
           pure unit
       pure next
@@ -187,8 +190,12 @@ component =
               let pred el = case parsePath el ["lrsLoc", "chr"] of
                     Left _ -> false
                     Right chr -> unsafeCoerce chr == l.chr
-              eles <- liftEff $ filterEdgesWithNodes cy pred
-              _ <- liftEff $ collRemoveElements eles
+
+              graphColl <- liftEff $ Cytoscape.graphCollection cy
+              let edges = filter ((&&) <$> isEdge <*> pred <<< elementJson) graphColl
+                  nodes = connectedNodes edges
+
+              _ <- liftEff $ collRemoveElements $ edges `union` nodes
               pure unit
 
           case eventRange ev of

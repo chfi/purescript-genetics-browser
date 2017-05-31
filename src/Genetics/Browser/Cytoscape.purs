@@ -40,6 +40,8 @@ foreign import coreAddCollection :: ∀ eff. Cytoscape
                                  -> CyCollection
                                  -> Eff (cy :: CY | eff) Unit
 
+foreign import graphCollection :: ∀ eff. Cytoscape -> Eff (cy :: CY | eff) CyCollection
+
 
 foreign import runLayout :: forall eff.
                             Cytoscape

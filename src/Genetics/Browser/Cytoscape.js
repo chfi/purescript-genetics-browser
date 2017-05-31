@@ -44,6 +44,12 @@ exports.coreAddCollection = function(cy) {
     };
 };
 
+exports.graphCollection = function(cy) {
+    return function() {
+        return cy.collection('*');
+    };
+};
+
 exports.runLayout = function(cy) {
     return function(layout) {
         return function() {
