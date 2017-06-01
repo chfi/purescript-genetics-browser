@@ -143,5 +143,6 @@ main = do
   run [consoleReporter] do
     specCytoscape
     checkGlyphPosInstances
+    Units.unitIsoSpec
+
   setOnLoad runBrowserTest
-  Units.main

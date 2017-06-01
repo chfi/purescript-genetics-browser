@@ -1,24 +1,24 @@
 module Test.Units where
 
-import Prelude
-import Test.QuickCheck.Laws.Data as Data
-import Control.Monad.Eff.Console (log)
+import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (CONSOLE)
+import Control.Monad.Eff.Exception (EXCEPTION)
+import Control.Monad.Eff.Random (RANDOM)
 import Genetics.Browser.Units (class HCoordinate, Bp(..), MBp(..), bp, mbp)
+import Prelude
 import Test.QuickCheck (quickCheck')
+import Test.Spec (Spec, describe, it)
 
-
-checkUnitIso :: _
-checkUnitIso = do
-  log "Checking isomorphism for coordinate units"
-  log "Bp:"
-  quickCheck' 1000 (isomorphism :: Bp -> Boolean)
-  log "MBp:"
-  quickCheck' 1000 (isomorphism :: MBp -> Boolean)
-
-  where isomorphism :: ∀ c. (HCoordinate c) => c -> Boolean
-        isomorphism x = bp x  - bp (mbp x) < Bp 0.000001 &&
-                        mbp x - mbp (bp x) < MBp 0.000001
-
-main :: _
-main = do
-  checkUnitIso
+unitIsoSpec :: ∀ eff. Spec ( console :: CONSOLE
+                           , random :: RANDOM
+                           , exception :: EXCEPTION
+                           | eff
+                           ) Unit
+unitIsoSpec = do
+  let isomorphism :: ∀ c. (HCoordinate c) => c -> Boolean
+      isomorphism x = bp x  - bp (mbp x) < Bp 0.000001 &&
+                      mbp x - mbp (bp x) < MBp 0.000001
+  describe "Units and coordinates" do
+    it "Bp and MBp are isomorphic" $ do
+      liftEff $ quickCheck' 1000 (isomorphism :: Bp -> Boolean)
+      liftEff $ quickCheck' 1000 (isomorphism :: MBp -> Boolean)
