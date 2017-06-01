@@ -9,7 +9,8 @@ import Data.Either (Either(..))
 import Data.Foreign (Foreign)
 import Data.Maybe (Maybe)
 import Data.Nullable (Nullable, toNullable)
-import Genetics.Browser.Cytoscape.Types (CY, CyCollection, CyEvent, Cytoscape, Element)
+import Genetics.Browser.Cytoscape.Collection (CyCollection)
+import Genetics.Browser.Cytoscape.Types (CY, CyEvent, Cytoscape, Element)
 import Unsafe.Coerce (unsafeCoerce)
 
 

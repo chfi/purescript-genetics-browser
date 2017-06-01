@@ -1,15 +1,17 @@
 module Genetics.Browser.Cytoscape.Collection where
 
 import Data.Argonaut ((.?))
-import Data.Argonaut.Core (JObject)
+import Data.Argonaut.Core (JObject, JArray)
 import Data.Either (Either(..))
 import Data.Foldable (all)
-import Genetics.Browser.Cytoscape.Types (CyCollection, Cytoscape, Element, elementJson)
+import Genetics.Browser.Cytoscape.Types (Cytoscape, Element, elementJson)
 import Genetics.Browser.Feature.Foreign (parsePath)
 import Prelude
 
+foreign import data CyCollection :: Type
 
 foreign import emptyCollection :: Cytoscape -> CyCollection
+foreign import collectionJson :: CyCollection -> JArray
 
 foreign import union :: CyCollection
                      -> CyCollection

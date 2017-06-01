@@ -2,6 +2,9 @@
 
 exports.emptyCollection = function(cy) {
     return cy.collection();
+exports.collectionJson = function(coll) {
+    return coll.jsons();
+};
 };
 
 exports.union = function(a) {
