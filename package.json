@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "description": "Genetics network browser written in Purescript",
   "dependencies": {
-    "cytoscape": "^3.0.0"
+    "cytoscape": "^3.1.1"
   },
   "devDependencies": {
     "bower": "1.8.0",
