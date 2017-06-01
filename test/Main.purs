@@ -1,29 +1,30 @@
 module Test.Main where
 
-import Genetics.Browser.Cytoscape.Types
-import Genetics.Browser.Cytoscape.Collection
-import Prelude
-import DOM.Node.Types as DOM
-import Genetics.Browser.Cytoscape as Cy
-import Genetics.Browser.GlyphF.Canvas as Canvas
-import Genetics.Browser.GlyphF.SVG as SVG
-import Test.QuickCheck.Laws.Data as Data
-import Test.Units as Units
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (log, logShow)
 import DOM (DOM)
+import DOM.Node.Types as DOM
 import Data.Argonaut (jsonParser, toArray)
 import Data.Either (Either(..))
 import Data.Foreign (Foreign)
 import Data.Maybe (Maybe(..))
 import Data.Traversable (traverse_)
+import Genetics.Browser.Cytoscape as Cy
+import Genetics.Browser.Cytoscape.Collection
+import Genetics.Browser.Cytoscape.Types
 import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, rect, stroke)
+import Genetics.Browser.GlyphF.Canvas as Canvas
+import Genetics.Browser.GlyphF.SVG as SVG
 import Genetics.Browser.GlyphPosition (GlyphPosition)
 import Genetics.Browser.Units (Bp(..), MBp(..))
 import Graphics.Canvas (getCanvasElementById, getContext2D, translate)
+import Prelude
 import Test.QuickCheck.Laws (QC)
+import Test.QuickCheck.Laws.Data as Data
+import Test.Units as Units
 import Type.Proxy (Proxy(..))
+
 
 
 foreign import testGlyphPos :: Foreign -> String
@@ -96,6 +97,14 @@ testCytoscape = do
         logShow $ collectionJson nodes
         log $ "Union of filtered"
         logShow $ collectionJson $ edges `union` nodes
+        log $ "Are the collections equal?"
+        logShow $ eles == nodes `union` edges
+        log $ "Edges are contained in main collection"
+        logShow $ eles `contains` edges
+        log $ "Nodes are contained in main collection"
+        logShow $ eles `contains` nodes
+        log $ "Edges are not contained in nodes"
+        logShow $ not $ nodes `contains` eles
 
 
 runBrowserTest :: QC _ Unit

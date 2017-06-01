@@ -20,6 +20,12 @@ exports.size = function(coll) {
     return coll.size();
 };
 
+exports.contains = function(collA) {
+    return function(collB) {
+        return collA.contains(collB);
+    };
+};
+
 exports.emptyCollection = function(cy) {
     return require("cytoscape")().collection();
 };

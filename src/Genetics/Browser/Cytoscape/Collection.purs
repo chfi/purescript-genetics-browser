@@ -27,7 +27,10 @@ instance semigroupCyCollection :: Semigroup CyCollection where
 -- in the context of an existing cytoscape instance
 foreign import emptyCollection :: Cytoscape -> CyCollection
 
+
 foreign import size :: CyCollection -> Int
+
+foreign import contains :: CyCollection -> CyCollection -> Boolean
 
 foreign import connectedEdges :: CyCollection
                               -> CyCollection
