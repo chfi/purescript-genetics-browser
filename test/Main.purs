@@ -1,17 +1,17 @@
 module Test.Main where
 
 import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Console (log, logShow)
+import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (log)
 import DOM (DOM)
 import DOM.Node.Types as DOM
-import Data.Argonaut (jsonParser, toArray)
+import Data.Argonaut (Json, jsonParser, toArray)
 import Data.Either (Either(..))
 import Data.Foreign (Foreign)
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromJust)
 import Data.Traversable (traverse_)
 import Genetics.Browser.Cytoscape as Cy
-import Genetics.Browser.Cytoscape.Collection
-import Genetics.Browser.Cytoscape.Types
+import Genetics.Browser.Cytoscape.Collection (contains, emptyCollection, filter, isEdge, isNode, union)
 import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, rect, stroke)
 import Genetics.Browser.GlyphF.Canvas as Canvas
@@ -19,9 +19,14 @@ import Genetics.Browser.GlyphF.SVG as SVG
 import Genetics.Browser.GlyphPosition (GlyphPosition)
 import Genetics.Browser.Units (Bp(..), MBp(..))
 import Graphics.Canvas (getCanvasElementById, getContext2D, translate)
+import Partial.Unsafe (unsafePartial)
 import Prelude
 import Test.QuickCheck.Laws (QC)
 import Test.QuickCheck.Laws.Data as Data
+import Test.Spec (describe, it)
+import Test.Spec.Assertions (fail, shouldEqual, shouldNotEqual)
+import Test.Spec.Reporter.Console (consoleReporter)
+import Test.Spec.Runner (run)
 import Test.Units as Units
 import Type.Proxy (Proxy(..))
 
@@ -77,34 +82,34 @@ checkGlyphPosInstances = do
   where
     prxGlyph = Proxy :: Proxy GlyphPosition
 
+cyJson :: Array Json
+cyJson = unsafePartial $ fromJust $ case jsonParser "[{\"data\": { \"id\": \"a\" }},{\"data\": { \"id\": \"b\" }},{\"data\": { \"id\": \"ab\", \"source\": \"a\", \"target\": \"b\" }}]" of
+  Left e     -> Nothing
+  Right json -> toArray json
 
-testCytoscape :: Eff _ Unit
-testCytoscape = do
-  case jsonParser "[{\"data\": { \"id\": \"a\" }},{\"data\": { \"id\": \"b\" }},{\"data\": { \"id\": \"ab\", \"source\": \"a\", \"target\": \"b\" }}]" of
-    Left e     -> log $ "Could not parse Cytoscape elements JSON: " <> e
-    Right json -> case toArray json of
-      Nothing    -> log $ "Could not parse Cytoscape elements into Array."
-      Just ar    -> do
-        cy <- Cy.cytoscape Nothing (Just ar)
-        eles <- Cy.graphGetCollection cy
-        let edges = filter isEdge eles
-            nodes = filter isNode eles
-        log $ "All elements"
-        logShow $ collectionJson eles
-        log $ "Filtered edges"
-        logShow $ collectionJson edges
-        log $ "Filtered nodes"
-        logShow $ collectionJson nodes
-        log $ "Union of filtered"
-        logShow $ collectionJson $ edges `union` nodes
-        log $ "Are the collections equal?"
-        logShow $ eles == nodes `union` edges
-        log $ "Edges are contained in main collection"
-        logShow $ eles `contains` edges
-        log $ "Nodes are contained in main collection"
-        logShow $ eles `contains` nodes
-        log $ "Edges are not contained in nodes"
-        logShow $ not $ nodes `contains` eles
+-- specCytoscape :: ∀ eff. Eff (SpecEffects (cy :: CY, process :: PROCESS)) Unit
+specCytoscape :: Eff _ Unit
+specCytoscape = run [consoleReporter] do
+  describe "Cytoscape" do
+    it "is not empty if created with elements" $ do
+      cy <- liftEff $ Cy.cytoscape Nothing (Just cyJson)
+      eles <- liftEff $ Cy.graphGetCollection cy
+      eles `shouldNotEqual` emptyCollection cy
+
+    it "collections can be filtered and recombined" $ do
+      cy <- liftEff $ Cy.cytoscape Nothing (Just cyJson)
+      eles <- liftEff $ Cy.graphGetCollection cy
+
+      let edges = filter isEdge eles
+          nodes = filter isNode eles
+      when (not $ eles `contains` edges) (fail "Graph doesn't contain its edges")
+      when (not $ eles `contains` nodes) (fail "Graph doesn't contain its nodes")
+
+      -- union of parts is equal to sum
+      (edges <> nodes) `shouldEqual` eles
+      eles             `shouldEqual` (edges <> nodes)
+      -- union is commutative
+      (edges <> nodes) `shouldEqual` (nodes <> edges)
 
 
 runBrowserTest :: QC _ Unit
@@ -126,6 +131,6 @@ runBrowserTest = do
 main :: QC _ Unit
 main = do
   checkGlyphPosInstances
-  testCytoscape
   setOnLoad runBrowserTest
+  specCytoscape
   Units.main

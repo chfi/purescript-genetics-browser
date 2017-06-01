@@ -27,6 +27,9 @@ instance semigroupCyCollection :: Semigroup CyCollection where
 -- in the context of an existing cytoscape instance
 foreign import emptyCollection :: Cytoscape -> CyCollection
 
+instance showCyCollection :: Show CyCollection where
+  show = show <<< collectionJson
+
 
 foreign import size :: CyCollection -> Int
 
