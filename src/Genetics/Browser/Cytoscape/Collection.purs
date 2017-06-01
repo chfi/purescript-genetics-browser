@@ -10,12 +10,24 @@ import Prelude
 
 foreign import data CyCollection :: Type
 
-foreign import emptyCollection :: Cytoscape -> CyCollection
 foreign import collectionJson :: CyCollection -> JArray
+foreign import collectionsEqual :: CyCollection -> CyCollection -> Boolean
+
+instance eqCyCollection :: Eq CyCollection where
+  eq = collectionsEqual
 
 foreign import union :: CyCollection
                      -> CyCollection
                      -> CyCollection
+
+instance semigroupCyCollection :: Semigroup CyCollection where
+  append = union
+
+-- can't be made a monoid since an empty collection can only be created
+-- in the context of an existing cytoscape instance
+foreign import emptyCollection :: Cytoscape -> CyCollection
+
+foreign import size :: CyCollection -> Int
 
 foreign import connectedEdges :: CyCollection
                               -> CyCollection

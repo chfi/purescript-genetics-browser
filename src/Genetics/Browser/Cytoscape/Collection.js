@@ -1,16 +1,27 @@
 "use strict";
 
-exports.emptyCollection = function(cy) {
-    return cy.collection();
 exports.collectionJson = function(coll) {
     return coll.jsons();
 };
+
+exports.collectionsEqual = function(collA) {
+    return function(collB) {
+        return collA.same(collB);
+    };
 };
 
 exports.union = function(a) {
     return function(b) {
         return a.union(b);
     };
+};
+
+exports.size = function(coll) {
+    return coll.size();
+};
+
+exports.emptyCollection = function(cy) {
+    return require("cytoscape")().collection();
 };
 
 exports.connectedEdges = function(a) {
@@ -33,4 +44,11 @@ exports.isNode = function(elem) {
 
 exports.isEdge = function(elem) {
     return elem.isEdge();
+};
+
+
+exports.collectionsEqual = function(collA) {
+    return function(collB) {
+        return collA.same(collB);
+    };
 };
