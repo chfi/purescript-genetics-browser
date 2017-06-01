@@ -2,7 +2,9 @@ module Test.Main where
 
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
+import Control.Monad.Eff.Console (CONSOLE, log)
+import Control.Monad.Eff.Exception (EXCEPTION)
+import Control.Monad.Eff.Random (RANDOM)
 import DOM (DOM)
 import DOM.Node.Types as DOM
 import Data.Argonaut (Json, jsonParser, toArray)
@@ -11,19 +13,20 @@ import Data.Foreign (Foreign)
 import Data.Maybe (Maybe(..), fromJust)
 import Data.Traversable (traverse_)
 import Genetics.Browser.Cytoscape as Cy
-import Genetics.Browser.Cytoscape.Collection (contains, emptyCollection, filter, isEdge, isNode, union)
+import Genetics.Browser.Cytoscape.Collection (contains, emptyCollection, filter, isEdge, isNode)
+import Genetics.Browser.Cytoscape.Types (CY)
 import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, rect, stroke)
 import Genetics.Browser.GlyphF.Canvas as Canvas
 import Genetics.Browser.GlyphF.SVG as SVG
 import Genetics.Browser.GlyphPosition (GlyphPosition)
 import Genetics.Browser.Units (Bp(..), MBp(..))
-import Graphics.Canvas (getCanvasElementById, getContext2D, translate)
+import Graphics.Canvas (CANVAS, getCanvasElementById, getContext2D, translate)
 import Partial.Unsafe (unsafePartial)
 import Prelude
 import Test.QuickCheck.Laws (QC)
 import Test.QuickCheck.Laws.Data as Data
-import Test.Spec (describe, it)
+import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual, shouldNotEqual)
 import Test.Spec.Reporter.Console (consoleReporter)
 import Test.Spec.Runner (run)
@@ -75,21 +78,26 @@ glyphify y (Feature _ xl xr _) = do
   fill "#555555"
   rect { x: xl, y: y } { x: xr, y: y + 40.0 }
 
-checkGlyphPosInstances :: ∀ e. QC e Unit
+
+checkGlyphPosInstances :: ∀ eff. Spec ( console :: CONSOLE
+                                      , random :: RANDOM
+                                      , exception :: EXCEPTION | eff) Unit
 checkGlyphPosInstances = do
-  Data.checkSemigroup prxGlyph
-  Data.checkMonoid prxGlyph
-  where
-    prxGlyph = Proxy :: Proxy GlyphPosition
+  let prxGlyph = Proxy :: Proxy GlyphPosition
+  describe "GlyphPosition instances" do
+    it "is a Semigroup" $ do
+      liftEff $ Data.checkSemigroup prxGlyph
+    it "is a Monoid" $ do
+      liftEff $ Data.checkMonoid prxGlyph
+
 
 cyJson :: Array Json
 cyJson = unsafePartial $ fromJust $ case jsonParser "[{\"data\": { \"id\": \"a\" }},{\"data\": { \"id\": \"b\" }},{\"data\": { \"id\": \"ab\", \"source\": \"a\", \"target\": \"b\" }}]" of
   Left e     -> Nothing
   Right json -> toArray json
 
--- specCytoscape :: ∀ eff. Eff (SpecEffects (cy :: CY, process :: PROCESS)) Unit
-specCytoscape :: Eff _ Unit
-specCytoscape = run [consoleReporter] do
+specCytoscape :: ∀ eff. Spec (cy :: CY | eff) Unit
+specCytoscape = do
   describe "Cytoscape" do
     it "is not empty if created with elements" $ do
       cy <- liftEff $ Cy.cytoscape Nothing (Just cyJson)
@@ -112,7 +120,10 @@ specCytoscape = run [consoleReporter] do
       (edges <> nodes) `shouldEqual` (nodes <> edges)
 
 
-runBrowserTest :: QC _ Unit
+runBrowserTest :: ∀ eff. QC ( canvas :: CANVAS
+                            , dom :: DOM
+                            | eff
+                            ) Unit
 runBrowserTest = do
   canvas <- getCanvasElementById "canvas"
   case canvas of
@@ -125,12 +136,12 @@ runBrowserTest = do
 
   log "rendering glyph to svg"
   traverse_ (\g -> SVG.renderGlyph g >>= addElementToDiv "svgDiv") [glyph1, glyph2, glyph3]
-
   pure unit
 
 main :: QC _ Unit
 main = do
-  checkGlyphPosInstances
+  run [consoleReporter] do
+    specCytoscape
+    checkGlyphPosInstances
   setOnLoad runBrowserTest
-  specCytoscape
   Units.main
