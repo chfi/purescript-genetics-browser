@@ -1,11 +1,21 @@
 module Genetics.Browser.Events
        where
 
-import Data.Argonaut ((.?))
-import Data.Either (Either)
-import Genetics.Browser.Events.Types (Event(..), EventLocation(..), EventRange(..), EventScore(..))
-import Genetics.Browser.Units (Bp(..))
 import Prelude
+import Data.Argonaut (Json, _Number, _Object, _String, (.?))
+import Data.Array (foldMap)
+import Data.Either (Either)
+import Data.Foreign.Class (class Decode, class Encode)
+import Data.Foreign.Generic (defaultOptions, genericDecode, genericEncode)
+import Data.Generic.Rep (class Generic)
+import Data.Lens (re, (^?))
+import Data.Lens.Index (ix)
+import Data.Lens.Types (Iso')
+import Data.Maybe (Maybe)
+import Data.Maybe.First (First(..))
+import Data.Newtype (unwrap)
+import Genetics.Browser.Events.Types (Event(..))
+import Genetics.Browser.Units (Bp(..), Chr(..), _Bp, _Chr)
 
 -- An Event comes from some track, and carries some information.
 -- depending on the track (?), the information may differ.
@@ -25,6 +35,8 @@ and remain type safe like that.
 
 -- so, source track and event types are orthogonal.
 
+newtype JsonEvent = JsonEvent Json
+
 evLocKeys ::
   { locKeys :: Array String
   , chrKeys :: Array String
@@ -35,20 +47,49 @@ evLocKeys = { locKeys: ["loc", "locLrs"]
             , posKeys: ["pos"]
             }
 
-eventLocation :: Event -> Either String EventLocation
-eventLocation (Event { eventData }) = do
-  chr <- eventData .? "chr"
-  pos <- Bp <$> eventData .? "pos"
+newtype EventLocation = EventLocation { chr :: Chr
+                                      , pos :: Bp
+                                      }
+
+newtype EventRange = EventRange { chr :: Chr
+                                , minPos :: Bp
+                                , maxPos :: Bp
+                                }
+newtype EventScore = EventScore Number
+
+
+parseLocation :: Event -> Maybe EventLocation
+parseLocation (Event ev) = do
+  chr <- ev ^? ix "chr" <<< _String <#> Chr
+  pos <- ev ^? ix "pos" <<< _Number <#> Bp
   pure $ EventLocation { chr, pos }
 
-eventRange :: Event -> Either String EventRange
-eventRange (Event { eventData }) = do
-  chr <- eventData .? "chr"
-  minPos <- Bp <$> eventData .? "minPos"
-  maxPos <- Bp <$> eventData .? "maxPos"
+parseRange :: Event -> Maybe EventRange
+parseRange (Event ev) = do
+  chr <-    ev ^? ix "chr" <<< _String <#> Chr
+  minPos <- ev ^? ix "minPos" <<< _Number <#> Bp
+  maxPos <- ev ^? ix "maxPos" <<< _Number <#> Bp
   pure $ EventRange { chr, minPos, maxPos }
 
-eventScore :: Event -> Either String EventScore
-eventScore (Event { eventData }) = do
-  score <- eventData .? "score"
-  pure $ EventScore { score }
+-- parseScore :: Event -> Maybe EventScore
+-- parseScore (Event ev) = EventScore <$> ev ^? ix "score" <<< _Number
+  -- score <- ev ^? ix "score" <<< _Number
+  -- pure $ EventScore score
+
+-- eventLocation :: Event -> Either String EventLocation
+-- eventLocation (Event { eventData }) = do
+--   chr <- eventData .? "chr"
+--   pos <- Bp <$> eventData .? "pos"
+--   pure $ EventLocation { chr, pos }
+
+-- eventRange :: Event -> Either String EventRange
+-- eventRange (Event { eventData }) = do
+--   chr <- eventData .? "chr"
+--   minPos <- Bp <$> eventData .? "minPos"
+--   maxPos <- Bp <$> eventData .? "maxPos"
+--   pure $ EventRange { chr, minPos, maxPos }
+
+-- eventScore :: Event -> Either String EventScore
+-- eventScore (Event { eventData }) = do
+--   score <- eventData .? "score"
+--   pure $ EventScore { score }

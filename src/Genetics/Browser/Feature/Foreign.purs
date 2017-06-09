@@ -1,15 +1,25 @@
 module Genetics.Browser.Feature.Foreign where
 
-import Data.Argonaut (class DecodeJson, encodeJson, toObject, (.?), (:=))
+import Prelude
+import Data.Argonaut (class DecodeJson, Json, _Object, _String, encodeJson, fromNumber, fromString, jsonParser, toNumber, toObject, (.?), (:=))
 import Data.Argonaut.Core (JObject)
 import Data.Either (Either(..))
-import Data.Foldable (class Foldable, foldMap, foldl)
-import Data.Maybe (Maybe(..))
+import Data.Foldable (class Foldable, foldMap, foldl, foldr)
+import Data.Lens (class Wander, folded, preview, traversed, (^..))
+import Data.Lens.At (at)
+import Data.Lens.Index (ix)
+import Data.Lens.Types (Traversal', Prism')
+import Data.List (List)
+import Data.Maybe (Maybe(..), fromJust)
 import Data.Maybe.First (First(..))
 import Data.Newtype (unwrap)
+import Data.Profunctor.Choice (class Choice)
+import Data.StrMap (fromFoldable, keys, singleton)
+import Data.Traversable (class Traversable, traverse)
+import Data.Tuple (Tuple(..))
 import Genetics.Browser.Events.Types (Event(..))
 import Genetics.Browser.Units (Bp(Bp))
-import Prelude
+import Partial.Unsafe (unsafePartial)
 
 type LocKeys = { locKeys :: Array String
                , chrKeys :: Array String
@@ -25,11 +35,44 @@ keysDecode :: forall f a.
          => JObject
          -> f String
          -> Either String a
+-- keysDecode :: Functor f => JObject -> f String -> Either String
+
 keysDecode obj keys = case foldMap (\key -> First $ hush $ obj .? key) keys of
   First Nothing  -> Left $ "Object contained no keys from " <> "todo add error"
   First (Just v) -> Right v
   where hush (Left _)  = Nothing
         hush (Right v) = Just v
+
+
+-- pick out a key from an object, Maybe.
+-- makes it nicer to compose
+objIx :: ∀ p.
+        Choice p
+     => Wander p
+     => String -> p Json Json -> p Json Json
+objIx k = _Object <<< ix k
+
+
+-- Deep parsing of Json objects given a foldable of keys
+deepObjIx :: ∀ f p.
+             Foldable f
+          => Choice p
+          => Wander p
+          => f String
+          -> p Json Json
+          -> p Json Json
+deepObjIx = foldr ((<<<) <<< objIx) id
+
+-- Just for testing
+exEl :: Json
+exEl = unsafePartial $ fromJust $ case jsonParser
+   "{\"data\": { \"id\": \"a\", \"lrsLoc\": {\"chr\": \"Chr11\" } }}" of
+  Left e     -> Nothing
+  Right json -> Just json
+
+-- Just an example
+lrsLocChr = deepObjIx ["data", "lrsLoc", "chr"] <<< _String
+
 
 parseFeatureLocation :: LocKeys -> JObject -> Either String { chr :: String, pos :: Bp }
 parseFeatureLocation { locKeys, chrKeys, posKeys } f = do
@@ -47,7 +90,7 @@ parseFeatureLocation' ks f = do
                         ]
   case toObject json of
     Nothing -> Left "Error when encoding Location Event"
-    Just obj -> Right $ Event { eventData: obj }
+    Just obj -> Right $ Event obj
 
 
 type RanKeys = { chrKeys :: Array String
@@ -74,7 +117,7 @@ parseFeatureRange' ks f = do
                         ]
   case toObject json of
     Nothing -> Left "Error when encoding Range Event"
-    Just obj -> Right $ Event { eventData: obj }
+    Just obj -> Right $ Event obj
 
 
 type ScoreKeys = { scoreKeys :: Array String }
@@ -86,7 +129,7 @@ parseFeatureScore { scoreKeys } f = do
                         ]
   case toObject json of
     Nothing -> Left "Error when encoding Score Event"
-    Just obj -> Right $ Event { eventData: obj }
+    Just obj -> Right $ Event obj
 
 
 parsePath :: ∀ f. Foldable f => JObject -> f String -> Either String JObject

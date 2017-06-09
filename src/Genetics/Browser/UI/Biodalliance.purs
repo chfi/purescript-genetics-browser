@@ -1,24 +1,32 @@
 module Genetics.Browser.UI.Biodalliance
        where
 
+import Prelude
+import Genetics.Browser.Biodalliance as Biodalliance
+import Genetics.Browser.Feature.Foreign as FF
+import Halogen as H
+import Halogen.HTML as HH
+import Halogen.HTML.Properties as HP
 import Control.Monad.Aff (Aff)
 import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (CONSOLE, log)
 import DOM.HTML.Types (HTMLElement)
+import Data.Argonaut (Json, _Number, _String)
 import Data.Argonaut.Core (JObject)
 import Data.Either (Either(..))
+import Data.Lens (re, (^?))
+import Data.Lens.Index (ix)
 import Data.Maybe (Maybe(..))
-import Genetics.Browser.Biodalliance as Biodalliance
-import Genetics.Browser.Events (eventLocation, eventRange, eventScore)
-import Genetics.Browser.Events.Types (Event, EventLocation(..), EventRange(..), EventScore(..))
-import Genetics.Browser.Feature.Foreign as FF
+import Data.StrMap (fromFoldable)
+import Data.Traversable (sequence, traverse)
+import Data.Tuple (Tuple(..))
+import Genetics.Browser.Events (EventLocation(..), EventRange(..), parseLocation, parseRange)
+import Genetics.Browser.Events.Types (Event(..))
 import Genetics.Browser.Types (BD, Biodalliance)
-import Genetics.Browser.Units (Bp)
-import Halogen as H
-import Halogen.HTML as HH
-import Halogen.HTML.Properties as HP
-import Prelude
+import Genetics.Browser.Units (Bp, Chr(..), MBp(..), bp, mbp)
+import Global.Unsafe (unsafeStringify)
 
 
 type State = { bd :: Maybe Biodalliance
@@ -26,7 +34,7 @@ type State = { bd :: Maybe Biodalliance
 
 data Query a
   = Scroll Bp a
-  | Jump String Bp Bp a
+  | Jump Chr Bp Bp a
   | Initialize (forall eff. HTMLElement -> Eff eff Biodalliance) a
   | InitializeCallback (H.SubscribeStatus -> a)
   | RaiseEvent JObject (H.SubscribeStatus -> a)
@@ -36,7 +44,7 @@ data Message
   = Initialized
   | SendEvent Event
 
-type Effects eff = (avar :: AVAR, bd :: BD | eff)
+type Effects eff = (avar :: AVAR, bd :: BD, console :: CONSOLE | eff)
 
 data Slot = Slot
 derive instance eqBDSlot :: Eq Slot
@@ -100,13 +108,14 @@ component =
       pure $ reply H.Listening
 
 
-    RaiseEvent ev reply -> do
-      case FF.parseFeatureRange' { chrKeys: ["chr"]
-                                 , minKeys: ["min"]
-                                 , maxKeys: ["max"]
-                                 } ev of
-        Left _ -> pure unit
-        Right r -> H.raise $ SendEvent r
+    RaiseEvent ft reply -> do
+      let chr = ft ^? ix "chr" <<< _String <<< re _String
+          minPos = ft ^? ix "min" <<< _Number <<< re _Number
+          maxPos = ft ^? ix "max" <<< _Number <<< re _Number
+          obj = traverse sequence [Tuple "chr" chr, Tuple "minPos" minPos, Tuple "maxPos" maxPos]
+      case obj of
+        Nothing -> liftEff $ log "Error when parsing chr, min, max"
+        Just o  -> H.raise $ SendEvent $ Event $ fromFoldable o
 
       pure $ reply H.Listening
 
@@ -117,19 +126,22 @@ component =
         Nothing -> pure next
         Just bd -> do
 
-          case eventLocation ev of
-            Left err -> pure unit
-            Right (EventLocation l) -> do
-              liftEff $ Biodalliance.setLocation bd l.chr l.pos l.pos
+          case parseLocation ev of
+            Nothing  -> liftEff $ log "couldn't parse location from event"
+            Just (EventLocation loc) -> do
+              liftEff $ log $ unsafeStringify loc
+              let minPos = loc.pos - bp (MBp 1.5)
+                  maxPos = loc.pos + bp (MBp 1.5)
+              liftEff $ Biodalliance.setLocation bd loc.chr (mbp minPos) (mbp maxPos)
 
-          case eventRange ev of
-            Left err -> pure unit
-            Right (EventRange r) -> do
+          case parseRange ev of
+            Nothing  -> liftEff $ log "couldn't parse range from event"
+            Just (EventRange r) -> do
               liftEff $ Biodalliance.setLocation bd r.chr r.minPos r.maxPos
 
-          case eventScore ev of
-            Left err -> pure unit
-            Right (EventScore s) -> pure unit
+          -- case eventScore ev of
+          --   Left err -> pure unit
+          --   Right (EventScore s) -> pure unit
 
 
           pure next

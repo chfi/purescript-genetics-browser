@@ -1,6 +1,16 @@
 module Genetics.Browser.UI.Container
        where
 
+import Prelude
+import Genetics.Browser.Renderer.GWAS as GWAS
+import Genetics.Browser.Renderer.Lineplot as QTL
+import Genetics.Browser.UI.Biodalliance as UIBD
+import Genetics.Browser.UI.Cytoscape as UICy
+import Halogen as H
+import Halogen.Aff as HA
+import Halogen.Component.ChildPath as CP
+import Halogen.HTML as HH
+import Halogen.HTML.Events as HE
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
@@ -12,20 +22,11 @@ import Data.Functor.Coproduct.Nested (type (<\/>))
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap)
 import Genetics.Browser.Events.Types (Event)
-import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
-import Genetics.Browser.Renderer.Lineplot as QTL
 import Genetics.Browser.Types (Biodalliance, Renderer)
-import Genetics.Browser.UI.Biodalliance as UIBD
-import Genetics.Browser.UI.Cytoscape as UICy
-import Genetics.Browser.Units (Bp(..))
-import Halogen as H
-import Halogen.Aff as HA
-import Halogen.Component.ChildPath as CP
-import Halogen.HTML as HH
-import Halogen.HTML.Events as HE
+import Genetics.Browser.Units (Bp(..), Chr(..))
+import Global.Unsafe (unsafeStringify)
 import Halogen.VDom.Driver (runUI)
-import Prelude
 
 
 qtlGlyphify :: LinePlotConfig -> Renderer
@@ -42,7 +43,7 @@ data Query a
   = Nop a
   | CreateBD (forall eff. HTMLElement -> Eff eff Biodalliance) a
   | BDScroll Bp a
-  | BDJump String Bp Bp a
+  | BDJump Chr Bp Bp a
   | CreateCy String a
   | ResetCy a
   | DistEvent Track Event a
@@ -66,17 +67,16 @@ component =
   initialState :: State
   initialState = unit
 
-
-            -- #svgHolder {
-            --     width: 100%,
-            --     float: left;
-            -- }
-            -- #cyHolder {
-            --     width: 100%;
-            --     height: 300px;
-            --     float: left;
-            --     display: block;
-            -- }
+  -- #svgHolder {
+  --     width: 100%,
+  --     float: left;
+  -- }
+  -- #cyHolder {
+  --     width: 100%;
+  --     height: 300px;
+  --     float: left;
+  --     display: block;
+  -- }
 
   render :: State -> H.ParentHTML Query ChildQuery ChildSlot (Aff (Effects eff))
   render state =
@@ -121,6 +121,7 @@ component =
   eval = case _ of
     Nop next -> do
       pure next
+
     CreateBD bd next -> do
       _ <- H.query' CP.cp1 UIBD.Slot $ H.action (UIBD.Initialize bd)
       pure next
@@ -130,6 +131,7 @@ component =
     BDJump chr xl xr next -> do
       _ <- H.query' CP.cp1 UIBD.Slot $ H.action (UIBD.Jump chr xl xr)
       pure next
+
     CreateCy div next -> do
       _ <- H.query' CP.cp2 UICy.Slot $ H.action (UICy.Initialize div)
       pure next
@@ -138,6 +140,8 @@ component =
       pure next
 
     DistEvent from ev next -> do
+      liftEff $ log "container is distributing event:"
+      liftEff $ log $ unsafeStringify ev
 
       _ <- case from of
         BDTrack ->
