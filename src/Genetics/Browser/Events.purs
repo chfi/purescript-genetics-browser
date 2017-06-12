@@ -2,20 +2,24 @@ module Genetics.Browser.Events
        where
 
 import Prelude
+import Control.Monad.Except (runExcept, runExceptT)
 import Data.Argonaut (Json, _Number, _Object, _String, (.?))
 import Data.Array (foldMap)
-import Data.Either (Either)
-import Data.Foreign.Class (class Decode, class Encode)
+import Data.Either (Either, fromRight)
+import Data.Exists (mkExists)
+import Data.Foldable (class Foldable)
+import Data.Foreign (Foreign)
+import Data.Foreign.Class (class Decode, class Encode, decode, encode)
 import Data.Foreign.Generic (defaultOptions, genericDecode, genericEncode)
 import Data.Generic.Rep (class Generic)
-import Data.Lens (re, (^?))
+import Data.Lens (_Right, iso, prism', re, (^?))
 import Data.Lens.Index (ix)
-import Data.Lens.Types (Iso')
+import Data.Lens.Types (Iso', Prism')
 import Data.Maybe (Maybe)
 import Data.Maybe.First (First(..))
-import Data.Newtype (unwrap)
-import Genetics.Browser.Events.Types (Event(..))
+import Data.Newtype (class Newtype, unwrap, wrap)
 import Genetics.Browser.Units (Bp(..), Chr(..), _Bp, _Chr)
+import Partial.Unsafe (unsafePartial)
 
 -- An Event comes from some track, and carries some information.
 -- depending on the track (?), the information may differ.
@@ -35,61 +39,72 @@ and remain type safe like that.
 
 -- so, source track and event types are orthogonal.
 
-newtype JsonEvent = JsonEvent Json
+newtype JsonEvent = JsonEvent Foreign
 
-evLocKeys ::
-  { locKeys :: Array String
-  , chrKeys :: Array String
-  , posKeys :: Array String
-  }
-evLocKeys = { locKeys: ["loc", "locLrs"]
-            , chrKeys: ["chr"]
-            , posKeys: ["pos"]
-            }
+derive instance newtypeJsonEvent :: Newtype JsonEvent _
+
 
 newtype EventLocation = EventLocation { chr :: Chr
                                       , pos :: Bp
                                       }
 
+derive instance genericEventLocation :: Generic EventLocation _
+
+instance encodeEventLocation :: Encode EventLocation where
+  encode = genericEncode defaultOptions
+
+instance decodeEventLocation :: Decode EventLocation where
+  decode = genericDecode defaultOptions
+
+
+parseEventLocation :: ∀ f r.
+                      Foldable f
+                   => Functor f
+                   => { posKeys :: f String, chrKeys :: f String | r }
+                   -> Json
+                   -> Maybe EventLocation
+parseEventLocation {chrKeys, posKeys} obj = do
+    chr <- unwrap $ foldMap First $ (\k -> obj ^?
+                                           _Object <<< ix k <<<
+                                           _String <<< re _Chr) <$> chrKeys
+    pos <- unwrap $ foldMap First $ (\k -> obj ^?
+                                           _Object <<< ix k <<<
+                                           _Number <<< re _Bp) <$> posKeys
+    pure $ EventLocation { chr, pos }
+
+
+
 newtype EventRange = EventRange { chr :: Chr
                                 , minPos :: Bp
                                 , maxPos :: Bp
                                 }
+
+derive instance genericEventRange :: Generic EventRange _
+
+instance encodeEventRange :: Encode EventRange where
+  encode = genericEncode defaultOptions
+
+instance decodeEventRange :: Decode EventRange where
+  decode = genericDecode defaultOptions
+
+
+parseEventRange :: ∀ f r.
+                      Foldable f
+                   => Functor f
+                   => { chrKeys :: f String, minPosKeys :: f String , maxPosKeys :: f String | r }
+                   -> Json
+                   -> Maybe EventRange
+parseEventRange {chrKeys, minPosKeys, maxPosKeys} obj = do
+    chr <- unwrap $ foldMap First $ (\k -> obj ^?
+                                           _Object <<< ix k <<<
+                                           _String <<< re _Chr) <$> chrKeys
+    minPos <- unwrap $ foldMap First $ (\k -> obj ^?
+                                           _Object <<< ix k <<<
+                                           _Number <<< re _Bp) <$> minPosKeys
+    maxPos <- unwrap $ foldMap First $ (\k -> obj ^?
+                                           _Object <<< ix k <<<
+                                           _Number <<< re _Bp) <$> maxPosKeys
+    pure $ EventRange { chr, minPos, maxPos }
+
+
 newtype EventScore = EventScore Number
-
-
-parseLocation :: Event -> Maybe EventLocation
-parseLocation (Event ev) = do
-  chr <- ev ^? ix "chr" <<< _String <#> Chr
-  pos <- ev ^? ix "pos" <<< _Number <#> Bp
-  pure $ EventLocation { chr, pos }
-
-parseRange :: Event -> Maybe EventRange
-parseRange (Event ev) = do
-  chr <-    ev ^? ix "chr" <<< _String <#> Chr
-  minPos <- ev ^? ix "minPos" <<< _Number <#> Bp
-  maxPos <- ev ^? ix "maxPos" <<< _Number <#> Bp
-  pure $ EventRange { chr, minPos, maxPos }
-
--- parseScore :: Event -> Maybe EventScore
--- parseScore (Event ev) = EventScore <$> ev ^? ix "score" <<< _Number
-  -- score <- ev ^? ix "score" <<< _Number
-  -- pure $ EventScore score
-
--- eventLocation :: Event -> Either String EventLocation
--- eventLocation (Event { eventData }) = do
---   chr <- eventData .? "chr"
---   pos <- Bp <$> eventData .? "pos"
---   pure $ EventLocation { chr, pos }
-
--- eventRange :: Event -> Either String EventRange
--- eventRange (Event { eventData }) = do
---   chr <- eventData .? "chr"
---   minPos <- Bp <$> eventData .? "minPos"
---   maxPos <- Bp <$> eventData .? "maxPos"
---   pure $ EventRange { chr, minPos, maxPos }
-
--- eventScore :: Event -> Either String EventScore
--- eventScore (Event { eventData }) = do
---   score <- eventData .? "score"
---   pure $ EventScore { score }

@@ -25,7 +25,7 @@ exports.setLocationImpl = function(bd) {
         return function(xl) {
             return function(xr) {
                 return function() {
-                    bd.setLocation(chr.slice(3), xl, xr);
+                    bd.setLocation(chr, xl, xr);
                 };
             };
         };
