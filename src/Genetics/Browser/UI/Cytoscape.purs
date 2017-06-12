@@ -1,50 +1,42 @@
 module Genetics.Browser.UI.Cytoscape
        where
 
+import Prelude
+import Genetics.Browser.Cytoscape as Cytoscape
+import Genetics.Browser.Feature.Foreign as FF
+import Halogen as H
+import Halogen.HTML as HH
+import Halogen.HTML.Properties as HP
+import Network.HTTP.Affjax as Affjax
 import Control.Monad.Aff (Aff)
 import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (EXCEPTION)
+import Control.Monad.Except (runExcept)
+import Data.Argonaut (Json, _JsonNumber, _JsonString, _Number, _Object, _String)
 import Data.Argonaut.Core (JObject)
 import Data.Either (Either(..))
-import Data.Maybe (Maybe(..))
+import Data.Exists (Exists)
+import Data.Foreign (F)
+import Data.Foreign.Class (decode, encode)
+import Data.Lens (re, (^?))
+import Data.Lens.Index (ix)
+import Data.Maybe (Maybe(..), isJust)
+import Data.Newtype (unwrap)
+import Data.StrMap (fromFoldable)
+import Data.Traversable (sequence, traverse)
+import Data.Tuple (Tuple(..))
 import Genetics.Browser.Cytoscape (ParsedEvent(..), runLayout, resizeContainer)
-import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Cytoscape.Collection (CyCollection, connectedNodes, filter, isEdge, union)
-import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, elementJson)
-import Genetics.Browser.Events (eventLocation)
-import Genetics.Browser.Events.Types (Event, EventLocation(EventLocation))
-import Genetics.Browser.Feature.Foreign (parsePath)
-import Genetics.Browser.Feature.Foreign as FF
-import Halogen as H
-import Halogen.HTML as HH
-import Halogen.HTML.Properties as HP
+import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject, elementJson)
+import Genetics.Browser.Events (EventLocation(..), EventRange(..), JsonEvent(..))
+import Genetics.Browser.Feature.Foreign (deepObjIx, parsePath)
+import Genetics.Browser.Units (_Bp, _BpMBp, _Chr, _MBp, bp)
+import Global.Unsafe (unsafeStringify)
 import Network.HTTP.Affjax (AJAX)
-import Network.HTTP.Affjax as Affjax
-import Prelude
 import Unsafe.Coerce (unsafeCoerce)
-
-parseEvent :: JObject -> Either String Event
-parseEvent = FF.parseFeatureLocation' { locKeys: ["lrsLoc"]
-                                      , chrKeys: ["chr"]
-                                      , posKeys: ["pos"]
-                                      }
-
-{-
-Create callback, subscriber event source like before (like already exists?)
-In the respective query, parse the event? Or do that before.
-  Cleaner if done in the query, but might be more difficult to generalize,
-  since a generic track won't be able to use them.
-    Doesn't actually matter now! these tracks are different types.
-
-So, send ParsedEvent to Query, then parse to Event... These names are awful
-Raise SendEvent msg with Event
-In Main, send to other track, as a Query (RecvEvent).
-In BD, try to parse received event and act accordingly.
--}
-
 
 
 -- TODO: elemsUrl should be safer. Maybe it should cache too, idk
@@ -55,12 +47,12 @@ type State = { cy :: Maybe Cytoscape
 data Query a
   = Initialize String a
   | Reset a
-  | Filter (JObject -> Boolean) a
-  | RecvEvent Event a
+  | Filter (Element -> Boolean) a
+  | RecvEvent JsonEvent a
   | RaiseEvent Cytoscape.ParsedEvent (H.SubscribeStatus -> a)
 
 data Output
-  = SendEvent Event
+  = SendEvent JsonEvent
 
 type Effects eff = ( cy :: CY
                    , ajax :: AJAX
@@ -94,13 +86,18 @@ component =
                           -- , HP.prop
                           ] []
 
-  getElements :: forall eff'. String -> Aff (ajax :: AJAX | eff') CyCollection
+
+  -- for some reason having an explicit forall makes the rest of the file not get parsed by purs-ide...
+  -- getElements :: ∀ eff'. String -> Aff (ajax :: AJAX | eff') CyCollection
+  getElements :: _
   getElements url = Affjax.get url <#> (\r -> Cytoscape.unsafeParseCollection r.response)
 
-  getAndSetElements :: forall eff'. String -> Cytoscape -> Aff (ajax :: AJAX, cy :: CY | eff') Unit
+  -- getAndSetElements :: ∀ eff'. String -> Cytoscape -> Aff (ajax :: AJAX, cy :: CY | eff') Unit
+  getAndSetElements :: _
   getAndSetElements url cy = do
     eles <- getElements url
     liftEff $ Cytoscape.graphAddCollection cy eles
+
 
   eval :: Query ~> H.ComponentDSL State Query Output (Aff (Effects eff))
   eval = case _ of
@@ -133,16 +130,19 @@ component =
               pure unit
             url -> do
               -- remove all elements
-              liftEff $ Cytoscape.graphRemoveAll cy
-              -- refetch all elements
+              liftEff $ do
+                Cytoscape.graphRemoveAll cy
+                log $ "resetting with stored URL " <> url
+
+              -- refetch & set all elements
               liftAff $ getAndSetElements url cy
 
-              liftEff $ log $ "resetting with stored URL " <> url
               pure unit
 
           liftEff $ do
             runLayout cy Cytoscape.circle
             resizeContainer cy
+
       pure next
 
 
@@ -151,9 +151,10 @@ component =
         Nothing -> pure unit
         Just cy -> do
           graphColl <- liftEff $ Cytoscape.graphGetCollection cy
-          let eles = filter (pred <<< elementJson) graphColl
+          let eles = filter pred graphColl
           _ <- liftEff $ Cytoscape.graphRemoveCollection eles
           pure unit
+
       pure next
 
 
@@ -161,43 +162,47 @@ component =
 
       case pev.target of
           Left el -> do
-            let d = elementJson el
-            case parseEvent d of
-              Left err  -> pure unit
-              Right loc ->
-                H.raise $ SendEvent loc
+            case cyParseEventLocation el of
+              Nothing -> liftEff $ log "Error when parsing chr, pos of cytoscape event"
+              Just obj' -> H.raise $ SendEvent $ JsonEvent $ encode obj'
 
           Right cy -> pure unit
 
       pure $ reply H.Listening
 
 
-    RecvEvent ev next -> do
+    RecvEvent (JsonEvent ev) next -> do
 
       H.gets _.cy >>= case _ of
         Nothing -> pure next
         Just cy -> do
+          liftEff $ log "received event"
+          liftEff $ log $ unsafeStringify ev
 
-          case eventLocation ev of
-            Left err -> pure unit
-            Right (EventLocation l) -> do
-              let pred el = case parsePath el ["lrsLoc", "chr"] of
-                    Left _ -> false
-                    Right chr -> unsafeCoerce chr == l.chr
+          case runExcept $ decode ev :: F EventRange of
+            Left _  -> liftEff $ log "couldn't parse range from event"
+            Right (EventRange ran) -> do
+              liftEff $ log $ unsafeStringify ran
+              let pred el = case cyParseEventLocation el of
+                    Nothing -> false
+                    Just (EventLocation loc) -> loc.chr /= ran.chr
 
               graphColl <- liftEff $ Cytoscape.graphGetCollection cy
-              let edges = filter ((&&) <$> isEdge <*> pred <<< elementJson) graphColl
-                  nodes = connectedNodes edges
-
-              _ <- liftEff $ Cytoscape.graphRemoveCollection $ edges `union` nodes
+              let eles = filter pred graphColl
+              _ <- liftEff $ Cytoscape.graphRemoveCollection eles
               pure unit
 
-          -- case eventRange ev of
-          --   Left err -> pure unit
-          --   Right (EventRange r) -> ?filterRange
-
-          -- case eventScore ev of
-          --   Left err -> pure unit
-          --   Right (EventScore s) -> ?filterScore
 
           pure next
+
+
+-- TODO this should be less ad-hoc, somehow. future probs~~~
+cyParseEventLocation :: Element -> Maybe EventLocation
+cyParseEventLocation el = case (elementJson el) ^? FF.deepObjIx ["data", "lrsLoc"] of
+  Nothing  -> Nothing
+  Just loc -> do
+    chr <- loc ^? _Object <<< ix "chr" <<< _String <<< re _Chr
+           -- ridiculous.
+    pos <- loc ^? _Object <<< ix "pos" <<< _Number
+                  <<< re _MBp <<< re _BpMBp
+    pure $ EventLocation { chr, pos }

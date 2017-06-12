@@ -1,16 +1,6 @@
 module Genetics.Browser.UI.Container
        where
 
-import Prelude
-import Genetics.Browser.Renderer.GWAS as GWAS
-import Genetics.Browser.Renderer.Lineplot as QTL
-import Genetics.Browser.UI.Biodalliance as UIBD
-import Genetics.Browser.UI.Cytoscape as UICy
-import Halogen as H
-import Halogen.Aff as HA
-import Halogen.Component.ChildPath as CP
-import Halogen.HTML as HH
-import Halogen.HTML.Events as HE
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
@@ -21,12 +11,22 @@ import Data.Either.Nested (Either2)
 import Data.Functor.Coproduct.Nested (type (<\/>))
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap)
-import Genetics.Browser.Events.Types (Event)
+import Genetics.Browser.Events (JsonEvent(..))
+import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
+import Genetics.Browser.Renderer.Lineplot as QTL
 import Genetics.Browser.Types (Biodalliance, Renderer)
+import Genetics.Browser.UI.Biodalliance as UIBD
+import Genetics.Browser.UI.Cytoscape as UICy
 import Genetics.Browser.Units (Bp(..), Chr(..))
 import Global.Unsafe (unsafeStringify)
+import Halogen as H
+import Halogen.Aff as HA
+import Halogen.Component.ChildPath as CP
+import Halogen.HTML as HH
+import Halogen.HTML.Events as HE
 import Halogen.VDom.Driver (runUI)
+import Prelude
 
 
 qtlGlyphify :: LinePlotConfig -> Renderer
@@ -46,7 +46,7 @@ data Query a
   | BDJump Chr Bp Bp a
   | CreateCy String a
   | ResetCy a
-  | DistEvent Track Event a
+  | DistEvent Track JsonEvent a
 
 type ChildSlot = Either2 UIBD.Slot UICy.Slot
 
