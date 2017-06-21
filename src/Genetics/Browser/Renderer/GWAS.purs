@@ -2,6 +2,8 @@ module Genetics.Browser.Renderer.GWAS
        ( render
        ) where
 
+import Prelude
+import Math as Math
 import Control.Monad.Except (runExcept)
 import Data.Either (Either(..))
 import Data.Foldable (foldr)
@@ -13,11 +15,9 @@ import Data.Traversable (sequence)
 import Genetics.Browser.Feature (Feature(Feature), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
 import Genetics.Browser.GlyphF.Interpret (writeGlyph)
-import Genetics.Browser.Types (View, Renderer)
+import Genetics.Browser.Types (Renderer(..), View)
 import Genetics.Browser.Units (Bp(Bp))
 import Global (readFloat, infinity)
-import Math as Math
-import Prelude
 
 type GWASData = {score :: Number}
 type GWASFeature = Feature Bp GWASData
@@ -76,7 +76,7 @@ writeResult g q = toForeign { glyphs: g
 -- TODO right now all other data in the feature is thrown away in the parsing...
 -- we should send the original Foreign value as the feature!
 render :: Renderer
-render v fs =
+render = Renderer $ \v fs ->
   let fs' = readGWASFeature v.chr <$> fs
       gs = toForeign $ featureToForeign v <$> fs'
       q = quant <$> (sequence $ (hush <<< runExcept) <$> fs')

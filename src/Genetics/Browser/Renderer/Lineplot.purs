@@ -1,6 +1,7 @@
 module Genetics.Browser.Renderer.Lineplot
        where
 
+import Prelude
 import Control.Alt ((<|>))
 import Data.Foreign (F, Foreign, readNumber, readString, toForeign)
 import Data.Foreign.Index (readProp)
@@ -10,10 +11,9 @@ import Data.Traversable (sequence)
 import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, path, stroke)
 import Genetics.Browser.GlyphF.Interpret (writeGlyph)
-import Genetics.Browser.Types (Renderer)
+import Genetics.Browser.Types (Renderer(..))
 import Genetics.Browser.Units (Bp(..))
 import Global (readFloat)
-import Prelude
 
 type LineData = { score :: Number }
 type LineFeature = Feature Bp LineData
@@ -56,7 +56,7 @@ writeResult g q = toForeign { glyphs: [g]
 
 
 render :: LinePlotConfig -> Renderer
-render cfg v fs =
+render cfg = Renderer $ \v fs ->
   let fs' :: _
       fs' = sequence $ map (featureToScreen (Bp v.viewStart) (Bp v.scale)) <$>
             (readLineFeature v.chr <$> fs)

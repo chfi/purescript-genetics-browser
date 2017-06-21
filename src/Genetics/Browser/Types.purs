@@ -16,7 +16,7 @@ type View = { viewStart :: Number
 
 -- TODO: replace Array Foreign with Array ForeignFeature
 -- or similar, for clarity. Could be a newtype or type synonym
-type Renderer = View -> Array Foreign -> Foreign
+newtype Renderer = Renderer (View -> Array Foreign -> Foreign)
 
 type Quant = { min :: Number
              , max :: Number
