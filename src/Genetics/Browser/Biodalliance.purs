@@ -2,9 +2,57 @@ module Genetics.Browser.Biodalliance where
 
 import Prelude
 import Control.Monad.Eff (Eff)
+import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut.Core (JObject)
-import Genetics.Browser.Types (BD, Biodalliance)
+import Data.Foreign (Foreign)
+import Data.Options (Option, Options(..), opt, options)
+import Genetics.Browser.Types (BD, Biodalliance, Renderer(..))
 import Genetics.Browser.Units (class HCoordinate, Bp, Chr(..), bp)
+import Unsafe.Coerce (unsafeCoerce)
+
+foreign import initBDimpl :: ∀ eff. Foreign -> (HTMLElement -> Eff eff Biodalliance)
+
+initBD :: ∀ eff. Options Biodalliance -> HTMLElement -> Eff eff Biodalliance
+initBD opts = initBDimpl (options opts)
+
+foreign import data BDTrack :: Type
+
+
+-- semantically, sources :: Array BDTrack -> Options Biodalliance
+-- sources :: Op (Options Biodalliance) (Array BDTrack)
+sources :: Option Biodalliance (Array BDTrack)
+sources = opt "sources"
+
+renderers :: Option Biodalliance (Array Renderer)
+renderers = opt "externalRenderers"
+
+newtype SubConfig = SubConfig { multi_id :: String, offset :: Number }
+
+type GWASConfig = { name :: String
+                  , forceReduction :: Int
+                  , bwgUri :: String
+                  , renderer :: String
+                  , sub :: SubConfig
+                  }
+
+gwasTrack :: GWASConfig -> BDTrack
+gwasTrack = unsafeCoerce
+
+gwasConfig :: GWASConfig
+gwasConfig = { name: "GWAS"
+             , renderer: "gwasRenderer"
+             , sub: SubConfig { multi_id: "multi_1"
+                              , offset: 0.0
+                              }
+             , forceReduction: -1
+             , bwgUri: "http://localhost:8080/gwascatalog.bb"
+             }
+
+-- genomeTrack :: String -> String -> BDTrack
+-- genomeTrack name uri =
+
+-- gwasTrack :: String -> String -> String -> BDTrack
+-- gwasTrack name renderer
 
 
 -- TODO: should probably be a bit safer than just sending a JObject. future problem tho~~

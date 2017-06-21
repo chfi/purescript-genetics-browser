@@ -40,6 +40,7 @@
     "purescript-nullable": "^3.0.0",
     "cytoscape": "^3.0.0",
     "purescript-profunctor-lenses": "^3.2.0",
-    "purescript-spec": "^1.0.0"
+    "purescript-spec": "^1.0.0",
+    "purescript-options": "^3.0.0"
   }
 }
