@@ -6,47 +6,61 @@ import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut.Core (JObject)
 import Data.Foreign (Foreign)
 import Data.Options (Option, Options(..), opt, options)
+import Genetics.Browser.Config.Track (BDTrackConfig(..))
 import Genetics.Browser.Types (BD, Biodalliance, Renderer(..))
 import Genetics.Browser.Units (class HCoordinate, Bp, Chr(..), bp)
 import Unsafe.Coerce (unsafeCoerce)
 
-foreign import initBDimpl :: ∀ eff. Foreign -> (HTMLElement -> Eff eff Biodalliance)
+foreign import data BrowserConstructor :: Type
+foreign import data RenderWrapper :: Type
 
-initBD :: ∀ eff. Options Biodalliance -> HTMLElement -> Eff eff Biodalliance
-initBD opts = initBDimpl (options opts)
+newtype BDOptions = BDOptions Foreign
 
-foreign import data BDTrack :: Type
+foreign import initBDimpl :: ∀ eff.
+                             BDOptions
+                          -> RenderWrapper
+                          -> BrowserConstructor
+                          -> (HTMLElement -> Eff eff Biodalliance)
+
+initBD :: ∀ eff.
+          Options Biodalliance
+       -> RenderWrapper
+       -> BrowserConstructor
+       -> (HTMLElement -> Eff eff Biodalliance)
+initBD opts = initBDimpl (BDOptions $ options opts)
 
 
--- semantically, sources :: Array BDTrack -> Options Biodalliance
--- sources :: Op (Options Biodalliance) (Array BDTrack)
-sources :: Option Biodalliance (Array BDTrack)
+sources :: Option Biodalliance (Array BDTrackConfig)
 sources = opt "sources"
 
-renderers :: Option Biodalliance (Array Renderer)
-renderers = opt "externalRenderers"
+-- Renderers need some extra info for WrappedRenderer to be able to do its thing
+type RendererInfo = { name :: String, renderer :: Renderer, canvasHeight :: Number }
 
-newtype SubConfig = SubConfig { multi_id :: String, offset :: Number }
+renderers :: Option Biodalliance (Array RendererInfo)
+renderers = opt "renderers"
 
-type GWASConfig = { name :: String
-                  , forceReduction :: Int
-                  , bwgUri :: String
-                  , renderer :: String
-                  , sub :: SubConfig
-                  }
 
-gwasTrack :: GWASConfig -> BDTrack
-gwasTrack = unsafeCoerce
+-- newtype SubConfig = SubConfig { multi_id :: String, offset :: Number }
 
-gwasConfig :: GWASConfig
-gwasConfig = { name: "GWAS"
-             , renderer: "gwasRenderer"
-             , sub: SubConfig { multi_id: "multi_1"
-                              , offset: 0.0
-                              }
-             , forceReduction: -1
-             , bwgUri: "http://localhost:8080/gwascatalog.bb"
-             }
+-- type GWASConfig = { name :: String
+--                   , forceReduction :: Int
+--                   , bwgUri :: String
+--                   , renderer :: String
+--                   , sub :: SubConfig
+--                   }
+
+-- gwasTrack :: GWASConfig -> BDTrack
+-- gwasTrack = unsafeCoerce
+
+-- gwasConfig :: GWASConfig
+-- gwasConfig = { name: "GWAS"
+--              , renderer: "gwasRenderer"
+--              , sub: SubConfig { multi_id: "multi_1"
+--                               , offset: 0.0
+--                               }
+--              , forceReduction: -1
+--              , bwgUri: "http://localhost:8080/gwascatalog.bb"
+--              }
 
 -- genomeTrack :: String -> String -> BDTrack
 -- genomeTrack name uri =

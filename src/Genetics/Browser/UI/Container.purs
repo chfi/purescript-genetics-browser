@@ -1,6 +1,16 @@
 module Genetics.Browser.UI.Container
        where
 
+import Prelude
+import Genetics.Browser.Renderer.GWAS as GWAS
+import Genetics.Browser.Renderer.Lineplot as QTL
+import Genetics.Browser.UI.Biodalliance as UIBD
+import Genetics.Browser.UI.Cytoscape as UICy
+import Halogen as H
+import Halogen.Aff as HA
+import Halogen.Component.ChildPath as CP
+import Halogen.HTML as HH
+import Halogen.HTML.Events as HE
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
@@ -11,22 +21,15 @@ import Data.Either.Nested (Either2)
 import Data.Functor.Coproduct.Nested (type (<\/>))
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap)
+import Data.Options (Options(..), (:=))
+import Genetics.Browser.Biodalliance (BrowserConstructor, RenderWrapper, RendererInfo, initBD, renderers, sources)
+import Genetics.Browser.Config.Track (BDTrackConfig(..), makeBDTrack)
 import Genetics.Browser.Events (JsonEvent(..))
-import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
-import Genetics.Browser.Renderer.Lineplot as QTL
 import Genetics.Browser.Types (Biodalliance, Renderer)
-import Genetics.Browser.UI.Biodalliance as UIBD
-import Genetics.Browser.UI.Cytoscape as UICy
 import Genetics.Browser.Units (Bp(..), Chr(..))
 import Global.Unsafe (unsafeStringify)
-import Halogen as H
-import Halogen.Aff as HA
-import Halogen.Component.ChildPath as CP
-import Halogen.HTML as HH
-import Halogen.HTML.Events as HE
 import Halogen.VDom.Driver (runUI)
-import Prelude
 
 
 qtlGlyphify :: LinePlotConfig -> Renderer
@@ -41,7 +44,7 @@ type State = Unit
 
 data Query a
   = Nop a
-  | CreateBD (forall eff. HTMLElement -> Eff eff Biodalliance) a
+  | CreateBD (∀ eff. HTMLElement -> Eff eff Biodalliance) a
   | BDScroll Bp a
   | BDJump Chr Bp Bp a
   | CreateCy String a
@@ -152,8 +155,51 @@ component =
       pure next
 
 
-main :: (∀ eff. HTMLElement -> Eff eff Biodalliance) -> Eff _ Unit
-main mkBd = HA.runHalogenAff do
+qtlRenderer :: RendererInfo
+qtlRenderer = { name: "qtlRenderer"
+              , renderer: qtlGlyphify { minScore: 4.0
+                                      , maxScore: 6.0
+                                      , color: "#ff0000"
+                                      }
+              , canvasHeight: 200.0
+              }
+
+gwasRenderer :: RendererInfo
+gwasRenderer = { name: "gwasRenderer"
+               , renderer: gwasGlyphify
+               , canvasHeight: 300.0
+               }
+
+gwasTrack :: BDTrackConfig
+gwasTrack = makeBDTrack { name: "GWAS"
+                        , renderer: "gwasRenderer"
+                        , "bwgUri": "http://localhost:8080/gwascatalog.bb"
+                        , "forceReduction": -1
+                        }
+
+qtlTrack :: BDTrackConfig
+qtlTrack = makeBDTrack { name: "QTL"
+                       , renderer: "qtlRenderer"
+                       , stylesheet: unit
+                       , uri: "http://test-gn2.genenetwork.org/api_pre1/qtl/lod2.csv"
+                       , tier_type: "external"
+                       }
+
+
+bdOpts :: Options Biodalliance
+bdOpts = renderers := [qtlRenderer, gwasRenderer] <>
+         sources := [gwasTrack, qtlTrack]
+
+
+-- Should take a record of RenderWrapper, BrowserConstructor,
+-- external renderers, sources/tracks...
+-- ... much like BD!
+-- Track configs should be of type Foreign or Json, and parsed/checked.
+
+main :: RenderWrapper -> BrowserConstructor -> Eff _ Unit
+main wrapRenderer browser = HA.runHalogenAff do
+  let mkBd :: (∀ eff. HTMLElement -> Eff eff Biodalliance)
+      mkBd = initBD bdOpts wrapRenderer browser
   liftEff $ log "running main"
   HA.awaitLoad
   el <- HA.selectElement (wrap "#psgbHolder")
