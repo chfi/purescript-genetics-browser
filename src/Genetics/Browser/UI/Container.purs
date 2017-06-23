@@ -16,20 +16,27 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import DOM.HTML.Types (HTMLElement)
+import Data.Argonaut (Json, _Array)
+import Data.Array (filter, foldr, (:))
 import Data.Const (Const)
+import Data.Either (Either(..), isLeft, isRight)
 import Data.Either.Nested (Either2)
+import Data.Foldable (fold, foldMap, foldl)
 import Data.Functor.Coproduct.Nested (type (<\/>))
-import Data.Maybe (Maybe(..))
+import Data.Lens ((^?))
+import Data.Maybe (Maybe(..), isJust, isNothing, maybe)
 import Data.Newtype (wrap)
 import Data.Options (Options(..), (:=))
 import Genetics.Browser.Biodalliance (BrowserConstructor, RenderWrapper, RendererInfo, initBD, renderers, sources)
-import Genetics.Browser.Config.Track (BDTrackConfig(..), makeBDTrack)
+import Genetics.Browser.Config.Track (BDTrackConfig(..), makeBDTrack, validateBDConfig)
 import Genetics.Browser.Events (JsonEvent(..))
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
 import Genetics.Browser.Types (Biodalliance, Renderer)
 import Genetics.Browser.Units (Bp(..), Chr(..))
 import Global.Unsafe (unsafeStringify)
 import Halogen.VDom.Driver (runUI)
+import Partial (crash)
+import Partial.Unsafe (unsafeCrashWith)
 
 
 qtlGlyphify :: LinePlotConfig -> Renderer
@@ -170,6 +177,7 @@ gwasRenderer = { name: "gwasRenderer"
                , canvasHeight: 300.0
                }
 
+
 genomeTrack :: BDTrackConfig
 genomeTrack = makeBDTrack { name: "Genome"
                           , twoBitURI: "http://www.biodalliance.org/datasets/GRCm38/mm10.2bit"
@@ -194,11 +202,7 @@ qtlTrack = makeBDTrack { name: "QTL"
 
 
 bdOpts :: Options Biodalliance
-bdOpts = renderers := [qtlRenderer, gwasRenderer] <>
-         sources := [ genomeTrack
-                    , gwasTrack
-                    , qtlTrack
-                    ]
+bdOpts = renderers := [ qtlRenderer, gwasRenderer ]
 
 
 -- Should take a record of RenderWrapper, BrowserConstructor,
@@ -206,10 +210,24 @@ bdOpts = renderers := [qtlRenderer, gwasRenderer] <>
 -- ... much like BD!
 -- Track configs should be of type Foreign or Json, and parsed/checked.
 
-main :: RenderWrapper -> BrowserConstructor -> Eff _ Unit
-main wrapRenderer browser = HA.runHalogenAff do
+main :: RenderWrapper -> BrowserConstructor -> Json -> Eff _ Unit
+main wrapRenderer browser bdtracks = HA.runHalogenAff do
+  when (isNothing $ bdtracks ^? _Array) $ liftEff $ log "BD Tracks config is not an array"
+
+  let validated = maybe [] (map validateBDConfig) $ bdtracks ^? _Array
+
+      {errors, tracks} = foldr (\c {errors, tracks} ->
+                                 case c of Left  e -> {errors: (e : errors), tracks}
+                                           Right t -> {errors, tracks: (t : tracks)}
+                               ) { errors: [], tracks: [] } validated
+
+      opts' = bdOpts <> sources := tracks
+
+  liftEff $ log $ "Track errors: " <> foldMap ((<>) ", ") errors
+
   let mkBd :: (∀ eff. HTMLElement -> Eff eff Biodalliance)
-      mkBd = initBD bdOpts wrapRenderer browser
+      mkBd = initBD opts' wrapRenderer browser
+
   liftEff $ log "running main"
   HA.awaitLoad
   el <- HA.selectElement (wrap "#psgbHolder")
