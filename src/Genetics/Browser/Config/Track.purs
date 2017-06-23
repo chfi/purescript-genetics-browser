@@ -8,5 +8,5 @@ import Data.Foreign (Foreign, toForeign)
 
 newtype BDTrackConfig = BDTrackConfig Foreign
 
-makeBDTrack :: ∀ r. { name :: String, renderer :: String | r } -> BDTrackConfig
+makeBDTrack :: ∀ r. { name :: String | r } -> BDTrackConfig
 makeBDTrack = (BDTrackConfig <<< toForeign)
