@@ -170,25 +170,35 @@ gwasRenderer = { name: "gwasRenderer"
                , canvasHeight: 300.0
                }
 
+genomeTrack :: BDTrackConfig
+genomeTrack = makeBDTrack { name: "Genome"
+                          , twoBitURI: "http://www.biodalliance.org/datasets/GRCm38/mm10.2bit"
+                          , desc: "Mouse reference genome build GRCm38"
+                          , tier_type: "sequence"
+                          , provides_entrypoints: true
+                          }
+
 gwasTrack :: BDTrackConfig
 gwasTrack = makeBDTrack { name: "GWAS"
                         , renderer: "gwasRenderer"
-                        , "bwgUri": "http://localhost:8080/gwascatalog.bb"
+                        , "bwgURI": "http://localhost:8080/gwascatalog.bb"
                         , "forceReduction": -1
                         }
 
 qtlTrack :: BDTrackConfig
 qtlTrack = makeBDTrack { name: "QTL"
                        , renderer: "qtlRenderer"
-                       , stylesheet: unit
                        , uri: "http://test-gn2.genenetwork.org/api_pre1/qtl/lod2.csv"
-                       , tier_type: "external"
+                       , tier_type: "qtl"
                        }
 
 
 bdOpts :: Options Biodalliance
 bdOpts = renderers := [qtlRenderer, gwasRenderer] <>
-         sources := [gwasTrack, qtlTrack]
+         sources := [ genomeTrack
+                    , gwasTrack
+                    , qtlTrack
+                    ]
 
 
 -- Should take a record of RenderWrapper, BrowserConstructor,

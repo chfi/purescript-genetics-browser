@@ -10,20 +10,8 @@ exports.initBDimpl = function(opts) {
                         renderers[r.name] = wrapRenderer(r.renderer, r.canvasHeight);
                     });
 
-                    var sources = [{
-                        name: 'Genome',
-                        twoBitURI: 'http://www.biodalliance.org/datasets/GRCm38/mm10.2bit',
-                        desc: 'Mouse reference genome build GRCm38',
-                        tier_type: 'sequence',
-                        provides_entrypoints: true
-                    }];
-
-
-
                     // TODO: make sure to only add BD tracks when that becomes relevant
-                    sources = sources.concat(opts.sources);
-
-                    console.log(sources);
+                    var sources = opts.sources;
 
                     var b = new browser({
 
@@ -47,7 +35,7 @@ exports.initBDimpl = function(opts) {
 
                         // these should be set based on the track configs in opts,
                         // but that's probably overkill right now...
-                        externalRenderers: opts.externalRenderers,
+                        externalRenderers: renderers,
                         // externalRenderers: { gwasRenderer: gwasRenderer,
                         //                      qtlRenderer: qtlRenderer
                         //                    },
@@ -77,10 +65,6 @@ exports.initBDimpl = function(opts) {
                         //     {
                         //         name: 'GWAS',
                         //         renderer: "gwasRenderer",
-                        //         sub: {
-                        //             multi_id: "multi_1",
-                        //             offset: 0.0
-                        //         },
                         //         "forceReduction": -1,
                         //         bwgURI: 'http://localhost:8080/gwascatalog.bb'
                         //     },
@@ -88,22 +72,7 @@ exports.initBDimpl = function(opts) {
                         //         name: 'QTL',
                         //         tier_type: 'qtl',
                         //         renderer: "qtlRenderer",
-                        //         sub: {
-                        //             multi_id: "multi_1",
-                        //             offset: 0.0
-                        //         },
                         //         uri: 'http://test-gn2.genenetwork.org/api_pre1/qtl/lod2.csv'
-                        //     },
-                        //     {
-                        //         name: 'QTL, GWAS',
-                        //         tier_type: 'multi',
-                        //         renderer: 'multi',
-                        //         multi: {
-                        //             multi_id: "multi_1",
-                        //             grid: true,
-                        //             grid_offset: 0,
-                        //             grid_spacing: 10
-                        //         }
                         //     }
                         // ],
                         /*uiPrefix: '../',*/
@@ -118,11 +87,6 @@ exports.initBDimpl = function(opts) {
     };
 };
 
-
-// exports.createTrackConfig = function(config) {
-//     return { name: config.name,
-//              }
-// };
 
 exports.addFeatureListener = function(bd) {
     return function(callback) {
