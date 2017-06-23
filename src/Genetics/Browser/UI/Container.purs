@@ -28,6 +28,7 @@ import Data.Maybe (Maybe(..), isJust, isNothing, maybe)
 import Data.Newtype (wrap)
 import Data.Options (Options(..), (:=))
 import Genetics.Browser.Biodalliance (BrowserConstructor, RenderWrapper, RendererInfo, initBD, renderers, sources)
+import Genetics.Browser.Config (BrowserConfig(..))
 import Genetics.Browser.Config.Track (BDTrackConfig(..), makeBDTrack, validateBDConfig)
 import Genetics.Browser.Events (JsonEvent(..))
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
@@ -177,44 +178,15 @@ gwasRenderer = { name: "gwasRenderer"
                , canvasHeight: 300.0
                }
 
-
-genomeTrack :: BDTrackConfig
-genomeTrack = makeBDTrack { name: "Genome"
-                          , twoBitURI: "http://www.biodalliance.org/datasets/GRCm38/mm10.2bit"
-                          , desc: "Mouse reference genome build GRCm38"
-                          , tier_type: "sequence"
-                          , provides_entrypoints: true
-                          }
-
-gwasTrack :: BDTrackConfig
-gwasTrack = makeBDTrack { name: "GWAS"
-                        , renderer: "gwasRenderer"
-                        , "bwgURI": "http://localhost:8080/gwascatalog.bb"
-                        , "forceReduction": -1
-                        }
-
-qtlTrack :: BDTrackConfig
-qtlTrack = makeBDTrack { name: "QTL"
-                       , renderer: "qtlRenderer"
-                       , uri: "http://test-gn2.genenetwork.org/api_pre1/qtl/lod2.csv"
-                       , tier_type: "qtl"
-                       }
-
-
 bdOpts :: Options Biodalliance
 bdOpts = renderers := [ qtlRenderer, gwasRenderer ]
 
 
--- Should take a record of RenderWrapper, BrowserConstructor,
--- external renderers, sources/tracks...
--- ... much like BD!
--- Track configs should be of type Foreign or Json, and parsed/checked.
+main :: BrowserConfig -> Eff _ Unit
+main (BrowserConfig { wrapRenderer, browser, tracks }) = HA.runHalogenAff do
+  when (isNothing $ tracks ^? _Array) $ liftEff $ log "Tracks config is not an array"
 
-main :: RenderWrapper -> BrowserConstructor -> Json -> Eff _ Unit
-main wrapRenderer browser bdtracks = HA.runHalogenAff do
-  when (isNothing $ bdtracks ^? _Array) $ liftEff $ log "BD Tracks config is not an array"
-
-  let validated = maybe [] (map validateBDConfig) $ bdtracks ^? _Array
+  let validated = maybe [] (map validateBDConfig) $ tracks ^? _Array
 
       {errors, tracks} = foldr (\c {errors, tracks} ->
                                  case c of Left  e -> {errors: (e : errors), tracks}
