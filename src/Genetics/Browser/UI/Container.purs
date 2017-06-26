@@ -17,7 +17,7 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut (Json, _Array)
-import Data.Array (filter, foldr, (:))
+import Data.Array (filter, foldr, (:), null)
 import Data.Const (Const)
 import Data.Either (Either(..), isLeft, isRight)
 import Data.Either.Nested (Either2)
@@ -25,11 +25,12 @@ import Data.Foldable (fold, foldMap, foldl)
 import Data.Functor.Coproduct.Nested (type (<\/>))
 import Data.Lens ((^?))
 import Data.Maybe (Maybe(..), isJust, isNothing, maybe)
+import Data.Monoid (mempty)
 import Data.Newtype (wrap)
 import Data.Options (Options(..), (:=))
 import Genetics.Browser.Biodalliance (BrowserConstructor, RenderWrapper, RendererInfo, initBD, renderers, sources)
 import Genetics.Browser.Config (BrowserConfig(..))
-import Genetics.Browser.Config.Track (BDTrackConfig(..), makeBDTrack, validateBDConfig)
+import Genetics.Browser.Config.Track (BDTrackConfig, CyGraphConfig, makeBDTrack, validateBDConfig, validateCyConfig)
 import Genetics.Browser.Events (JsonEvent(..))
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
 import Genetics.Browser.Types (Biodalliance, Renderer)
@@ -119,6 +120,10 @@ component =
       --     ]
       ]
 
+  addCyGraph :: Maybe CyGraphConfig -> _
+  addCyGraph = case _ of
+    Nothing -> []
+    Just cy -> [HH.div [] [HH.slot' CP.cp2 UICy.Slot UICy.component unit handleCyMessage]]
 
   handleBDMessage :: UIBD.Message -> Maybe (Query Unit)
   handleBDMessage UIBD.Initialized = Just $ ResetCy unit
@@ -187,6 +192,7 @@ main (BrowserConfig { wrapRenderer, browser, tracks }) = HA.runHalogenAff do
   when (isNothing $ tracks ^? _Array) $ liftEff $ log "Tracks config is not an array"
 
   let validated = maybe [] (map validateBDConfig) $ tracks ^? _Array
+      validatedCy = maybe [] (map validateCyConfig) $ tracks ^? _Array
 
       {errors, tracks} = foldr (\c {errors, tracks} ->
                                  case c of Left  e -> {errors: (e : errors), tracks}
@@ -211,6 +217,8 @@ main (BrowserConfig { wrapRenderer, browser, tracks }) = HA.runHalogenAff do
       liftEff $ log "creating BD"
       io.query $ H.action (CreateBD mkBd)
       liftEff $ log "created BD!"
-      liftEff $ log "creating Cy.js"
-      io.query $ H.action (CreateCy "http://localhost:8080/eles.json")
-      liftEff $ log "created cy!"
+      liftEff $ log $ "cytoscape enabled: " <> show (not null validatedCy)
+      when (not null validatedCy) $ do
+        liftEff $ log "creating Cy.js"
+        io.query $ H.action (CreateCy "http://localhost:8080/eles.json")
+        liftEff $ log "created cy!"
