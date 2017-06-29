@@ -44,15 +44,16 @@ validateBDConfig :: Json -> Either String BDTrackConfig
 validateBDConfig json =
   case getTrackType json of
     Nothing -> Left $ "Track has no type"
-    Just cyGraph -> Left $ ""
-    Just bdTrack -> case json ^? _Object <<< ix "name" of
+    Just (TrackType "CyGraph") -> Left $ "Is CyGraph"
+    Just (TrackType "BDTrack") -> case json ^? _Object <<< ix "name" of
       Nothing -> Left $ "BD track config does not have a name"
       Just c  -> Right $ BDTrackConfig $ toForeign json
+    Just _ -> Left $ "Track has unrecognized type"
 
 -- Maybe this should be in another file (one not called 'Track')
 newtype CyGraphConfig = CyGraphConfig Foreign
 
-makeCyTrack :: ∀ r. { trackType :: TrackType, elementsUri :: String } -> CyGraphConfig
+makeCyTrack :: ∀ r. { trackType :: TrackType, elementsUri :: String | r } -> CyGraphConfig
 makeCyTrack = CyGraphConfig <<< toForeign
 
 -- this and validateBDConfig must be able to be simplified;
@@ -62,10 +63,11 @@ validateCyConfig :: Json -> Either String CyGraphConfig
 validateCyConfig json = do
   case getTrackType json of
     Nothing -> Left $ "Track has no type"
-    Just bdTrack -> Left $ ""
-    Just cyGraph -> case json ^? _Object <<< ix "elementsUri" of
+    Just (TrackType "BDTrack") -> Left $ "Is BD track"
+    Just (TrackType "CyGraph") -> case json ^? _Object <<< ix "elementsUri" of
       Nothing -> Left $ "cy graph config does not have an elementsUri"
       Just c  -> Right $ CyGraphConfig $ toForeign json
+    Just _ -> Left $ "Track has unrecognized type"
 
 -- TODO: combine validateBDConfig and validateCyConfig
 -- validateTrackConfig :: Json -> Either String (Either BDTrackConfig CyGraphConfig)
