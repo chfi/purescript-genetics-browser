@@ -34,14 +34,14 @@ cytoscape :: forall eff.
 cytoscape htmlEl els = liftEff $ cytoscapeImpl (toNullable htmlEl) (toNullable els)
 
 
-unsafeParseCollection :: Foreign -> CyCollection
+unsafeParseCollection :: Foreign -> CyCollection Element
 unsafeParseCollection = unsafeCoerce
 
 foreign import graphAddCollection :: ∀ eff. Cytoscape
-                                 -> CyCollection
+                                 -> CyCollection Element
                                  -> Eff (cy :: CY | eff) Unit
 
-foreign import graphGetCollection :: ∀ eff. Cytoscape -> Eff (cy :: CY | eff) CyCollection
+foreign import graphGetCollection :: ∀ eff. Cytoscape -> Eff (cy :: CY | eff) (CyCollection Element)
 
 
 foreign import runLayout :: forall eff.
@@ -92,7 +92,7 @@ onClick cy = onEvent cy "click"
 
 -- is `graphRemoveWithCollection` or similar a better name? ...
 foreign import graphRemoveCollection :: ∀ eff.
-                                 CyCollection
-                              -> Eff (cy :: CY | eff) CyCollection
+                                 CyCollection Element
+                              -> Eff (cy :: CY | eff) (CyCollection Element)
 
 foreign import graphRemoveAll :: forall eff. Cytoscape -> Eff (cy :: CY | eff) Unit
