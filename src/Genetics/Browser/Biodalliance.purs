@@ -5,11 +5,11 @@ import Control.Monad.Eff (Eff)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut.Core (JObject)
 import Data.Foreign (Foreign)
-import Data.Options (Option, Options(..), opt, options)
-import Genetics.Browser.Config.Track (BDTrackConfig(..))
-import Genetics.Browser.Types (BD, Biodalliance, Renderer(..))
-import Genetics.Browser.Units (class HCoordinate, Bp, Chr(..), bp)
-import Unsafe.Coerce (unsafeCoerce)
+import Data.Options (Option, Options, opt, options)
+import Genetics.Browser.Config.Track (BDTrackConfig)
+import Genetics.Browser.Types (BD, Biodalliance, Renderer)
+import Genetics.Browser.Units (class HCoordinate, Bp, Chr, bp)
+
 
 foreign import data BrowserConstructor :: Type
 foreign import data RenderWrapper :: Type

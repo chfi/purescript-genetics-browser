@@ -24,7 +24,9 @@ newtype TrackType = TrackType String
 derive instance eqTrackType :: Eq TrackType
 derive instance ordTrackType :: Ord TrackType
 
+bdTrack :: TrackType
 bdTrack = TrackType "BDTrack"
+cyGraph :: TrackType
 cyGraph = TrackType "CyGraph"
 
 getTrackType :: Json -> Maybe TrackType

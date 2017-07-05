@@ -2,24 +2,19 @@ module Genetics.Browser.Events
        where
 
 import Prelude
-import Control.Monad.Except (runExcept, runExceptT)
-import Data.Argonaut (Json, _Number, _Object, _String, (.?))
+import Data.Argonaut (Json, _Number, _Object, _String)
 import Data.Array (foldMap)
-import Data.Either (Either, fromRight)
-import Data.Exists (mkExists)
 import Data.Foldable (class Foldable)
 import Data.Foreign (Foreign)
-import Data.Foreign.Class (class Decode, class Encode, decode, encode)
+import Data.Foreign.Class (class Decode, class Encode)
 import Data.Foreign.Generic (defaultOptions, genericDecode, genericEncode)
 import Data.Generic.Rep (class Generic)
-import Data.Lens (_Right, iso, prism', re, (^?))
+import Data.Lens (re, (^?))
 import Data.Lens.Index (ix)
-import Data.Lens.Types (Iso', Prism')
 import Data.Maybe (Maybe)
 import Data.Maybe.First (First(..))
-import Data.Newtype (class Newtype, unwrap, wrap)
-import Genetics.Browser.Units (Bp(..), Chr(..), _Bp, _Chr)
-import Partial.Unsafe (unsafePartial)
+import Data.Newtype (class Newtype, unwrap)
+import Genetics.Browser.Units (Bp, Chr, _Bp, _Chr)
 
 -- An Event comes from some track, and carries some information.
 -- depending on the track (?), the information may differ.

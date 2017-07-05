@@ -15,28 +15,20 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (EXCEPTION)
 import Control.Monad.Except (runExcept)
-import Data.Argonaut (Json, _JsonNumber, _JsonString, _Number, _Object, _String)
-import Data.Argonaut.Core (JObject)
+import Data.Argonaut (_Number, _Object, _String)
 import Data.Either (Either(..))
-import Data.Exists (Exists)
 import Data.Foreign (F)
 import Data.Foreign.Class (decode, encode)
 import Data.Lens (re, (^?))
 import Data.Lens.Index (ix)
-import Data.Maybe (Maybe(..), isJust)
-import Data.Newtype (unwrap)
-import Data.StrMap (fromFoldable)
-import Data.Traversable (sequence, traverse)
-import Data.Tuple (Tuple(..))
+import Data.Maybe (Maybe(..))
 import Genetics.Browser.Cytoscape (ParsedEvent(..), runLayout, resizeContainer)
-import Genetics.Browser.Cytoscape.Collection (CyCollection, connectedNodes, filter, isEdge, union)
-import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject, elementJson)
+import Genetics.Browser.Cytoscape.Collection (filter)
+import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJson)
 import Genetics.Browser.Events (EventLocation(..), EventRange(..), JsonEvent(..))
-import Genetics.Browser.Feature.Foreign (deepObjIx, parsePath)
-import Genetics.Browser.Units (_Bp, _BpMBp, _Chr, _MBp, bp)
+import Genetics.Browser.Units (_BpMBp, _Chr, _MBp)
 import Global.Unsafe (unsafeStringify)
 import Network.HTTP.Affjax (AJAX)
-import Unsafe.Coerce (unsafeCoerce)
 
 
 -- TODO: elemsUrl should be safer. Maybe it should cache too, idk
@@ -198,11 +190,10 @@ component =
 
 -- TODO this should be less ad-hoc, somehow. future probs~~~
 cyParseEventLocation :: Element -> Maybe EventLocation
-cyParseEventLocation el = case (elementJson el) ^? FF.deepObjIx ["data", "lrsLoc"] of
-  Nothing  -> Nothing
-  Just loc -> do
-    chr <- loc ^? _Object <<< ix "chr" <<< _String <<< re _Chr
+cyParseEventLocation el = do
+  loc <- elementJson el ^? FF.deepObjIx ["data", "lrsLoc"]
+  chr <- loc ^? _Object <<< ix "chr" <<< _String <<< re _Chr
            -- ridiculous.
-    pos <- loc ^? _Object <<< ix "pos" <<< _Number
+  pos <- loc ^? _Object <<< ix "pos" <<< _Number
                   <<< re _MBp <<< re _BpMBp
-    pure $ EventLocation { chr, pos }
+  pure $ EventLocation { chr, pos }

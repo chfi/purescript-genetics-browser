@@ -1,12 +1,14 @@
 module Genetics.Browser.Cytoscape.Collection where
 
 import Prelude
-import Data.Argonaut ((.?))
+import Data.Argonaut (_Object, _String, (.?))
 import Data.Argonaut.Core (JObject, JArray)
 import Data.Either (Either(..))
 import Data.Foldable (and)
+import Data.Lens ((^?))
+import Data.Lens.Index (ix)
+import Data.Maybe (maybe)
 import Genetics.Browser.Cytoscape.Types (Cytoscape, Element, elementJObject)
-import Genetics.Browser.Feature.Foreign (parsePath)
 
 
 foreign import data CyCollection :: Type -> Type
@@ -62,7 +64,7 @@ evenEdges =
 
 evenEdgesWithNodes :: CyCollection Element -> CyCollection Element
 evenEdgesWithNodes coll =
-  let evenId el = case (elementJObject el) .? "id" of
+  let evenId el = case elementJObject el .? "id" of
         Left _  -> false
         Right i -> i `mod` 2 == 0
       edges = filter (and [isNode, evenId]) coll
@@ -71,18 +73,24 @@ evenEdgesWithNodes coll =
 
 evenEdgesWithNodes' :: CyCollection Element -> CyCollection Element
 evenEdgesWithNodes' =
-  let evenId el = case (elementJObject el) .? "id" of
+  let evenId el = case elementJObject el .? "id" of
         Left _  -> false
         Right i -> i `mod` 2 == 0
   in union <$> filter (and [isNode, evenId]) <*> connectedNodes
 
 
 locPred :: String -> JObject -> Boolean
-locPred chr obj = case obj `parsePath` ["lrsLoc"] of
-  Left _  -> false
-  Right l -> case l .? "chr" of
-    Left _ -> false
-    Right c -> chr == c
+locPred chr obj = maybe false id $ do
+  loc <- obj ^? ix "lrsLoc" <<< _Object
+  chr' <- loc ^? ix "chr" <<< _String
+  pure $ chr' == chr
+
+-- locPred :: String -> JObject -> Boolean
+-- locPred chr obj = case obj ^? ix "lrsLoc" of $ do
+  -- Left _  -> false
+  -- Right l -> case l .? "chr" of
+  --   Left _ -> false
+  --   Right c -> chr == c
 
 edgesLoc :: String -> CyCollection Element -> CyCollection Element
-edgesLoc chr = filter (locPred chr <<< elementJObject)
+edgesLoc chr = filter $ locPred chr <<< elementJObject

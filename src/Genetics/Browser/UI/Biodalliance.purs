@@ -125,6 +125,7 @@ component =
 
     RecvEvent (JsonEvent ev) next -> do
       mbd <- H.gets _.bd
+
       case mbd of
         Nothing -> pure next
         Just bd -> do

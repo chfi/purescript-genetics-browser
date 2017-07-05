@@ -30,7 +30,10 @@ exports.initBDimpl = function(opts) {
                         // Maybe it doesn't matter if we're controlling the viewport w/ the API
                         maxViewWidth: 20000000,
 
-                        maxHeight: opts.maxHeight || 1000,
+                        // All the maxHeight does is set the BD holder CSS...
+                        // Should (somehow) be controlled by PS.
+                        // maxHeight: opts.maxHeight || 1000,
+                        maxHeight: null,
 
                         // BD remembering anything will probably only lead to
                         // inconsistencies with the main container
