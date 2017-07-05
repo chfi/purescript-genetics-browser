@@ -30,18 +30,24 @@ exports.initBDimpl = function(opts) {
                         // Maybe it doesn't matter if we're controlling the viewport w/ the API
                         maxViewWidth: 20000000,
 
-                        // this should be set externally as well
-                        cookieKey:  'mouse38',
+                        maxHeight: opts.maxHeight || 1000,
+
+                        // BD remembering anything will probably only lead to
+                        // inconsistencies with the main container
+                        noPersist: true,
 
                         // these should be set based on the track configs in opts,
                         // but that's probably overkill right now...
                         externalRenderers: renderers,
-                        // externalRenderers: { gwasRenderer: gwasRenderer,
-                        //                      qtlRenderer: qtlRenderer
-                        //                    },
 
                         // idk how best to do this. for now let it be hardcoded,
-                        // later send as plain JSON, maybe use a function to generate it
+                        // later send as plain JSON, maybe use a function to generate it.
+                        // the first four are mandatory;
+                        // `taxon` should be an integer from the NCBI taxonomy,
+                        // `auth` and `version` should match authorty and version strings
+                        // used in the DAS Registry
+                        // however the DAS Registry isn't a thing anymore
+                        // given how we use BD, I think we can skip most of it
                         coordSystem: {
                             speciesName: 'Mouse',
                             taxon: 10090,
@@ -54,27 +60,6 @@ exports.initBDimpl = function(opts) {
                         maxWorkers: 0,
 
                         sources: sources,
-                        // sources: [
-                        //     {
-                        //         name: 'Genome',
-                        //         twoBitURI: 'http://www.biodalliance.org/datasets/GRCm38/mm10.2bit',
-                        //         desc: 'Mouse reference genome build GRCm38',
-                        //         tier_type: 'sequence',
-                        //         provides_entrypoints: true
-                        //     },
-                        //     {
-                        //         name: 'GWAS',
-                        //         renderer: "gwasRenderer",
-                        //         "forceReduction": -1,
-                        //         bwgURI: 'http://localhost:8080/gwascatalog.bb'
-                        //     },
-                        //     {
-                        //         name: 'QTL',
-                        //         tier_type: 'qtl',
-                        //         renderer: "qtlRenderer",
-                        //         uri: 'http://test-gn2.genenetwork.org/api_pre1/qtl/lod2.csv'
-                        //     }
-                        // ],
                         /*uiPrefix: '../',*/
 
                         fullScreen: true

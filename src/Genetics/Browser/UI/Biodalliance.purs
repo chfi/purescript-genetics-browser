@@ -33,7 +33,7 @@ type State = { bd :: Maybe Biodalliance
 data Query a
   = Scroll Bp a
   | Jump Chr Bp Bp a
-  | Initialize (forall eff. HTMLElement -> Eff eff Biodalliance) a
+  | Initialize (forall eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance) a
   | InitializeCallback (H.SubscribeStatus -> a)
   | RaiseEvent JObject (H.SubscribeStatus -> a)
   | RecvEvent JsonEvent a

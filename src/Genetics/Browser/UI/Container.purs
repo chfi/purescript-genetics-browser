@@ -33,7 +33,7 @@ import Genetics.Browser.Config (BrowserConfig(..))
 import Genetics.Browser.Config.Track (BDTrackConfig, CyGraphConfig, makeBDTrack, validateBDConfig, validateCyConfig)
 import Genetics.Browser.Events (JsonEvent(..))
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
-import Genetics.Browser.Types (Biodalliance, Renderer)
+import Genetics.Browser.Types (BD, Biodalliance, Renderer)
 import Genetics.Browser.Units (Bp(..), Chr(..))
 import Global.Unsafe (unsafeStringify)
 import Halogen.VDom.Driver (runUI)
@@ -53,7 +53,7 @@ type State = Unit
 
 data Query a
   = Nop a
-  | CreateBD (∀ eff. HTMLElement -> Eff eff Biodalliance) a
+  | CreateBD (∀ eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance) a
   | BDScroll Bp a
   | BDJump Chr Bp Bp a
   | CreateCy String a
@@ -203,7 +203,7 @@ main (BrowserConfig { wrapRenderer, browser, tracks }) = HA.runHalogenAff do
 
   liftEff $ log $ "Track errors: " <> foldMap ((<>) ", ") errors
 
-  let mkBd :: (∀ eff. HTMLElement -> Eff eff Biodalliance)
+  let mkBd :: (∀ eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance)
       mkBd = initBD opts' wrapRenderer browser
 
   liftEff $ log "running main"

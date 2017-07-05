@@ -20,13 +20,13 @@ foreign import initBDimpl :: ∀ eff.
                              BDOptions
                           -> RenderWrapper
                           -> BrowserConstructor
-                          -> (HTMLElement -> Eff eff Biodalliance)
+                          -> (HTMLElement -> Eff (bd :: BD | eff) Biodalliance)
 
 initBD :: ∀ eff.
           Options Biodalliance
        -> RenderWrapper
        -> BrowserConstructor
-       -> (HTMLElement -> Eff eff Biodalliance)
+       -> (HTMLElement -> Eff (bd :: BD | eff) Biodalliance)
 initBD opts = initBDimpl (BDOptions $ options opts)
 
 
@@ -39,34 +39,9 @@ type RendererInfo = { name :: String, renderer :: Renderer, canvasHeight :: Numb
 renderers :: Option Biodalliance (Array RendererInfo)
 renderers = opt "renderers"
 
+maxHeight :: Option Biodalliance Int
+maxHeight = opt "maxHeight"
 
--- newtype SubConfig = SubConfig { multi_id :: String, offset :: Number }
-
--- type GWASConfig = { name :: String
---                   , forceReduction :: Int
---                   , bwgUri :: String
---                   , renderer :: String
---                   , sub :: SubConfig
---                   }
-
--- gwasTrack :: GWASConfig -> BDTrack
--- gwasTrack = unsafeCoerce
-
--- gwasConfig :: GWASConfig
--- gwasConfig = { name: "GWAS"
---              , renderer: "gwasRenderer"
---              , sub: SubConfig { multi_id: "multi_1"
---                               , offset: 0.0
---                               }
---              , forceReduction: -1
---              , bwgUri: "http://localhost:8080/gwascatalog.bb"
---              }
-
--- genomeTrack :: String -> String -> BDTrack
--- genomeTrack name uri =
-
--- gwasTrack :: String -> String -> String -> BDTrack
--- gwasTrack name renderer
 
 
 -- TODO: should probably be a bit safer than just sending a JObject. future problem tho~~
