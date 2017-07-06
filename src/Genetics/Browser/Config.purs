@@ -3,8 +3,9 @@ module Genetics.Browser.Config
 
 import Data.Argonaut (Json)
 import Genetics.Browser.Biodalliance (BrowserConstructor, RenderWrapper)
+import Genetics.Browser.Config.Track (TracksMap)
 
 newtype BrowserConfig = BrowserConfig { wrapRenderer :: RenderWrapper
                                       , browser :: BrowserConstructor
-                                      , tracks :: Json
+                                      , tracks :: TracksMap
                                       }

@@ -10,15 +10,23 @@ module Genetics.Browser.Config.Track
        where
 
 import Prelude
-import Data.Argonaut (Json, _Object, _String)
+import Data.Argonaut (Json, _Array, _Object, _String)
 import Data.Either (Either(..))
 import Data.Foreign (Foreign, toForeign)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), maybe)
+import Data.StrMap (StrMap)
+import Data.Traversable (sequence)
 
 
 newtype TrackType = TrackType String
+
+newtype TracksMap = TracksMap (StrMap Json)
+
+getConfigs :: TracksMap -> TrackType -> Either String (Array Json)
+getConfigs (TracksMap ts) (TrackType tt) =
+  maybe (Left "Incorrect trackType") Right $ ts ^? ix tt <<< _Array
 
 -- derive instance newtypeTrackType :: Newtype TrackType _
 derive instance eqTrackType :: Eq TrackType
@@ -74,3 +82,25 @@ validateCyConfig json = do
 -- TODO: combine validateBDConfig and validateCyConfig
 -- validateTrackConfig :: Json -> Either String (Either BDTrackConfig CyGraphConfig)
 -- validateTrackConfig :: Json -> Either String (Either3 BDTrackConfig PSTrackConfig CyGraphConfig)
+
+
+foldConfigs :: forall a b.
+               (Json -> Either String a)
+            -> (Json -> Either String b)
+            -> TracksMap
+            -> { bdTracks :: Array (Either String a)
+               , cyGraphs :: Array (Either String b)
+               }
+foldConfigs bdFun cyFun tm = { bdTracks, cyGraphs }
+  where bdTracks = map (_ >>= bdFun) $ sequence $ getConfigs tm bdTrack
+        cyGraphs = map (_ >>= cyFun) $ sequence $ getConfigs tm cyGraph
+        test :: _
+        test = map (sequence >=> bdFun) getConfigs tm bdTrack
+ -- there's /probably/ a nicer way to d this
+
+
+validateConfigs :: TracksMap
+                -> { bdTracks :: Array (Either String BDTrackConfig)
+                   , cyGraphs :: Array (Either String CyGraphConfig)
+                   }
+validateConfigs = foldConfigs validateBDConfig validateCyConfig
