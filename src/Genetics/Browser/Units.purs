@@ -5,11 +5,10 @@ module Genetics.Browser.Units where
 
 import Prelude
 import Data.Foreign.Class (class Decode, class Encode)
-import Data.Lens (iso, lens, prism, prism')
+import Data.Lens (iso)
 import Data.Lens.Iso.Newtype (_Newtype)
-import Data.Lens.Types (Iso', Lens', Prism')
-import Data.Maybe (Maybe)
-import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.Lens.Types (Iso')
+import Data.Newtype (class Newtype, unwrap)
 import Test.QuickCheck (class Arbitrary)
 
 newtype Bp = Bp Number
@@ -77,12 +76,3 @@ derive newtype instance decodeChr :: Decode Chr
 
 _Chr :: Iso' Chr String
 _Chr = _Newtype
-
-
--- prism' :: forall s a. (a -> s) -> (s -> Maybe a) -> Prism' s a
--- _CyChr :: Prism' String Chr
--- _CyChr = prism' print parse
---   where print :: Chr -> String
---         print (Chr chr) = "Chr" <> show chr
---         parse :: String -> Maybe Chr
---         parse str =

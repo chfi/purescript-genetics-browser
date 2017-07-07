@@ -1,4 +1,9 @@
 module Genetics.Browser.Events
+       ( JsonEvent(..)
+       , EventLocation(..)
+       , EventRange(..)
+       , EventScore(..)
+       )
        where
 
 import Prelude

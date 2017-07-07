@@ -3,7 +3,6 @@ module Genetics.Browser.UI.Cytoscape
 
 import Prelude
 import Genetics.Browser.Cytoscape as Cytoscape
-import Genetics.Browser.Feature.Foreign as FF
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Properties as HP
@@ -24,7 +23,7 @@ import Data.Lens.Index (ix)
 import Data.Maybe (Maybe(..))
 import Genetics.Browser.Cytoscape (ParsedEvent(..), runLayout, resizeContainer)
 import Genetics.Browser.Cytoscape.Collection (filter)
-import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJson)
+import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
 import Genetics.Browser.Events (EventLocation(..), EventRange(..), JsonEvent(..))
 import Genetics.Browser.Units (_BpMBp, _Chr, _MBp)
 import Global.Unsafe (unsafeStringify)
@@ -80,7 +79,7 @@ component =
 
 
   -- for some reason having an explicit forall makes the rest of the file not get parsed by purs-ide...
-  -- getElements :: ∀ eff'. String -> Aff (ajax :: AJAX | eff') CyCollection
+  -- getElements :: ∀ eff'. String -> Aff (ajax :: AJAX | eff') (CyCollection Element)
   getElements :: _
   getElements url = Affjax.get url <#> (\r -> Cytoscape.unsafeParseCollection r.response)
 
@@ -191,7 +190,7 @@ component =
 -- TODO this should be less ad-hoc, somehow. future probs~~~
 cyParseEventLocation :: Element -> Maybe EventLocation
 cyParseEventLocation el = do
-  loc <- elementJson el ^? FF.deepObjIx ["data", "lrsLoc"]
+  loc <- elementJObject el ^? ix "data" <<< _Object <<< ix "lrsLoc"
   chr <- loc ^? _Object <<< ix "chr" <<< _String <<< re _Chr
            -- ridiculous.
   pos <- loc ^? _Object <<< ix "pos" <<< _Number

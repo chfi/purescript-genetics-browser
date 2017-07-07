@@ -85,12 +85,6 @@ locPred chr obj = maybe false id $ do
   chr' <- loc ^? ix "chr" <<< _String
   pure $ chr' == chr
 
--- locPred :: String -> JObject -> Boolean
--- locPred chr obj = case obj ^? ix "lrsLoc" of $ do
-  -- Left _  -> false
-  -- Right l -> case l .? "chr" of
-  --   Left _ -> false
-  --   Right c -> chr == c
 
 edgesLoc :: String -> CyCollection Element -> CyCollection Element
 edgesLoc chr = filter $ locPred chr <<< elementJObject
