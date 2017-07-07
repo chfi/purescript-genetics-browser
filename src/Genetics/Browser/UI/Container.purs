@@ -16,20 +16,17 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import DOM.HTML.Types (HTMLElement)
-import Data.Argonaut (_Array)
-import Data.Array (foldr, null, (:))
+import Data.Array (null)
 import Data.Const (Const)
-import Data.Either (Either(Right, Left))
 import Data.Either.Nested (Either2)
 import Data.Foldable (foldMap)
 import Data.Functor.Coproduct.Nested (type (<\/>))
-import Data.Lens ((^?))
-import Data.Maybe (Maybe(Just, Nothing), isNothing, maybe)
+import Data.Maybe (Maybe(Just, Nothing))
 import Data.Newtype (wrap)
 import Data.Options (Options, (:=))
 import Genetics.Browser.Biodalliance (RendererInfo, initBD, renderers, sources)
 import Genetics.Browser.Config (BrowserConfig(..))
-import Genetics.Browser.Config.Track (CyGraphConfig, validateBDConfig, validateCyConfig)
+import Genetics.Browser.Config.Track (CyGraphConfig, validateConfigs)
 import Genetics.Browser.Events (JsonEvent)
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
 import Genetics.Browser.Types (BD, Biodalliance, Renderer)
@@ -188,19 +185,13 @@ bdOpts = renderers := [ qtlRenderer, gwasRenderer ]
 
 main :: BrowserConfig -> Eff _ Unit
 main (BrowserConfig { wrapRenderer, browser, tracks }) = HA.runHalogenAff do
-  when (isNothing $ tracks ^? _Array) $ liftEff $ log "Tracks config is not an array"
 
-  let validated = maybe [] (map validateBDConfig) $ tracks ^? _Array
-      validatedCy = maybe [] (map validateCyConfig) $ tracks ^? _Array
+  let {bdTracks, cyGraphs} = validateConfigs tracks
 
-      {errors, tracks} = foldr (\c {errors, tracks} ->
-                                 case c of Left  e -> {errors: (e : errors), tracks}
-                                           Right t -> {errors, tracks: (t : tracks)}
-                               ) { errors: [], tracks: [] } validated
+      opts' = bdOpts <> sources := bdTracks.results
 
-      opts' = bdOpts <> sources := tracks
-
-  liftEff $ log $ "Track errors: " <> foldMap ((<>) ", ") errors
+  liftEff $ log $ "BDTrack errors: " <> foldMap ((<>) ", ") bdTracks.errors
+  liftEff $ log $ "CyGraph errors: " <> foldMap ((<>) ", ") cyGraphs.errors
 
   let mkBd :: (∀ eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance)
       mkBd = initBD opts' wrapRenderer browser
@@ -216,8 +207,8 @@ main (BrowserConfig { wrapRenderer, browser, tracks }) = HA.runHalogenAff do
       liftEff $ log "creating BD"
       io.query $ H.action (CreateBD mkBd)
       liftEff $ log "created BD!"
-      liftEff $ log $ "cytoscape enabled: " <> show (not null validatedCy)
-      when (not null validatedCy) $ do
+      liftEff $ log $ "cytoscape enabled: " <> show (not null cyGraphs.results)
+      when (not null cyGraphs.results) $ do
         liftEff $ log "creating Cy.js"
         io.query $ H.action (CreateCy "http://localhost:8080/eles.json")
         liftEff $ log "created cy!"
