@@ -8,6 +8,8 @@ import Data.Foldable (and)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (maybe)
+import Data.Newtype (wrap)
+import Data.Predicate (Predicate(..))
 import Genetics.Browser.Cytoscape.Types (Cytoscape, Element, elementJObject)
 
 
@@ -44,16 +46,16 @@ foreign import connectedNodes :: forall e. CyCollection e
                               -> CyCollection e
 
 foreign import filter :: forall e.
-                         (e -> Boolean)
+                         Predicate e
                       -> CyCollection e
                       -> CyCollection e
 
-foreign import isNode :: Element -> Boolean
-foreign import isEdge :: Element -> Boolean
+foreign import isNode :: Predicate Element
+foreign import isEdge :: Predicate Element
 
 evenEdges :: CyCollection Element -> CyCollection Element
 evenEdges =
-  let evenId el = case (elementJObject el) .? "id" of
+  let evenId = wrap $ \el -> case (elementJObject el) .? "id" of
         Left _  -> false
         Right i -> i `mod` 2 == 0
       -- get all nodes with even IDs
@@ -64,7 +66,7 @@ evenEdges =
 
 evenEdgesWithNodes :: CyCollection Element -> CyCollection Element
 evenEdgesWithNodes coll =
-  let evenId el = case elementJObject el .? "id" of
+  let evenId = wrap $ \el -> case elementJObject el .? "id" of
         Left _  -> false
         Right i -> i `mod` 2 == 0
       edges = filter (and [isNode, evenId]) coll
@@ -73,7 +75,7 @@ evenEdgesWithNodes coll =
 
 evenEdgesWithNodes' :: CyCollection Element -> CyCollection Element
 evenEdgesWithNodes' =
-  let evenId el = case elementJObject el .? "id" of
+  let evenId = wrap $ \el -> case elementJObject el .? "id" of
         Left _  -> false
         Right i -> i `mod` 2 == 0
   in union <$> filter (and [isNode, evenId]) <*> connectedNodes
@@ -87,4 +89,4 @@ locPred chr obj = maybe false id $ do
 
 
 edgesLoc :: String -> CyCollection Element -> CyCollection Element
-edgesLoc chr = filter $ locPred chr <<< elementJObject
+edgesLoc chr = filter $ wrap $ locPred chr <<< elementJObject
