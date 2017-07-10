@@ -21,7 +21,9 @@
     "purescript-halogen": "^2.0.1",
     "purescript-argonaut": "^3.0.0",
     "purescript-coroutines": "^4.0.0",
-    "purescript-aff-coroutines": "^5.0.0"
+    "purescript-aff-coroutines": "^5.0.0",
+    "purescript-variant": "^1.1.0",
+    "purescript-contravariant": "3.1.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0",
