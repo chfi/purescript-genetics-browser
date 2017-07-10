@@ -21,10 +21,13 @@ import Data.Foreign.Class (decode, encode)
 import Data.Lens (re, (^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (Maybe(..))
+import Data.Newtype (wrap)
+import Data.Predicate (Predicate(..))
+import Data.Variant (default, inj)
 import Genetics.Browser.Cytoscape (ParsedEvent(..), runLayout, resizeContainer)
 import Genetics.Browser.Cytoscape.Collection (filter)
 import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
-import Genetics.Browser.Events (EventLocation(..), EventRange(..), JsonEvent(..))
+import Genetics.Browser.Events (Event(..), EventLocation, EventRange, Location, Range, _eventLocation, handleRange)
 import Genetics.Browser.Units (_BpMBp, _Chr, _MBp)
 import Global.Unsafe (unsafeStringify)
 import Network.HTTP.Affjax (AJAX)
@@ -35,15 +38,15 @@ type State = { cy :: Maybe Cytoscape
              , elemsUrl :: String
              }
 
-data Query a
+data Query r a
   = Initialize String a
   | Reset a
-  | Filter (Element -> Boolean) a
-  | RecvEvent JsonEvent a
-  | RaiseEvent Cytoscape.ParsedEvent (H.SubscribeStatus -> a)
+  | Filter (Predicate Element) a
+  | EventFromCy Cytoscape.ParsedEvent (H.SubscribeStatus -> a)
+  | RecvEvent (Event r) a
 
-data Output
-  = SendEvent JsonEvent
+data Output r
+  = SendEvent (Event r)
 
 type Effects eff = ( cy :: CY
                    , ajax :: AJAX
@@ -55,7 +58,12 @@ data Slot = Slot
 derive instance eqCySlot :: Eq Slot
 derive instance ordCySlot :: Ord Slot
 
-component :: ∀ eff. H.Component HH.HTML Query Unit Output (Aff (Effects eff))
+
+type HandledEvents r = ( range :: Range | r )
+
+type PossibleEvents r = ( location :: Location | r)
+
+component :: ∀ rq rm eff. H.Component HH.HTML (Query (HandledEvents rq)) Unit (Output (PossibleEvents rm)) (Aff (Effects eff))
 component =
   H.component
     { initialState: const initialState
@@ -71,7 +79,7 @@ component =
                  }
 
   -- TODO: set css here instead of pgb.html
-  render :: State -> H.ComponentHTML Query
+  render :: State -> H.ComponentHTML (Query (HandledEvents rq))
   render = const $ HH.div [ HP.ref (H.RefLabel "cy")
                           , HP.id_ "cyDiv"
                           -- , HP.prop
@@ -90,7 +98,7 @@ component =
     liftEff $ Cytoscape.graphAddCollection cy eles
 
 
-  eval :: Query ~> H.ComponentDSL State Query Output (Aff (Effects eff))
+  eval :: (Query (HandledEvents rq)) ~> H.ComponentDSL State (Query (HandledEvents rq)) (Output (PossibleEvents rm)) (Aff (Effects eff))
   eval = case _ of
     Initialize url next -> do
       H.getHTMLElementRef (H.RefLabel "cy") >>= case _ of
@@ -104,7 +112,7 @@ component =
             runLayout cy Cytoscape.circle
             resizeContainer cy
 
-          H.subscribe $ H.eventSource (Cytoscape.onClick cy) $ Just <<< H.request <<< RaiseEvent
+          H.subscribe $ H.eventSource (Cytoscape.onClick cy) $ Just <<< H.request <<< EventFromCy
           H.modify (_ { cy = Just cy
                       , elemsUrl = url
                       })
@@ -149,50 +157,51 @@ component =
       pure next
 
 
-    RaiseEvent (ParsedEvent pev) reply -> do
+    EventFromCy (ParsedEvent pev) reply -> do
 
       case pev.target of
           Left el -> do
             case cyParseEventLocation el of
               Nothing -> liftEff $ log "Error when parsing chr, pos of cytoscape event"
-              Just obj' -> H.raise $ SendEvent $ JsonEvent $ encode obj'
+              Just obj' -> H.raise $ SendEvent $ Event $ inj _eventLocation obj'
 
           Right cy -> pure unit
 
       pure $ reply H.Listening
 
 
-    RecvEvent (JsonEvent ev) next -> do
+    RecvEvent (Event v) next -> do
 
       H.gets _.cy >>= case _ of
         Nothing -> pure next
         Just cy -> do
           liftEff $ log "received event"
-          liftEff $ log $ unsafeStringify ev
+          liftEff $ log $ unsafeStringify v
 
-          case runExcept $ decode ev :: F EventRange of
-            Left _  -> liftEff $ log "couldn't parse range from event"
-            Right (EventRange ran) -> do
-              liftEff $ log $ unsafeStringify ran
+          (default (pure unit)
+            # handleRange \ran -> do
+
               let pred el = case cyParseEventLocation el of
                     Nothing -> false
-                    Just (EventLocation loc) -> loc.chr /= ran.chr
+                    Just loc -> loc.chr /= ran.chr
 
               graphColl <- liftEff $ Cytoscape.graphGetCollection cy
-              let eles = filter pred graphColl
+              let eles = filter (wrap pred) graphColl
               _ <- liftEff $ Cytoscape.graphRemoveCollection eles
               pure unit
+
+            ) v
 
 
           pure next
 
 
 -- TODO this should be less ad-hoc, somehow. future probs~~~
-cyParseEventLocation :: Element -> Maybe EventLocation
+cyParseEventLocation :: Element -> Maybe Location
 cyParseEventLocation el = do
   loc <- elementJObject el ^? ix "data" <<< _Object <<< ix "lrsLoc"
   chr <- loc ^? _Object <<< ix "chr" <<< _String <<< re _Chr
            -- ridiculous.
   pos <- loc ^? _Object <<< ix "pos" <<< _Number
                   <<< re _MBp <<< re _BpMBp
-  pure $ EventLocation { chr, pos }
+  pure $ { chr, pos }
