@@ -31,17 +31,16 @@ import Global.Unsafe (unsafeStringify)
 type State = { bd :: Maybe Biodalliance
              }
 
-data Query r a
+data Query a
   = Scroll Bp a
   | Jump Chr Bp Bp a
   | Initialize (forall eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance) a
   | InitializeCallback (H.SubscribeStatus -> a)
   | EventFromBD JObject (H.SubscribeStatus -> a)
-  | RecvEvent (Event r) a
+  -- | RecvEvent (Event r) a
 
-data Message r
+data Message
   = Initialized
-  | SendEvent (Event r)
 
 type Effects eff = (avar :: AVAR, bd :: BD, console :: CONSOLE | eff)
 
@@ -49,12 +48,8 @@ data Slot = Slot
 derive instance eqBDSlot :: Eq Slot
 derive instance ordBDSlot :: Ord Slot
 
-type HandledEvents r = ( location :: Location
-                       , range :: Range | r )
 
-type PossibleEvents r = ( range :: Range | r)
-
-component :: ∀ rq rm eff. H.Component HH.HTML (Query (HandledEvents rq)) Unit (Message (PossibleEvents rm)) (Aff (Effects eff))
+component :: ∀ eff. H.Component HH.HTML Query Unit Message (Aff (Effects eff))
 component =
   H.component
     { initialState: const initialState
@@ -113,36 +108,39 @@ component =
 
 
     EventFromBD ft reply -> do
-      let obj = do
-            chr <- ft ^? ix "chr" <<< _String <<< re _Chr
-            minPos <- ft ^? ix "min" <<< _Number <<< re _Bp
-            maxPos <- ft ^? ix "max" <<< _Number <<< re _Bp
-            pure $ { chr, minPos, maxPos }
 
-      case obj of
-        Nothing -> liftEff $ log "Error when parsing chr, min, max of BD event"
-        Just o  -> do
-          liftEff $ log "sending event from BD:"
-          liftEff $ log $ unsafeStringify o
-          H.raise $ SendEvent $ Event $ inj _eventRange o
+      -- _ <- createEvent SendEvent ft
+      -- let obj = do
+      --       chr <- ft ^? ix "chr" <<< _String <<< re _Chr
+      --       minPos <- ft ^? ix "min" <<< _Number <<< re _Bp
+      --       maxPos <- ft ^? ix "max" <<< _Number <<< re _Bp
+      --       pure $ { chr, minPos, maxPos }
+
+      -- case obj of
+      --   Nothing -> liftEff $ log "Error when parsing chr, min, max of BD event"
+      --   Just o  -> do
+      --     liftEff $ log "sending event from BD:"
+      --     liftEff $ log $ unsafeStringify o
+      --     H.raise $ SendEvent $ Event $ inj _eventRange o
 
       pure $ reply H.Listening
 
 
-    RecvEvent (Event v) next -> do
-      mbd <- H.gets _.bd
+    -- RecvEvent (Event v) next -> do
+    --   mbd <- H.gets _.bd
 
-      case mbd of
-        Nothing -> pure next
-        Just bd -> do
+    --   case mbd of
+    --     Nothing -> pure next
+    --     Just bd -> do
 
-          (default (pure unit)
-            # handleLocation (\loc -> do
-              let minPos = loc.pos - bp (MBp 1.5)
-                  maxPos = loc.pos + bp (MBp 1.5)
-              liftEff $ Biodalliance.setLocation bd loc.chr (mbp minPos) (mbp maxPos))
-            # handleRange (\ran -> do
-              liftEff $ Biodalliance.setLocation bd ran.chr ran.minPos ran.maxPos)
-            ) v
+    --       _ <- handleEvent bd v
+          -- (default (pure unit)
+          --   # handleLocation (\loc -> do
+          --     let minPos = loc.pos - bp (MBp 1.5)
+          --         maxPos = loc.pos + bp (MBp 1.5)
+          --     liftEff $ Biodalliance.setLocation bd loc.chr (mbp minPos) (mbp maxPos))
+          --   # handleRange (\ran -> do
+          --     liftEff $ Biodalliance.setLocation bd ran.chr ran.minPos ran.maxPos)
+          --   ) v
 
-          pure next
+          -- pure next

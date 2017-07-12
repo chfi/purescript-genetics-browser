@@ -38,15 +38,15 @@ type State = { cy :: Maybe Cytoscape
              , elemsUrl :: String
              }
 
-data Query r a
+data Query a
   = Initialize String a
   | Reset a
   | Filter (Predicate Element) a
   | EventFromCy Cytoscape.ParsedEvent (H.SubscribeStatus -> a)
-  | RecvEvent (Event r) a
+  -- | RecvEvent (Event r) a
 
-data Output r
-  = SendEvent (Event r)
+data Output
+  = SendEvent
 
 type Effects eff = ( cy :: CY
                    , ajax :: AJAX
@@ -59,11 +59,11 @@ derive instance eqCySlot :: Eq Slot
 derive instance ordCySlot :: Ord Slot
 
 
-type HandledEvents r = ( range :: Range | r )
+-- type HandledEvents r = ( range :: Range | r )
 
-type PossibleEvents r = ( location :: Location | r)
+-- type PossibleEvents r = ( location :: Location | r)
 
-component :: ∀ rq rm eff. H.Component HH.HTML (Query (HandledEvents rq)) Unit (Output (PossibleEvents rm)) (Aff (Effects eff))
+component :: ∀ eff. H.Component HH.HTML Query Unit Output (Aff (Effects eff))
 component =
   H.component
     { initialState: const initialState
@@ -79,7 +79,7 @@ component =
                  }
 
   -- TODO: set css here instead of pgb.html
-  render :: State -> H.ComponentHTML (Query (HandledEvents rq))
+  render :: State -> H.ComponentHTML Query
   render = const $ HH.div [ HP.ref (H.RefLabel "cy")
                           , HP.id_ "cyDiv"
                           -- , HP.prop
@@ -98,7 +98,7 @@ component =
     liftEff $ Cytoscape.graphAddCollection cy eles
 
 
-  eval :: (Query (HandledEvents rq)) ~> H.ComponentDSL State (Query (HandledEvents rq)) (Output (PossibleEvents rm)) (Aff (Effects eff))
+  eval :: Query ~> H.ComponentDSL State Query Output (Aff (Effects eff))
   eval = case _ of
     Initialize url next -> do
       H.getHTMLElementRef (H.RefLabel "cy") >>= case _ of
@@ -163,37 +163,38 @@ component =
           Left el -> do
             case cyParseEventLocation el of
               Nothing -> liftEff $ log "Error when parsing chr, pos of cytoscape event"
-              Just obj' -> H.raise $ SendEvent $ Event $ inj _eventLocation obj'
+              -- Just obj' -> H.raise $ SendEvent $ Event $ inj _eventLocation obj'
+              Just obj' -> H.raise $ SendEvent
 
           Right cy -> pure unit
 
       pure $ reply H.Listening
 
 
-    RecvEvent (Event v) next -> do
+    -- RecvEvent (Event v) next -> do
 
-      H.gets _.cy >>= case _ of
-        Nothing -> pure next
-        Just cy -> do
-          liftEff $ log "received event"
-          liftEff $ log $ unsafeStringify v
+    --   H.gets _.cy >>= case _ of
+    --     Nothing -> pure next
+    --     Just cy -> do
+    --       liftEff $ log "received event"
+    --       liftEff $ log $ unsafeStringify v
 
-          (default (pure unit)
-            # handleRange \ran -> do
+    --       (default (pure unit)
+    --         # handleRange \ran -> do
 
-              let pred el = case cyParseEventLocation el of
-                    Nothing -> false
-                    Just loc -> loc.chr /= ran.chr
+    --           let pred el = case cyParseEventLocation el of
+    --                 Nothing -> false
+    --                 Just loc -> loc.chr /= ran.chr
 
-              graphColl <- liftEff $ Cytoscape.graphGetCollection cy
-              let eles = filter (wrap pred) graphColl
-              _ <- liftEff $ Cytoscape.graphRemoveCollection eles
-              pure unit
+    --           graphColl <- liftEff $ Cytoscape.graphGetCollection cy
+    --           let eles = filter (wrap pred) graphColl
+    --           _ <- liftEff $ Cytoscape.graphRemoveCollection eles
+    --           pure unit
 
-            ) v
+    --         ) v
 
 
-          pure next
+    --       pure next
 
 
 -- TODO this should be less ad-hoc, somehow. future probs~~~
