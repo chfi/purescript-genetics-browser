@@ -3,15 +3,18 @@ module Genetics.Browser.UI.Biodalliance
 
 import Prelude
 import Genetics.Browser.Biodalliance as Biodalliance
+import Genetics.Browser.UI.Events.Biodalliance as BDEvents
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Properties as HP
-import Control.Monad.Aff (Aff)
+import Control.Monad.Aff (Aff, forkAff)
 import Control.Monad.Aff.AVar (AVAR)
+import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff, liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Except (runExcept)
+import Control.Monad.Rec.Class (forever)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut (_Number, _String)
 import Data.Argonaut.Core (JObject)
@@ -26,6 +29,7 @@ import Genetics.Browser.Events (Event(..), EventLocation, EventRange, Location, 
 import Genetics.Browser.Types (BD, Biodalliance)
 import Genetics.Browser.Units (Bp, Chr, MBp(MBp), _Bp, _Chr, bp, mbp)
 import Global.Unsafe (unsafeStringify)
+import Unsafe.Coerce (unsafeCoerce)
 
 
 type State = { bd :: Maybe Biodalliance
@@ -35,6 +39,8 @@ data Query a
   = Scroll Bp a
   | Jump Chr Bp Bp a
   | Initialize (forall eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance) a
+  | AttachHandler (Biodalliance -> Aff (bd :: BD, console :: CONSOLE, avar :: AVAR ) Unit) a
+  -- | AttachHandler (forall eff. Biodalliance -> Aff (bd :: BD, console :: CONSOLE, avar :: AVAR | eff) Unit) a
   | InitializeCallback (H.SubscribeStatus -> a)
   | EventFromBD JObject (H.SubscribeStatus -> a)
   -- | RecvEvent (Event r) a
@@ -62,12 +68,12 @@ component =
   initialState :: State
   initialState = { bd: Nothing }
 
-  render :: State -> H.ComponentHTML (Query (HandledEvents rq))
+  render :: State -> H.ComponentHTML Query
   render = const $ HH.div [ HP.ref (H.RefLabel "bd")
                           , HP.id_ "bdDiv"
                           ] []
 
-  eval :: (Query (HandledEvents rq)) ~> H.ComponentDSL State (Query (HandledEvents rq)) (Message (PossibleEvents rm)) (Aff (Effects eff))
+  eval :: Query ~> H.ComponentDSL State Query Message (Aff (Effects eff))
   eval = case _ of
     Initialize mkBd next -> do
       H.getHTMLElementRef (H.RefLabel "bd") >>= case _ of
@@ -81,6 +87,16 @@ component =
             $ Just <<< H.request <<< EventFromBD
 
           H.modify (_ { bd = Just bd })
+      pure next
+
+    AttachHandler h next -> do
+      mbd <- H.gets _.bd
+      case mbd of
+        Nothing -> pure unit
+        Just bd -> do
+          _ <- liftAff $ forkAff $ unsafeCoerce $ h bd
+          pure unit
+          -- _ <- forkAff h bd
       pure next
 
 
