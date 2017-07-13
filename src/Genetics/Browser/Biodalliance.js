@@ -33,7 +33,7 @@ exports.initBDimpl = function(opts) {
                         // All the maxHeight does is set the BD holder CSS...
                         // Should (somehow) be controlled by PS.
                         // maxHeight: opts.maxHeight || 1000,
-                        maxHeight: null,
+                        maxHeight: 1000000,
 
                         // BD remembering anything will probably only lead to
                         // inconsistencies with the main container
