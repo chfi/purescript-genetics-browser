@@ -16,6 +16,7 @@
   },
   "scripts": {
     "deps": "bower install",
-    "build": "pulp browserify --main Genetics.Browser.UI.Container --skip-entry-point --standalone PS --to"
+    "build": "pulp browserify --main Genetics.Browser.UI.Container --skip-entry-point --standalone PS --to",
+    "watch": "pulp --watch browserify --main Genetics.Browser.UI.Container --skip-entry-point --standalone PS --to"
   }
 }

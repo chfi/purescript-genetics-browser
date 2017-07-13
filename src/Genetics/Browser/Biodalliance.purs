@@ -49,7 +49,7 @@ maxHeight = opt "maxHeight"
 --         -- the latter will be relevant to native PS tracks, probably
 foreign import addFeatureListener :: ∀ eff a.
                                      Biodalliance
-                                  -> (JObject -> Eff (bd :: BD | eff) a)
+                                  -> (JObject -> Eff eff a)
                                   -> Eff (bd :: BD | eff) Unit
 
 foreign import addInitListener :: forall eff a.

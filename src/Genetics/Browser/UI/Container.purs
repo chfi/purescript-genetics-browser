@@ -2,7 +2,10 @@ module Genetics.Browser.UI.Container
        where
 
 import Prelude
+import Control.Coroutine as CR
+import Control.Monad.Aff as Aff
 import Control.Monad.Aff.Bus as Bus
+import Genetics.Browser.Biodalliance as Biodalliance
 import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot as QTL
 import Genetics.Browser.UI.Biodalliance as UIBD
@@ -13,56 +16,96 @@ import Halogen.Aff as HA
 import Halogen.Component.ChildPath as CP
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
-import Control.Monad.Aff (Aff)
+import Control.Monad.Aff (Aff, Canceler(..), forkAff)
 import Control.Monad.Aff.AVar (AVAR)
-import Control.Monad.Aff.Bus (BusR)
+import Control.Monad.Aff.Bus (BusR, BusRW)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Rec.Class (forever)
 import DOM.HTML.Types (HTMLElement)
+import Data.Argonaut (_Number, _String)
+import Data.Argonaut.Core (JObject)
 import Data.Array (null)
 import Data.Const (Const)
 import Data.Either.Nested (Either2, Either1)
 import Data.Foldable (foldMap)
 import Data.Functor.Coproduct.Nested (type (<\/>))
-import Data.Maybe (Maybe(Just, Nothing))
+import Data.Lens (re, (^?))
+import Data.Lens.Index (ix)
+import Data.Maybe (Maybe(Just, Nothing), maybe)
 import Data.Newtype (wrap)
 import Data.Options (Options, (:=))
 import Data.Symbol (SProxy(..))
 import Data.Tuple (fst)
-import Data.Variant (Variant, default, on)
-import Genetics.Browser.Biodalliance (RendererInfo, initBD, renderers, sources)
+import Data.Variant (Variant, case_, default, inj, on)
+import Genetics.Browser.Biodalliance (RendererInfo, initBD, renderers, setLocation, sources)
 import Genetics.Browser.Config (BrowserConfig(..))
 import Genetics.Browser.Config.Track (CyGraphConfig, validateConfigs)
+import Genetics.Browser.Cytoscape.Types (Cytoscape)
 import Genetics.Browser.Events (Event(..), Location, Range)
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
 import Genetics.Browser.Types (BD, Biodalliance, Renderer)
-import Genetics.Browser.Units (Bp(Bp), Chr)
+import Genetics.Browser.Units (Bp(Bp), Chr, _Bp, _Chr, bp)
 import Global.Unsafe (unsafeStringify)
 import Halogen.VDom.Driver (runUI)
 import Unsafe.Coerce (unsafeCoerce)
 
 
+type BDEventEff eff = (console :: CONSOLE, bd :: BD, avar :: AVAR | eff)
 
 
-setBDHandler :: forall r .
-                (Biodalliance -> Variant r -> Eff (bd :: BD, console :: CONSOLE, avar :: AVAR ) Unit)
-             -> BusR (Variant r)
-             -> Biodalliance
-             -> Aff ( bd :: BD, console :: CONSOLE, avar :: AVAR  ) Unit
-setBDHandler h bus bd = forever do
+locationHandler :: forall eff. Biodalliance -> Location -> Eff (BDEventEff eff) Unit
+locationHandler bd loc = do
+  log "got location"
+  setLocation bd loc.chr (bp loc.pos - Bp 1000000.0) (bp loc.pos + Bp 1000000.0)
+
+rangeHandler :: forall eff. Biodalliance -> Range -> Eff (BDEventEff eff) Unit
+rangeHandler bd ran= do
+  log "got range"
+  setLocation bd ran.chr ran.minPos ran.maxPos
+
+
+createBDHandler :: forall eff. { location :: Biodalliance -> Location -> Eff _ Unit
+                               , range :: Biodalliance -> Range -> Eff _ Unit }
+                -> Biodalliance
+                -> BusRW (Variant (location :: Location, range :: Range))
+                -> Aff _ (Canceler _)
+createBDHandler {location, range} bd bus = forkAff $ forever do
   val <- Bus.read bus
-  liftEff $ h bd val
+  liftEff $ (default (pure unit)
+    # on (SProxy :: SProxy "location") (location bd)
+    # on (SProxy :: SProxy "range") (range bd)
+    ) val
 
 
-bdHandler :: forall eff. Biodalliance -> Variant (location :: Location, range :: Range) -> Eff (console :: CONSOLE | eff) Unit
-bdHandler bd =
-  default (log "default event got")
-  # on (SProxy :: SProxy "location") (\loc -> log "got location")
-  # on (SProxy :: SProxy "range") (\ran -> log "got range")
 
 
+parseRangeEvent :: JObject -> Maybe Range
+parseRangeEvent obj = do
+  chr <- obj ^? ix "chr" <<< _String <<< re _Chr
+  minPos <- obj ^? ix "min" <<< _Number <<< re _Bp
+  maxPos <- obj ^? ix "max" <<< _Number <<< re _Bp
+  pure $ {chr, minPos, maxPos}
+
+
+subscribeBDEvents :: { range :: JObject -> Maybe Range
+                     }
+                  -> Biodalliance
+                  -> BusRW (Variant (range :: Range))
+                  -> Eff _ Unit
+subscribeBDEvents {range} bd bus =
+  Biodalliance.addFeatureListener bd $ \obj -> do
+    case range obj of
+      Nothing -> pure unit
+      Just ran -> do
+        _ <- Aff.launchAff $ Bus.write (inj (SProxy :: SProxy "range") ran) bus
+        pure unit
+    -- case location obj of
+    --   Nothing -> pure unit
+    --   Just loc -> do
+    --     _ <- Aff.launchAff $ Bus.write (inj (SProxy :: SProxy "location") loc) bus
+    --     pure unit
 
 
 qtlGlyphify :: LinePlotConfig -> Renderer
@@ -79,21 +122,23 @@ type State = Unit
 data Query a
   = Nop a
   | CreateBD (∀ eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance) a
-  -- | AttachBDHandler (forall r eff. BDEventInHandler r eff) a
-  -- | AttachBDHandler (forall eff. Biodalliance -> Aff (bd :: BD, console :: CONSOLE, avar :: AVAR | eff) Unit) a
-  | AttachBDHandler (forall eff. Biodalliance -> Aff eff Unit) a
+  | PropagateMessage Message a
   | BDScroll Bp a
   | BDJump Chr Bp Bp a
   | CreateCy String a
   | ResetCy a
-  -- | DistributeEvent Track (Event r) a
+
+data Message
+  = BDInstance Biodalliance
+  | CyInstance Cytoscape
+  -- | WithCy Cytoscape
 
 type ChildSlot = Either2 UIBD.Slot UICy.Slot
 
 type ChildQuery = UIBD.Query <\/> UICy.Query <\/> Const Void
 type Effects eff = UIBD.Effects (UICy.Effects eff)
 
-component :: ∀ eff. H.Component HH.HTML Query Unit Void (Aff (Effects eff))
+component :: ∀ eff. H.Component HH.HTML Query Unit Message (Aff (Effects eff))
 component =
   H.parentComponent
     { initialState: const initialState
@@ -128,12 +173,6 @@ component =
         , HH.div
             [] [HH.slot' CP.cp2 UICy.Slot UICy.component unit handleCyMessage]
         ]
-      -- , HH.div
-      --     [
-      --       -- fix stylesheet - should be on the right hand side, not too wide...
-      --     ]
-      --     [
-      --     ]
       ]
 
   -- addCyGraph :: Maybe CyGraphConfig -> _
@@ -142,10 +181,10 @@ component =
   --   Just cy -> [HH.div [] [HH.slot' CP.cp2 UICy.Slot UICy.component unit handleCyMessage]]
 
   -- handleBDMessage :: UIBD.Message bdm -> Maybe (Query r Unit)
-  handleBDMessage :: _
+  handleBDMessage :: UIBD.Message -> Maybe (Query Unit)
   -- handleBDMessage UIBD.Initialized = Just $ ResetCy unit
+  handleBDMessage (UIBD.SendBD bd) = Just $ H.action $ PropagateMessage (BDInstance bd)
   handleBDMessage _ = Nothing
-  -- handleBDMessage (UIBD.SendEvent obj) = Just $ DistributeEvent BDTrack obj unit
 
      -- TODO the event source track should be handled automatically somehow
   handleCyMessage :: _
@@ -153,7 +192,7 @@ component =
   -- handleCyMessage :: UICy.Output cym -> Maybe (Query r Unit)
   -- handleCyMessage (UICy.SendEvent ev) = Just $ DistributeEvent CyTrack ev unit
 
-  eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Void (Aff (Effects eff))
+  eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Message (Aff (Effects eff))
   eval = case _ of
     Nop next -> do
       pure next
@@ -161,9 +200,11 @@ component =
     CreateBD bd next -> do
       _ <- H.query' CP.cp1 UIBD.Slot $ H.action (UIBD.Initialize bd)
       pure next
-    AttachBDHandler bd next -> do
-      _ <- H.query' CP.cp1 UIBD.Slot $ H.action (UIBD.AttachHandler bd)
+
+    PropagateMessage msg next -> do
+      H.raise msg
       pure next
+
     BDScroll dist next -> do
       _ <- H.query' CP.cp1 UIBD.Slot $ H.action (UIBD.Scroll dist)
       pure next
@@ -178,17 +219,6 @@ component =
       _ <- H.query' CP.cp2 UICy.Slot $ H.action UICy.Reset
       pure next
 
-    -- DistributeEvent from ev next -> do
-    --   liftEff $ log "container is distributing event:"
-    --   liftEff $ log $ unsafeStringify ev
-
-      -- _ <- case from of
-        -- BDTrack ->
-        --   H.query' CP.cp2 UICy.Slot $ H.action (UICy.RecvEvent ev)
-        -- CyTrack ->
-        --   H.query' CP.cp1 UIBD.Slot $ H.action (UIBD.RecvEvent ev)
-
-      -- pure next
 
 
 qtlRenderer :: RendererInfo
@@ -226,22 +256,29 @@ main (BrowserConfig { wrapRenderer, browser, tracks }) = HA.runHalogenAff do
   liftEff $ log "running main"
   HA.awaitLoad
   el <- HA.selectElement (wrap "#psgbHolder")
+
   case el of
     Nothing -> do
       liftEff $ log "no element for browser!"
     Just el' -> do
       io <- runUI component unit el'
-      liftEff $ log "creating BD event in bus"
-      busTuple <- Bus.split <$> Bus.make
-      let h :: Biodalliance -> Aff ( bd :: BD, console :: CONSOLE , avar :: AVAR) Unit
-          h = setBDHandler bdHandler (fst busTuple)
+      liftEff $ log "creating BD event buses"
+      busToBD <- Bus.make
+      busFromBD <- Bus.make
+      io.subscribe $ CR.consumer $ case _ of
+        BDInstance bd -> do
+          _ <- createBDHandler { location: locationHandler
+                               , range: rangeHandler } bd busToBD
+          _ <- liftEff $ subscribeBDEvents { range: parseRangeEvent } bd busFromBD
+          pure Nothing
+        _ -> pure (Just unit)
+
       liftEff $ log "creating BD"
       io.query $ H.action (CreateBD mkBd)
-      -- io.query $ H.action (AttachBDHandler h)
-      io.query $ H.action (AttachBDHandler (unsafeCoerce h))
+
       liftEff $ log "created BD!"
       liftEff $ log $ "cytoscape enabled: " <> show (not null cyGraphs.results)
       -- when (not null cyGraphs.results) $ do
-      --   liftEff $ log "creating Cy.js"
-      --   io.query $ H.action (CreateCy "http://localhost:8080/eles.json")
-      --   liftEff $ log "created cy!"
+      liftEff $ log "creating Cy.js"
+      io.query $ H.action (CreateCy "http://localhost:8080/eles.json")
+      liftEff $ log "created cy!"
