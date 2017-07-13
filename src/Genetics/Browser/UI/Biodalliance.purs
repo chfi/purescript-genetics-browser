@@ -39,14 +39,12 @@ data Query a
   = Scroll Bp a
   | Jump Chr Bp Bp a
   | Initialize (forall eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance) a
-  | AttachHandler (Biodalliance -> Aff (bd :: BD, console :: CONSOLE, avar :: AVAR ) Unit) a
-  -- | AttachHandler (forall eff. Biodalliance -> Aff (bd :: BD, console :: CONSOLE, avar :: AVAR | eff) Unit) a
   | InitializeCallback (H.SubscribeStatus -> a)
   | EventFromBD JObject (H.SubscribeStatus -> a)
-  -- | RecvEvent (Event r) a
 
 data Message
   = Initialized
+  | SendBD Biodalliance
 
 type Effects eff = (avar :: AVAR, bd :: BD, console :: CONSOLE | eff)
 
@@ -85,18 +83,10 @@ component =
 
           H.subscribe $ H.eventSource (Biodalliance.addFeatureListener bd)
             $ Just <<< H.request <<< EventFromBD
+          H.raise $ SendBD bd
 
           H.modify (_ { bd = Just bd })
-      pure next
 
-    AttachHandler h next -> do
-      mbd <- H.gets _.bd
-      case mbd of
-        Nothing -> pure unit
-        Just bd -> do
-          _ <- liftAff $ forkAff $ unsafeCoerce $ h bd
-          pure unit
-          -- _ <- forkAff h bd
       pure next
 
 
@@ -125,38 +115,5 @@ component =
 
     EventFromBD ft reply -> do
 
-      -- _ <- createEvent SendEvent ft
-      -- let obj = do
-      --       chr <- ft ^? ix "chr" <<< _String <<< re _Chr
-      --       minPos <- ft ^? ix "min" <<< _Number <<< re _Bp
-      --       maxPos <- ft ^? ix "max" <<< _Number <<< re _Bp
-      --       pure $ { chr, minPos, maxPos }
-
-      -- case obj of
-      --   Nothing -> liftEff $ log "Error when parsing chr, min, max of BD event"
-      --   Just o  -> do
-      --     liftEff $ log "sending event from BD:"
-      --     liftEff $ log $ unsafeStringify o
-      --     H.raise $ SendEvent $ Event $ inj _eventRange o
 
       pure $ reply H.Listening
-
-
-    -- RecvEvent (Event v) next -> do
-    --   mbd <- H.gets _.bd
-
-    --   case mbd of
-    --     Nothing -> pure next
-    --     Just bd -> do
-
-    --       _ <- handleEvent bd v
-          -- (default (pure unit)
-          --   # handleLocation (\loc -> do
-          --     let minPos = loc.pos - bp (MBp 1.5)
-          --         maxPos = loc.pos + bp (MBp 1.5)
-          --     liftEff $ Biodalliance.setLocation bd loc.chr (mbp minPos) (mbp maxPos))
-          --   # handleRange (\ran -> do
-          --     liftEff $ Biodalliance.setLocation bd ran.chr ran.minPos ran.maxPos)
-          --   ) v
-
-          -- pure next
