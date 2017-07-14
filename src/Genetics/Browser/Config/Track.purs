@@ -48,20 +48,20 @@ getTrackType json = readTrackType =<< json ^? _Object <<< ix "trackType" <<< _St
 -- validateTrackConfig :: Json -> Either String (Either BDTrackConfig CyGraphConfig)
 -- validateTrackConfig :: Json -> Either String (Either3 BDTrackConfig PSTrackConfig CyGraphConfig)
 
-newtype BDTrackConfig = BDTrackConfig Foreign
+newtype BDTrackConfig = BDTrackConfig Json
 
 validateBDConfig :: Json -> Either String BDTrackConfig
 validateBDConfig json = case json ^? _Object <<< ix "name" of
   Nothing -> Left $ "BD track config does not have a name"
-  Just c  -> Right $ BDTrackConfig $ toForeign json
+  Just c  -> Right $ BDTrackConfig $ json
 
 
-newtype CyGraphConfig = CyGraphConfig Foreign
+newtype CyGraphConfig = CyGraphConfig Json
 
 validateCyConfig :: Json -> Either String CyGraphConfig
 validateCyConfig json = case json ^? _Object <<< ix "elementsUri" of
   Nothing -> Left $ "cy graph config does not have an elementsUri"
-  Just c  -> Right $ CyGraphConfig $ toForeign json
+  Just c  -> Right $ CyGraphConfig $ json
 
 
 
