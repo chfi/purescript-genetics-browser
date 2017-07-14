@@ -6,6 +6,7 @@ import Control.Coroutine as CR
 import Control.Monad.Aff as Aff
 import Control.Monad.Aff.Bus as Bus
 import Genetics.Browser.Biodalliance as Biodalliance
+import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot as QTL
 import Genetics.Browser.UI.Biodalliance as UIBD
@@ -24,10 +25,11 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Rec.Class (forever)
 import DOM.HTML.Types (HTMLElement)
-import Data.Argonaut (_Number, _String)
+import Data.Argonaut (_Number, _Object, _String)
 import Data.Argonaut.Core (JObject)
 import Data.Array (null)
 import Data.Const (Const)
+import Data.Either (Either(..))
 import Data.Either.Nested (Either2, Either1)
 import Data.Foldable (foldMap)
 import Data.Functor.Coproduct.Nested (type (<\/>))
@@ -42,11 +44,13 @@ import Data.Variant (Variant, case_, default, inj, on)
 import Genetics.Browser.Biodalliance (RendererInfo, initBD, renderers, setLocation, sources)
 import Genetics.Browser.Config (BrowserConfig(..))
 import Genetics.Browser.Config.Track (CyGraphConfig, validateConfigs)
-import Genetics.Browser.Cytoscape.Types (Cytoscape)
+import Genetics.Browser.Cytoscape (ParsedEvent(..))
+import Genetics.Browser.Cytoscape.Collection (filter)
+import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
 import Genetics.Browser.Events (Event(..), Location, Range)
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
 import Genetics.Browser.Types (BD, Biodalliance, Renderer)
-import Genetics.Browser.Units (Bp(Bp), Chr, _Bp, _Chr, bp)
+import Genetics.Browser.Units (Bp(Bp), Chr, _Bp, _BpMBp, _Chr, _MBp, bp)
 import Global.Unsafe (unsafeStringify)
 import Halogen.VDom.Driver (runUI)
 import Unsafe.Coerce (unsafeCoerce)
@@ -55,15 +59,29 @@ import Unsafe.Coerce (unsafeCoerce)
 type BDEventEff eff = (console :: CONSOLE, bd :: BD, avar :: AVAR | eff)
 
 
-locationHandler :: forall eff. Biodalliance -> Location -> Eff (BDEventEff eff) Unit
-locationHandler bd loc = do
-  log "got location"
+locationHandlerBD :: forall eff. Biodalliance -> Location -> Eff (BDEventEff eff) Unit
+locationHandlerBD bd loc = do
+  log "bd got location"
   setLocation bd loc.chr (bp loc.pos - Bp 1000000.0) (bp loc.pos + Bp 1000000.0)
 
-rangeHandler :: forall eff. Biodalliance -> Range -> Eff (BDEventEff eff) Unit
-rangeHandler bd ran= do
-  log "got range"
+rangeHandlerBD :: forall eff. Biodalliance -> Range -> Eff (BDEventEff eff) Unit
+rangeHandlerBD bd ran= do
+  log "bd got range"
   setLocation bd ran.chr ran.minPos ran.maxPos
+
+
+type CyEventEff eff = (console :: CONSOLE, cy :: CY, avar :: AVAR | eff)
+
+rangeHandlerCy :: forall eff. Cytoscape -> Range -> Eff (CyEventEff eff) Unit
+rangeHandlerCy cy ran = do
+  log "cy got range"
+  let pred el = case parseLocationElementCy el of
+        Nothing -> false
+        Just loc -> loc.chr /= ran.chr
+  graphColl <- liftEff $ Cytoscape.graphGetCollection cy
+  let eles = filter (wrap pred) graphColl
+  _ <- liftEff $ Cytoscape.graphRemoveCollection eles
+  pure unit
 
 
 createBDHandler :: forall eff. { location :: Biodalliance -> Location -> Eff _ Unit
@@ -79,15 +97,39 @@ createBDHandler {location, range} bd bus = forkAff $ forever do
     ) val
 
 
+createCyHandler :: forall eff. { range :: Cytoscape -> Range -> Eff _ Unit }
+                -> Cytoscape
+                -> BusRW (Variant (range :: Range))
+                -> Aff _ (Canceler _)
+createCyHandler {range} cy bus = forkAff $ forever do
+  val <- Bus.read bus
+  liftEff $ (default (pure unit)
+    # on (SProxy :: SProxy "range") (range cy)
+    ) val
 
 
-parseRangeEvent :: JObject -> Maybe Range
-parseRangeEvent obj = do
+parseRangeEventBD :: JObject -> Maybe Range
+parseRangeEventBD obj = do
   chr <- obj ^? ix "chr" <<< _String <<< re _Chr
   minPos <- obj ^? ix "min" <<< _Number <<< re _Bp
   maxPos <- obj ^? ix "max" <<< _Number <<< re _Bp
   pure $ {chr, minPos, maxPos}
 
+
+parseLocationElementCy :: Element -> Maybe Location
+parseLocationElementCy el = do
+    loc <- elementJObject el ^? ix "data" <<< _Object <<< ix "lrsLoc"
+    chr <- loc ^? _Object <<< ix "chr" <<< _String <<< re _Chr
+            -- ridiculous.
+    pos <- loc ^? _Object <<< ix "pos" <<< _Number
+                    <<< re _MBp <<< re _BpMBp
+    pure $ { chr, pos }
+
+
+parseLocationEventCy :: ParsedEvent -> Maybe Location
+parseLocationEventCy (ParsedEvent ev) = case ev.target of
+  Left el -> parseLocationElementCy el
+  Right _ -> Nothing
 
 subscribeBDEvents :: { range :: JObject -> Maybe Range
                      }
@@ -99,6 +141,7 @@ subscribeBDEvents {range} bd bus =
     case range obj of
       Nothing -> pure unit
       Just ran -> do
+        liftEff $ log $ "BD sending range: " <> unsafeStringify range
         _ <- Aff.launchAff $ Bus.write (inj (SProxy :: SProxy "range") ran) bus
         pure unit
     -- case location obj of
@@ -106,6 +149,20 @@ subscribeBDEvents {range} bd bus =
     --   Just loc -> do
     --     _ <- Aff.launchAff $ Bus.write (inj (SProxy :: SProxy "location") loc) bus
     --     pure unit
+
+
+subscribeCyEvents :: { location :: ParsedEvent -> Maybe Location }
+                  -> Cytoscape
+                  -> BusRW (Variant (location :: Location))
+                  -> Eff _ Unit
+subscribeCyEvents {location} cy bus =
+  Cytoscape.onClick cy $ \obj -> do
+    case location obj of
+      Nothing -> pure unit
+      Just loc -> do
+        liftEff $ log $ "cy sending location: " <> unsafeStringify loc
+        _ <- Aff.launchAff $ Bus.write (inj (SProxy :: SProxy "location") loc) bus
+        pure unit
 
 
 qtlGlyphify :: LinePlotConfig -> Renderer
@@ -120,8 +177,7 @@ data Track = BDTrack | CyTrack
 type State = Unit
 
 data Query a
-  = Nop a
-  | CreateBD (∀ eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance) a
+  = CreateBD (∀ eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance) a
   | PropagateMessage Message a
   | BDScroll Bp a
   | BDJump Chr Bp Bp a
@@ -180,23 +236,18 @@ component =
   --   Nothing -> []
   --   Just cy -> [HH.div [] [HH.slot' CP.cp2 UICy.Slot UICy.component unit handleCyMessage]]
 
-  -- handleBDMessage :: UIBD.Message bdm -> Maybe (Query r Unit)
   handleBDMessage :: UIBD.Message -> Maybe (Query Unit)
-  -- handleBDMessage UIBD.Initialized = Just $ ResetCy unit
+  handleBDMessage UIBD.Initialized = Nothing
   handleBDMessage (UIBD.SendBD bd) = Just $ H.action $ PropagateMessage (BDInstance bd)
-  handleBDMessage _ = Nothing
 
-     -- TODO the event source track should be handled automatically somehow
-  handleCyMessage :: _
-  handleCyMessage _ = Nothing
-  -- handleCyMessage :: UICy.Output cym -> Maybe (Query r Unit)
-  -- handleCyMessage (UICy.SendEvent ev) = Just $ DistributeEvent CyTrack ev unit
+  -- TODO the event source track should be handled automatically somehow
+  handleCyMessage :: UICy.Output -> Maybe (Query Unit)
+  handleCyMessage (UICy.SendCy cy) = Just $ H.action $ PropagateMessage (CyInstance cy)
+  handleCyMessage (UICy.SendEvent) = Nothing
+
 
   eval :: Query ~> H.ParentDSL State Query ChildQuery ChildSlot Message (Aff (Effects eff))
   eval = case _ of
-    Nop next -> do
-      pure next
-
     CreateBD bd next -> do
       _ <- H.query' CP.cp1 UIBD.Slot $ H.action (UIBD.Initialize bd)
       pure next
@@ -265,13 +316,24 @@ main (BrowserConfig { wrapRenderer, browser, tracks }) = HA.runHalogenAff do
       liftEff $ log "creating BD event buses"
       busToBD <- Bus.make
       busFromBD <- Bus.make
+      busToCy <- Bus.make
+      busFromCy <- Bus.make
+
       io.subscribe $ CR.consumer $ case _ of
         BDInstance bd -> do
-          _ <- createBDHandler { location: locationHandler
-                               , range: rangeHandler } bd busToBD
-          _ <- liftEff $ subscribeBDEvents { range: parseRangeEvent } bd busFromBD
+          liftEff $ log "attaching "
+          _ <- createBDHandler { location: locationHandlerBD
+                               , range: rangeHandlerBD } bd busToBD
+          _ <- liftEff $ subscribeBDEvents { range: parseRangeEventBD } bd busFromBD
           pure Nothing
-        _ -> pure (Just unit)
+        _ -> pure $ Just unit
+
+      io.subscribe $ CR.consumer $ case _ of
+        CyInstance cy -> do
+          _ <- createCyHandler { range: rangeHandlerCy } cy busToCy
+          _ <- liftEff $ subscribeCyEvents { location: parseLocationEventCy } cy busFromCy
+          pure Nothing
+        _ -> pure $ Just unit
 
       liftEff $ log "creating BD"
       io.query $ H.action (CreateBD mkBd)
