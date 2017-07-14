@@ -40,7 +40,6 @@ data Query a
   | Jump Chr Bp Bp a
   | Initialize (forall eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance) a
   | InitializeCallback (H.SubscribeStatus -> a)
-  | EventFromBD JObject (H.SubscribeStatus -> a)
 
 data Message
   = Initialized
@@ -79,10 +78,6 @@ component =
         Just el -> do
           bd <- liftEff $ mkBd el
 
-          H.subscribe $ H.eventSource_ (Biodalliance.onInit bd) (H.request InitializeCallback)
-
-          H.subscribe $ H.eventSource (Biodalliance.addFeatureListener bd)
-            $ Just <<< H.request <<< EventFromBD
           H.raise $ SendBD bd
 
           H.modify (_ { bd = Just bd })
@@ -110,10 +105,4 @@ component =
 
     InitializeCallback reply -> do
       H.raise $ Initialized
-      pure $ reply H.Listening
-
-
-    EventFromBD ft reply -> do
-
-
       pure $ reply H.Listening

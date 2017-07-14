@@ -42,11 +42,10 @@ data Query a
   = Initialize String a
   | Reset a
   | Filter (Predicate Element) a
-  | EventFromCy Cytoscape.ParsedEvent (H.SubscribeStatus -> a)
-  -- | RecvEvent (Event r) a
 
 data Output
   = SendEvent
+  | SendCy Cytoscape
 
 type Effects eff = ( cy :: CY
                    , ajax :: AJAX
@@ -112,7 +111,8 @@ component =
             runLayout cy Cytoscape.circle
             resizeContainer cy
 
-          H.subscribe $ H.eventSource (Cytoscape.onClick cy) $ Just <<< H.request <<< EventFromCy
+          H.raise $ SendCy cy
+
           H.modify (_ { cy = Just cy
                       , elemsUrl = url
                       })
@@ -156,48 +156,8 @@ component =
 
       pure next
 
-
-    EventFromCy (ParsedEvent pev) reply -> do
-
-      case pev.target of
-          Left el -> do
-            case cyParseEventLocation el of
-              Nothing -> liftEff $ log "Error when parsing chr, pos of cytoscape event"
-              -- Just obj' -> H.raise $ SendEvent $ Event $ inj _eventLocation obj'
-              Just obj' -> H.raise $ SendEvent
-
-          Right cy -> pure unit
-
-      pure $ reply H.Listening
-
-
-    -- RecvEvent (Event v) next -> do
-
-    --   H.gets _.cy >>= case _ of
-    --     Nothing -> pure next
-    --     Just cy -> do
-    --       liftEff $ log "received event"
-    --       liftEff $ log $ unsafeStringify v
-
-    --       (default (pure unit)
-    --         # handleRange \ran -> do
-
-    --           let pred el = case cyParseEventLocation el of
-    --                 Nothing -> false
-    --                 Just loc -> loc.chr /= ran.chr
-
-    --           graphColl <- liftEff $ Cytoscape.graphGetCollection cy
-    --           let eles = filter (wrap pred) graphColl
-    --           _ <- liftEff $ Cytoscape.graphRemoveCollection eles
-    --           pure unit
-
-    --         ) v
-
-
-    --       pure next
-
-
 -- TODO this should be less ad-hoc, somehow. future probs~~~
+
 cyParseEventLocation :: Element -> Maybe Location
 cyParseEventLocation el = do
   loc <- elementJObject el ^? ix "data" <<< _Object <<< ix "lrsLoc"
