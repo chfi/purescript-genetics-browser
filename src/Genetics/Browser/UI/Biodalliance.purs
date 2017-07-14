@@ -3,7 +3,6 @@ module Genetics.Browser.UI.Biodalliance
 
 import Prelude
 import Genetics.Browser.Biodalliance as Biodalliance
-import Genetics.Browser.UI.Events.Biodalliance as BDEvents
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Properties as HP

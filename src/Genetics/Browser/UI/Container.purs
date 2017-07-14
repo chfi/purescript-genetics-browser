@@ -11,7 +11,6 @@ import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot as QTL
 import Genetics.Browser.UI.Biodalliance as UIBD
 import Genetics.Browser.UI.Cytoscape as UICy
-import Genetics.Browser.UI.Events.Biodalliance as BDEvents
 import Halogen as H
 import Halogen.Aff as HA
 import Halogen.Component.ChildPath as CP
@@ -84,16 +83,16 @@ rangeHandlerCy cy ran = do
   pure unit
 
 
-createBDHandler :: forall eff. { location :: Biodalliance -> Location -> Eff _ Unit
-                               , range :: Biodalliance -> Range -> Eff _ Unit }
+createBDHandler :: forall eff. { location :: Biodalliance -> Location -> Eff _ Unit }
+                               -- , range :: Biodalliance -> Range -> Eff _ Unit }
                 -> Biodalliance
-                -> BusRW (Variant (location :: Location, range :: Range))
+                -> BusRW (Variant (location :: Location))
                 -> Aff _ (Canceler _)
-createBDHandler {location, range} bd bus = forkAff $ forever do
+createBDHandler {location} bd bus = forkAff $ forever do
   val <- Bus.read bus
   liftEff $ (default (pure unit)
     # on (SProxy :: SProxy "location") (location bd)
-    # on (SProxy :: SProxy "range") (range bd)
+    -- # on (SProxy :: SProxy "range") (range bd)
     ) val
 
 
@@ -141,14 +140,9 @@ subscribeBDEvents {range} bd bus =
     case range obj of
       Nothing -> pure unit
       Just ran -> do
-        liftEff $ log $ "BD sending range: " <> unsafeStringify range
+        liftEff $ log $ "BD sending range: " <> unsafeStringify ran
         _ <- Aff.launchAff $ Bus.write (inj (SProxy :: SProxy "range") ran) bus
         pure unit
-    -- case location obj of
-    --   Nothing -> pure unit
-    --   Just loc -> do
-    --     _ <- Aff.launchAff $ Bus.write (inj (SProxy :: SProxy "location") loc) bus
-    --     pure unit
 
 
 subscribeCyEvents :: { location :: ParsedEvent -> Maybe Location }
@@ -253,6 +247,9 @@ component =
       pure next
 
     PropagateMessage msg next -> do
+      case msg of
+        BDInstance _ -> liftEff $ log "propagating BD"
+        CyInstance _ -> liftEff $ log "propagating Cy"
       H.raise msg
       pure next
 
@@ -314,29 +311,28 @@ main (BrowserConfig { wrapRenderer, browser, tracks }) = HA.runHalogenAff do
     Just el' -> do
       io <- runUI component unit el'
       liftEff $ log "creating BD event buses"
-      busToBD <- Bus.make
       busFromBD <- Bus.make
-      busToCy <- Bus.make
       busFromCy <- Bus.make
 
       io.subscribe $ CR.consumer $ case _ of
         BDInstance bd -> do
-          liftEff $ log "attaching "
-          _ <- createBDHandler { location: locationHandlerBD
-                               , range: rangeHandlerBD } bd busToBD
+          liftEff $ log "attaching BD event handlers"
+          _ <- createBDHandler { location: locationHandlerBD } bd busFromCy
           _ <- liftEff $ subscribeBDEvents { range: parseRangeEventBD } bd busFromBD
           pure Nothing
         _ -> pure $ Just unit
 
-      io.subscribe $ CR.consumer $ case _ of
-        CyInstance cy -> do
-          _ <- createCyHandler { range: rangeHandlerCy } cy busToCy
-          _ <- liftEff $ subscribeCyEvents { location: parseLocationEventCy } cy busFromCy
-          pure Nothing
-        _ -> pure $ Just unit
 
       liftEff $ log "creating BD"
       io.query $ H.action (CreateBD mkBd)
+
+      io.subscribe $ CR.consumer $ case _ of
+        CyInstance cy -> do
+          liftEff $ log "attaching Cy event handlers"
+          _ <- createCyHandler { range: rangeHandlerCy } cy busFromBD
+          _ <- liftEff $ subscribeCyEvents { location: parseLocationEventCy } cy busFromCy
+          pure Nothing
+        _ -> pure $ Just unit
 
       liftEff $ log "created BD!"
       liftEff $ log $ "cytoscape enabled: " <> show (not null cyGraphs.results)
