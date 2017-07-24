@@ -32,11 +32,9 @@ import Test.Spec.Reporter.Console (consoleReporter)
 import Test.Spec.Runner (run)
 import Test.Units as Units
 import Type.Proxy (Proxy(..))
+import Test.Cytoscape (specCytoscape)
 
 
-
-foreign import testGlyphPos :: Foreign -> String
-foreign import showGlyphSVG :: Foreign -> Unit
 foreign import addElementToDiv :: ∀ eff. String -> DOM.Element -> Eff ( dom :: DOM | eff ) Unit
 foreign import setOnLoad :: ∀ eff. Eff eff Unit -> Eff eff Unit
 
@@ -91,33 +89,6 @@ checkGlyphPosInstances = do
       liftEff $ Data.checkMonoid prxGlyph
 
 
-cyJson :: Array Json
-cyJson = unsafePartial $ fromJust $ case jsonParser "[{\"data\": { \"id\": \"a\" }},{\"data\": { \"id\": \"b\" }},{\"data\": { \"id\": \"ab\", \"source\": \"a\", \"target\": \"b\" }}]" of
-  Left e     -> Nothing
-  Right json -> toArray json
-
-specCytoscape :: ∀ eff. Spec (cy :: CY | eff) Unit
-specCytoscape = do
-  describe "Cytoscape" do
-    it "is not empty if created with elements" $ do
-      cy <- liftEff $ Cy.cytoscape Nothing (Just cyJson)
-      eles <- liftEff $ Cy.graphGetCollection cy
-      eles `shouldNotEqual` emptyCollection cy
-
-    it "collections can be filtered and recombined" $ do
-      cy <- liftEff $ Cy.cytoscape Nothing (Just cyJson)
-      eles <- liftEff $ Cy.graphGetCollection cy
-
-      let edges = filter isEdge eles
-          nodes = filter isNode eles
-      when (not $ eles `contains` edges) (fail "Graph doesn't contain its edges")
-      when (not $ eles `contains` nodes) (fail "Graph doesn't contain its nodes")
-
-      -- union of parts is equal to sum
-      (edges <> nodes) `shouldEqual` eles
-      eles             `shouldEqual` (edges <> nodes)
-      -- union is commutative
-      (edges <> nodes) `shouldEqual` (nodes <> edges)
 
 
 runBrowserTest :: ∀ eff. QC ( canvas :: CANVAS

@@ -1,17 +1,3 @@
-exports.testGlyphPos = function(g) {
-    console.log(g.min());
-    console.log(g.max());
-    console.log(g.minY());
-    console.log(g.maxY());
-};
-
-
-exports.showGlyphSVG = function(g) {
-    console.log("Printing SVG");
-    var e = g.toSVG();
-    console.log(e);
-};
-
 exports.addElementToDiv = function(divId) {
     return function(e) {
         return function () {
