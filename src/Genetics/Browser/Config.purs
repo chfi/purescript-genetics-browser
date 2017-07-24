@@ -2,6 +2,7 @@ module Genetics.Browser.Config
        where
 
 import Prelude
+import Control.Monad.Except (withExcept)
 import Data.Array (null)
 import Data.Foldable (all)
 import Data.Foreign (F, Foreign, ForeignError(..), fail, unsafeReadTagged)
@@ -17,16 +18,16 @@ newtype BrowserConfig = BrowserConfig { wrapRenderer :: RenderWrapper
                                       , tracks :: TracksMap
                                       }
 
-
+readTaggedWithError :: forall a. String -> String -> Foreign -> F a
+readTaggedWithError s e f = withExcept ((<>) (pure $ ForeignError e)) $ unsafeReadTagged s f
 
 parseBrowserConfig :: Foreign -> F BrowserConfig
 parseBrowserConfig f = do
-  wrapRenderer <- f ! "wrapRenderer" >>= unsafeReadTagged "Function"
-  browser <- f ! "browser" >>= unsafeReadTagged "Function"
+  wrapRenderer <- f ! "wrapRenderer" >>= readTaggedWithError "Function" "Error on 'wrapRenderer':"
+  browser <- f ! "browser" >>= readTaggedWithError "Function" "Error on 'browser':"
   tracks <- f ! "tracks"
   tracksKeys <- (map readTrackType) <$> keys tracks
   when (null tracksKeys) $ fail $ ForeignError "TracksMap is empty"
   when (not $ all isJust tracksKeys) $ fail $ ForeignError "TracksMap keys are not all TrackType"
-
   let tracks' = unsafeCoerce tracks
   pure $ BrowserConfig { wrapRenderer, browser, tracks: tracks' }
