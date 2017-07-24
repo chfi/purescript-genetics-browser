@@ -3,6 +3,8 @@ module Genetics.Browser.Config.Track
        , CyGraphConfig
        , TracksMap
        , validateConfigs
+       , TrackType
+       , readTrackType
        )
        where
 
@@ -39,9 +41,6 @@ readTrackType :: String -> Maybe TrackType
 readTrackType "BDTrack" = Just BDTrack
 readTrackType "CyGraph" = Just CyGraph
 readTrackType _ = Nothing
-
-getTrackType :: Json -> Maybe TrackType
-getTrackType json = readTrackType =<< json ^? _Object <<< ix "trackType" <<< _String
 
 
 -- TODO: combine validateBDConfig and validateCyConfig

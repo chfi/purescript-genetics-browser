@@ -47,8 +47,14 @@ exports.badConfigBrowser = { wrapRenderer: wrapRenderer,
                                      }
                            };
 
-exports.badConfigTracks = { wrapRenderer: wrapRenderer,
-                            browser: browser,
-                            tracks: {
-                            }
-                          };
+exports.badConfigTracks1 = { wrapRenderer: wrapRenderer,
+                             browser: browser,
+                             tracks: { track: {}
+                                     }
+                           };
+
+
+exports.badConfigTracks2 = { wrapRenderer: wrapRenderer,
+                             browser: browser,
+                             tracks: {}
+                           };

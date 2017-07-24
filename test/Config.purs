@@ -1,17 +1,21 @@
 module Test.Config where
 
 import Prelude
+import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (log)
 import Control.Monad.Except (runExcept)
-import Data.Either (isLeft, isRight)
+import Data.Either (Either(..), isLeft, isRight)
 import Data.Foreign (Foreign)
 import Genetics.Browser.Config (parseBrowserConfig)
+import Global.Unsafe (unsafeStringify)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
 foreign import validConfig :: Foreign
 foreign import badConfigWrapRenderer :: Foreign
 foreign import badConfigBrowser :: Foreign
-foreign import badConfigTracks :: Foreign
+foreign import badConfigTracks1 :: Foreign
+foreign import badConfigTracks2 :: Foreign
 
 parse f = runExcept $ parseBrowserConfig f
 
@@ -25,4 +29,6 @@ specConfig = do
     it "fails on configs where `browser` is not Function" do
       isLeft (parse badConfigBrowser) `shouldEqual` true
     it "fails on configs where `tracks` is not an object with valid keys" do
-      isLeft (parse badConfigTracks) `shouldEqual` true
+      isLeft (parse badConfigTracks1) `shouldEqual` true
+    it "fails on configs where `tracks` is empty" do
+      isLeft (parse badConfigTracks2) `shouldEqual` true
