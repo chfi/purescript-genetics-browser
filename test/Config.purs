@@ -1,13 +1,10 @@
 module Test.Config where
 
 import Prelude
-import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
 import Control.Monad.Except (runExcept)
-import Data.Either (Either(..), isLeft, isRight)
+import Data.Either (isLeft, isRight)
 import Data.Foreign (Foreign)
 import Genetics.Browser.Config (parseBrowserConfig)
-import Global.Unsafe (unsafeStringify)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 

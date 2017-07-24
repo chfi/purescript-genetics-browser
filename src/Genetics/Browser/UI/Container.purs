@@ -22,6 +22,7 @@ import Control.Monad.Aff.Bus (BusR, BusRW)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
+import Control.Monad.Except (runExcept)
 import Control.Monad.Rec.Class (forever)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut (_Number, _Object, _String)
@@ -30,7 +31,8 @@ import Data.Array (null)
 import Data.Const (Const)
 import Data.Either (Either(..))
 import Data.Either.Nested (Either2, Either1)
-import Data.Foldable (foldMap)
+import Data.Foldable (foldMap, sequence_)
+import Data.Foreign (Foreign, renderForeignError)
 import Data.Functor.Coproduct.Nested (type (<\/>))
 import Data.Lens (re, (^?))
 import Data.Lens.Index (ix)
@@ -41,7 +43,7 @@ import Data.Symbol (SProxy(..))
 import Data.Tuple (fst)
 import Data.Variant (Variant, case_, default, inj, on)
 import Genetics.Browser.Biodalliance (RendererInfo, initBD, renderers, setLocation, sources)
-import Genetics.Browser.Config (BrowserConfig(..))
+import Genetics.Browser.Config (BrowserConfig(..), parseBrowserConfig)
 import Genetics.Browser.Config.Track (CyGraphConfig, validateConfigs)
 import Genetics.Browser.Cytoscape (ParsedEvent(..))
 import Genetics.Browser.Cytoscape.Collection (filter)
@@ -288,55 +290,59 @@ bdOpts :: Options Biodalliance
 bdOpts = renderers := [ qtlRenderer, gwasRenderer ]
 
 
-main :: BrowserConfig -> Eff _ Unit
-main (BrowserConfig { wrapRenderer, browser, tracks }) = HA.runHalogenAff do
+main :: Foreign -> Eff _ Unit
+main fConfig = HA.runHalogenAff do
+  case runExcept $ parseBrowserConfig fConfig of
+    Left e -> liftEff $ do
+      log "Invalid browser configuration:"
+      sequence_ $ log <<< renderForeignError <$> e
+    Right (BrowserConfig config) -> do
+      let {bdTracks, cyGraphs} = validateConfigs config.tracks
 
-  let {bdTracks, cyGraphs} = validateConfigs tracks
+          opts' = bdOpts <> sources := bdTracks.results
 
-      opts' = bdOpts <> sources := bdTracks.results
+      liftEff $ log $ "BDTrack errors: " <> foldMap ((<>) ", ") bdTracks.errors
+      liftEff $ log $ "CyGraph errors: " <> foldMap ((<>) ", ") cyGraphs.errors
 
-  liftEff $ log $ "BDTrack errors: " <> foldMap ((<>) ", ") bdTracks.errors
-  liftEff $ log $ "CyGraph errors: " <> foldMap ((<>) ", ") cyGraphs.errors
+      let mkBd :: (∀ eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance)
+          mkBd = initBD opts' config.wrapRenderer config.browser
 
-  let mkBd :: (∀ eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance)
-      mkBd = initBD opts' wrapRenderer browser
+      liftEff $ log "running main"
+      HA.awaitLoad
+      el <- HA.selectElement (wrap "#psgbHolder")
 
-  liftEff $ log "running main"
-  HA.awaitLoad
-  el <- HA.selectElement (wrap "#psgbHolder")
+      case el of
+        Nothing -> do
+          liftEff $ log "no element for browser!"
+        Just el' -> do
+          io <- runUI component unit el'
+          liftEff $ log "creating BD event buses"
+          busFromBD <- Bus.make
+          busFromCy <- Bus.make
 
-  case el of
-    Nothing -> do
-      liftEff $ log "no element for browser!"
-    Just el' -> do
-      io <- runUI component unit el'
-      liftEff $ log "creating BD event buses"
-      busFromBD <- Bus.make
-      busFromCy <- Bus.make
-
-      io.subscribe $ CR.consumer $ case _ of
-        BDInstance bd -> do
-          liftEff $ log "attaching BD event handlers"
-          _ <- createBDHandler { location: locationHandlerBD } bd busFromCy
-          _ <- liftEff $ subscribeBDEvents { range: parseRangeEventBD } bd busFromBD
-          pure Nothing
-        _ -> pure $ Just unit
+          io.subscribe $ CR.consumer $ case _ of
+            BDInstance bd -> do
+              liftEff $ log "attaching BD event handlers"
+              _ <- createBDHandler { location: locationHandlerBD } bd busFromCy
+              _ <- liftEff $ subscribeBDEvents { range: parseRangeEventBD } bd busFromBD
+              pure Nothing
+            _ -> pure $ Just unit
 
 
-      liftEff $ log "creating BD"
-      io.query $ H.action (CreateBD mkBd)
+          liftEff $ log "creating BD"
+          io.query $ H.action (CreateBD mkBd)
 
-      io.subscribe $ CR.consumer $ case _ of
-        CyInstance cy -> do
-          liftEff $ log "attaching Cy event handlers"
-          _ <- createCyHandler { range: rangeHandlerCy } cy busFromBD
-          _ <- liftEff $ subscribeCyEvents { location: parseLocationEventCy } cy busFromCy
-          pure Nothing
-        _ -> pure $ Just unit
+          io.subscribe $ CR.consumer $ case _ of
+            CyInstance cy -> do
+              liftEff $ log "attaching Cy event handlers"
+              _ <- createCyHandler { range: rangeHandlerCy } cy busFromBD
+              _ <- liftEff $ subscribeCyEvents { location: parseLocationEventCy } cy busFromCy
+              pure Nothing
+            _ -> pure $ Just unit
 
-      liftEff $ log "created BD!"
-      liftEff $ log $ "cytoscape enabled: " <> show (not null cyGraphs.results)
-      -- when (not null cyGraphs.results) $ do
-      liftEff $ log "creating Cy.js"
-      io.query $ H.action (CreateCy "http://localhost:8080/eles.json")
-      liftEff $ log "created cy!"
+          liftEff $ log "created BD!"
+          liftEff $ log $ "cytoscape enabled: " <> show (not null cyGraphs.results)
+          -- when (not null cyGraphs.results) $ do
+          liftEff $ log "creating Cy.js"
+          io.query $ H.action (CreateCy "http://localhost:8080/eles.json")
+          liftEff $ log "created cy!"
