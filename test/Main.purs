@@ -1,38 +1,31 @@
 module Test.Main where
 
+import Prelude
+import DOM.Node.Types as DOM
+import Genetics.Browser.GlyphF.Canvas as Canvas
+import Genetics.Browser.GlyphF.SVG as SVG
+import Test.QuickCheck.Laws.Data as Data
+import Test.Units as Units
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Eff.Exception (EXCEPTION)
 import Control.Monad.Eff.Random (RANDOM)
 import DOM (DOM)
-import DOM.Node.Types as DOM
-import Data.Argonaut (Json, jsonParser, toArray)
-import Data.Either (Either(..))
-import Data.Foreign (Foreign)
-import Data.Maybe (Maybe(..), fromJust)
+import Data.Maybe (Maybe(Just, Nothing))
 import Data.Traversable (traverse_)
-import Genetics.Browser.Cytoscape as Cy
-import Genetics.Browser.Cytoscape.Collection (contains, emptyCollection, filter, isEdge, isNode)
-import Genetics.Browser.Cytoscape.Types (CY)
 import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, rect, stroke)
-import Genetics.Browser.GlyphF.Canvas as Canvas
-import Genetics.Browser.GlyphF.SVG as SVG
 import Genetics.Browser.GlyphPosition (GlyphPosition)
 import Genetics.Browser.Units (Bp(..), MBp(..))
 import Graphics.Canvas (CANVAS, getCanvasElementById, getContext2D, translate)
-import Partial.Unsafe (unsafePartial)
-import Prelude
+import Test.Config (specConfig)
+import Test.Cytoscape (specCytoscape)
 import Test.QuickCheck.Laws (QC)
-import Test.QuickCheck.Laws.Data as Data
 import Test.Spec (Spec, describe, it)
-import Test.Spec.Assertions (fail, shouldEqual, shouldNotEqual)
 import Test.Spec.Reporter.Console (consoleReporter)
 import Test.Spec.Runner (run)
-import Test.Units as Units
 import Type.Proxy (Proxy(..))
-import Test.Cytoscape (specCytoscape)
 
 
 foreign import addElementToDiv :: ∀ eff. String -> DOM.Element -> Eff ( dom :: DOM | eff ) Unit
@@ -115,5 +108,6 @@ main = do
     specCytoscape
     checkGlyphPosInstances
     Units.unitIsoSpec
+    specConfig
 
   setOnLoad runBrowserTest
