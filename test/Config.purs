@@ -20,8 +20,8 @@ foreign import badConfigTracks2 :: Foreign
 
 parse f = runExcept $ parseBrowserConfig f
 
-specConfig :: ∀ eff. Spec _ Unit
-specConfig = do
+spec :: Spec _ Unit
+spec = do
   describe "Browser Configuration validation" do
     it "can correctly parse a valid config" do
       isRight (parse validConfig) `shouldEqual` true

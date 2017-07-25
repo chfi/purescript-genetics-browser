@@ -1,20 +1,15 @@
-module Test.Units where
+module Test.Units
+       ( spec
+       ) where
 
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (CONSOLE)
-import Control.Monad.Eff.Exception (EXCEPTION)
-import Control.Monad.Eff.Random (RANDOM)
 import Genetics.Browser.Units (class HCoordinate, Bp(..), MBp(..), bp, mbp)
 import Prelude
 import Test.QuickCheck (quickCheck')
 import Test.Spec (Spec, describe, it)
 
-unitIsoSpec :: ∀ eff. Spec ( console :: CONSOLE
-                           , random :: RANDOM
-                           , exception :: EXCEPTION
-                           | eff
-                           ) Unit
-unitIsoSpec = do
+spec :: Spec _ Unit
+spec = do
   let isomorphism :: ∀ c. (HCoordinate c) => c -> Boolean
       isomorphism x = bp x  - bp (mbp x) < Bp 0.000001 &&
                       mbp x - mbp (bp x) < MBp 0.000001

@@ -1,33 +1,28 @@
-module Test.Cytoscape where
+module Test.Cytoscape
+       ( spec
+       ) where
 
 import Control.Monad.Eff.Class (liftEff)
-import Data.Argonaut (Json, jsonParser, toArray)
-import Data.Either (Either(..))
-import Data.Maybe (Maybe(..), fromJust)
+import Data.Argonaut (Json)
+import Data.Maybe (Maybe(..))
 import Genetics.Browser.Cytoscape as Cy
 import Genetics.Browser.Cytoscape.Collection (contains, emptyCollection, filter, isEdge, isNode)
-import Genetics.Browser.Cytoscape.Types (CY)
-import Partial.Unsafe (unsafePartial)
 import Prelude
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual, shouldNotEqual)
 
+foreign import testData :: Array Json
 
-cyJson :: Array Json
-cyJson = unsafePartial $ fromJust $ case jsonParser "[{\"data\": { \"id\": \"a\" }},{\"data\": { \"id\": \"b\" }},{\"data\": { \"id\": \"ab\", \"source\": \"a\", \"target\": \"b\" }}]" of
-  Left e     -> Nothing
-  Right json -> toArray json
-
-specCytoscape :: ∀ eff. Spec (cy :: CY | eff) Unit
-specCytoscape = do
+spec :: Spec _ Unit
+spec = do
   describe "Cytoscape" do
     it "is not empty if created with elements" $ do
-      cy <- liftEff $ Cy.cytoscape Nothing (Just cyJson)
+      cy <- liftEff $ Cy.cytoscape Nothing (Just testData)
       eles <- liftEff $ Cy.graphGetCollection cy
       eles `shouldNotEqual` emptyCollection cy
 
     it "collections can be filtered and recombined" $ do
-      cy <- liftEff $ Cy.cytoscape Nothing (Just cyJson)
+      cy <- liftEff $ Cy.cytoscape Nothing (Just testData)
       eles <- liftEff $ Cy.graphGetCollection cy
 
       let edges = filter isEdge eles
