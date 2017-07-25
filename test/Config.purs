@@ -1,12 +1,9 @@
 module Test.Config where
 
 import Prelude
-import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
 import Control.Monad.Except (runExcept)
 import Data.Either (Either(..), isLeft, isRight)
-import Data.Foldable (sequence_)
-import Data.Foreign (Foreign, renderForeignError)
+import Data.Foreign (Foreign)
 import Genetics.Browser.Config (BrowserConfig(..), parseBrowserConfig)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
