@@ -8,6 +8,8 @@ var browser = function() {
     console.log("browser!");
 };
 
+
+
 var bdSources = [
     {
         name: 'Genome',
@@ -32,6 +34,8 @@ exports.validConfig = { wrapRenderer: wrapRenderer,
                                   CyGraph: cySources
                                 }
                       };
+
+exports.validNoBD = { tracks: { CyGraph: cySources } };
 
 exports.badConfigWrapRenderer = { wrapRenderer: "not a function",
                                   browser: browser,

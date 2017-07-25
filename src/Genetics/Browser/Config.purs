@@ -13,6 +13,9 @@ import Genetics.Browser.Biodalliance (BrowserConstructor, RenderWrapper)
 import Genetics.Browser.Config.Track (TracksMap, readTrackType)
 import Unsafe.Coerce (unsafeCoerce)
 
+
+-- TODO `wrapRenderer` and `browser` should both be in a BD-specific config,
+-- and be optional if there are no BD tracks.
 newtype BrowserConfig = BrowserConfig { wrapRenderer :: RenderWrapper
                                       , browser :: BrowserConstructor
                                       , tracks :: TracksMap
