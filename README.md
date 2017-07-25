@@ -5,6 +5,7 @@
 Make sure you have Purescript installed globally, e.g. using NPM:
 ```shell
 npm install -g purescript
+npm install
 ```
 
 Install dependencies
@@ -19,49 +20,60 @@ npm build pgb.js
 ```
 
 This compiles a bundle to the file "pgb.js", which can be used by including it in a HTML page,
-which exposes the main Halogen container at `PS`:
+which exposes the main Halogen container at `PS`. Also make sure to include the Biodalliance
+scripts if you are using it:
 ```html
 <script language="javascript" src="./pgb.js"></script>
+<script language="javascript" src="./dalliance-all.js"></script>
 ```
 
-Running the main function, which creates the main container, requires wrapping the BD constructor
-in a callback which takes a HTML element:
+
+The browser requires a configuration to be run, in the form of a JS object. In the PS code
+it is defined as a newtype record:
+```purescript
+newtype BrowserConfig = BrowserConfig { wrapRenderer :: RenderWrapper
+                                      , browser :: BrowserConstructor
+                                      , tracks :: TracksMap
+                                      }
+```
+
+`wrapRenderer` and `browser` are helper functions for initializing a Biodalliance browser,
+and should always be set to `WrappedRenderer.wrapRenderer` and `Browser` respectively,
+which are exported from `dalliance-all.js`. `tracks` is a map of arrays of track configurations,
+with BD tracks under the `BDTrack` key, and Cy.js graphs under the `CyGraph` key (not yet implemented).
+
+This is a basic configuration example, with two BD tracks. The last line runs the browser with the config:
+
 ```html
-         var mkBd = function(el) {
-             return function() {
-                var b = new Browser({
+<script language="javascript">
+  var sources = [
+      {
+          name: 'Genome',
+          twoBitURI: 'http://www.biodalliance.org/datasets/GRCm38/mm10.2bit',
+          desc: 'Mouse reference genome build GRCm38',
+          tier_type: 'sequence',
+          provides_entrypoints: true
+      },
+      {
+          name: 'QTL',
+          tier_type: 'qtl',
+          renderer: "qtlRenderer",
+          uri: 'http://test-gn2.genenetwork.org/api_pre1/qtl/lod2.csv'
+      }
+  ];
 
-                    injectionPoint: el,
+  var config = { wrapRenderer: WrappedRenderer.wrapRenderer,
+                browser: Browser,
+                tracks: {BDTrack: sources}
+  };
 
-                    chr:        '11',
-                    cookieKey:  'mouse38',
-                    externalRenderers: { gwasRenderer: gwasRenderer },
-                    coordSystem: {
-                        speciesName: 'Mouse',
-                        taxon: 10090,
-                        auth: 'GRCm',
-                        version: 38,
-                        ucscName: 'mm10'
-                    },
-                    maxWorkers: 0,
-                    sources:      [
-                                ,{name: 'GWAS',
-                                    renderer: "gwasRenderer",
-                                    "forceReduction": -1,
-                                    bwgURI: 'http://localhost:8080/gwascatalog.bb',
-                                }
-                    ,
-                    ],
-                    uiPrefix: '../',
-                    fullScreen: true
-                });
-                return b;
-             };
-         };
-         PS.main(mkBd)();
+  PS.main(config)();
+</script>
 ```
 
-The callback wraps a nullary function (return function() {}), because of how Purescript works.
+Placing the above in an HTML file containing a div with ID "psgbHolder" should get you a basic browser.
+A full example can be found in `example.html` in this repo -- make sure to place the compiled BD files in
+the right place before running it.
 
 
 # Renderers
@@ -77,6 +89,7 @@ Look at Biodalliance.Renderer.GWAS for an example.
 The coordinate system used is relative and normalized to features, horizontally,
 and the canvas, vertically.
 
+
 # Tests
 Visual tests of the SVG and Canvas renderers can be found in Test.Main.
 To run them, first compile the test module:
@@ -84,3 +97,10 @@ To run them, first compile the test module:
 pulp build --main Test.Main --to ./index.js
 ```
 Then open index.html in a web browser.
+
+Unit tests and QuickCheck tests can be run with
+```shell
+pulp test
+# or
+npm run test
+```

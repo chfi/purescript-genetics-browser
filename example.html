@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+
+<html>
+
+    <head>
+
+        <style>
+            // These styles are used by the PS elements
+            #bdDiv {
+                width: 100%,
+                float: left;
+            }
+            #cyDiv {
+                width: 100%;
+                height: 300px;
+                float: left;
+                display: block;
+            }
+            .powered-by {
+                display: none;
+            }
+        </style>
+
+        <title>Purescript Genome Browser</title>
+        <script language="javascript" src="./dalliance-all.js"></script>
+
+        <script language="javascript" src="./pgb.js"></script>
+
+        <script language="javascript">
+         var sources = [
+             {
+                 name: 'Genome',
+                 twoBitURI: 'http://www.biodalliance.org/datasets/GRCm38/mm10.2bit',
+                 desc: 'Mouse reference genome build GRCm38',
+                 tier_type: 'sequence',
+                 provides_entrypoints: true
+             },
+             {
+                 name: 'QTL',
+                 tier_type: 'qtl',
+                 renderer: "qtlRenderer",
+                 uri: 'http://test-gn2.genenetwork.org/api_pre1/qtl/lod2.csv'
+             }
+         ];
+
+         var config = {tracks: {BDTrack: sources},
+                       browser: Browser,
+                       wrapRenderer: WrappedRenderer.wrapRenderer
+         };
+
+
+         PS.main(config)();
+
+        </script>
+    </head>
+
+    <body>
+        <div id="psgbHolder"></div>
+    </body>
+</html>
