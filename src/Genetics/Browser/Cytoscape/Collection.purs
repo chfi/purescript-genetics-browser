@@ -9,7 +9,7 @@ import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (maybe)
 import Data.Newtype (wrap)
-import Data.Predicate (Predicate(..))
+import Data.Predicate (Predicate)
 import Genetics.Browser.Cytoscape.Types (Cytoscape, Element, elementJObject)
 
 

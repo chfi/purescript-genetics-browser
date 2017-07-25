@@ -36,8 +36,10 @@ data TrackType = BDTrack | CyGraph
 derive instance eqTrackType :: Eq TrackType
 derive instance ordTrackType :: Ord TrackType
 derive instance genericTrackType :: Generic TrackType _
+
 instance showTrackType :: Show TrackType where
-  show = genericShow
+  show BDTrack = "BDTrack"
+  show CyGraph = "CyGraph"
 
 readTrackType :: String -> Maybe TrackType
 readTrackType "BDTrack" = Just BDTrack
