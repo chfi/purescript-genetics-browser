@@ -3,8 +3,10 @@ module Genetics.Browser.Config.Track
        , CyGraphConfig
        , TracksMap
        , validateConfigs
-       , TrackType
+       , TrackType(..)
        , readTrackType
+       , validateBDConfig
+       , validateCyConfig
        )
        where
 

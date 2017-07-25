@@ -25,6 +25,7 @@ import Test.QuickCheck.Laws (QC)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Reporter.Console (consoleReporter)
 import Test.Spec.Runner (run)
+import Test.Track as Track
 import Type.Proxy (Proxy(..))
 
 
@@ -109,5 +110,6 @@ main = do
     checkGlyphPosInstances
     Units.unitIsoSpec
     specConfig
+    Track.spec
 
   setOnLoad runBrowserTest
