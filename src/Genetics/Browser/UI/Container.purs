@@ -2,23 +2,13 @@ module Genetics.Browser.UI.Container
        where
 
 import Prelude
+
 import Control.Coroutine as CR
-import Control.Monad.Aff as Aff
-import Control.Monad.Aff.Bus as Bus
-import Genetics.Browser.Biodalliance as Biodalliance
-import Genetics.Browser.Cytoscape as Cytoscape
-import Genetics.Browser.Renderer.GWAS as GWAS
-import Genetics.Browser.Renderer.Lineplot as QTL
-import Genetics.Browser.UI.Biodalliance as UIBD
-import Genetics.Browser.UI.Cytoscape as UICy
-import Halogen as H
-import Halogen.Aff as HA
-import Halogen.Component.ChildPath as CP
-import Halogen.HTML as HH
-import Halogen.HTML.Events as HE
 import Control.Monad.Aff (Aff, Canceler(..), forkAff)
+import Control.Monad.Aff as Aff
 import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Aff.Bus (BusR, BusRW)
+import Control.Monad.Aff.Bus as Bus
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
@@ -27,7 +17,7 @@ import Control.Monad.Rec.Class (forever)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut (_Number, _Object, _String)
 import Data.Argonaut.Core (JObject)
-import Data.Array (null)
+import Data.Array (null, uncons, (:))
 import Data.Const (Const)
 import Data.Either (Either(..))
 import Data.Either.Nested (Either2, Either1)
@@ -37,22 +27,33 @@ import Data.Functor.Coproduct.Nested (type (<\/>))
 import Data.Lens (re, (^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (Maybe(Just, Nothing), maybe)
-import Data.Newtype (wrap)
+import Data.Newtype (unwrap, wrap)
 import Data.Options (Options, (:=))
 import Data.Symbol (SProxy(..))
 import Data.Tuple (fst)
 import Data.Variant (Variant, case_, default, inj, on)
 import Genetics.Browser.Biodalliance (RendererInfo, initBD, renderers, setLocation, sources)
+import Genetics.Browser.Biodalliance as Biodalliance
 import Genetics.Browser.Config (BrowserConfig(..), parseBrowserConfig)
 import Genetics.Browser.Config.Track (CyGraphConfig, validateConfigs)
 import Genetics.Browser.Cytoscape (ParsedEvent(..))
+import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Cytoscape.Collection (filter)
 import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
 import Genetics.Browser.Events (Event(..), Location, Range)
+import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
+import Genetics.Browser.Renderer.Lineplot as QTL
 import Genetics.Browser.Types (BD, Biodalliance, Renderer)
+import Genetics.Browser.UI.Biodalliance as UIBD
+import Genetics.Browser.UI.Cytoscape as UICy
 import Genetics.Browser.Units (Bp(Bp), Chr, _Bp, _BpMBp, _Chr, _MBp, bp)
 import Global.Unsafe (unsafeStringify)
+import Halogen as H
+import Halogen.Aff as HA
+import Halogen.Component.ChildPath as CP
+import Halogen.HTML as HH
+import Halogen.HTML.Events as HE
 import Halogen.VDom.Driver (runUI)
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -296,6 +297,7 @@ main fConfig = HA.runHalogenAff do
     Left e -> liftEff $ do
       log "Invalid browser configuration:"
       sequence_ $ log <<< renderForeignError <$> e
+
     Right (BrowserConfig config) -> do
       let {bdTracks, cyGraphs} = validateConfigs config.tracks
 
@@ -307,6 +309,7 @@ main fConfig = HA.runHalogenAff do
       let mkBd :: (∀ eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance)
           mkBd = initBD opts' config.wrapRenderer config.browser
 
+
       liftEff $ log "running main"
       HA.awaitLoad
       el <- HA.selectElement (wrap "#psgbHolder")
@@ -315,34 +318,38 @@ main fConfig = HA.runHalogenAff do
         Nothing -> do
           liftEff $ log "no element for browser!"
         Just el' -> do
+
           io <- runUI component unit el'
-          liftEff $ log "creating BD event buses"
+
           busFromBD <- Bus.make
           busFromCy <- Bus.make
 
-          io.subscribe $ CR.consumer $ case _ of
-            BDInstance bd -> do
-              liftEff $ log "attaching BD event handlers"
-              _ <- createBDHandler { location: locationHandlerBD } bd busFromCy
-              _ <- liftEff $ subscribeBDEvents { range: parseRangeEventBD } bd busFromBD
-              pure Nothing
-            _ -> pure $ Just unit
+          when (not null bdTracks.results) do
+            io.subscribe $ CR.consumer $ case _ of
+              BDInstance bd -> do
+                liftEff $ log "attaching BD event handlers"
+                _ <- createBDHandler { location: locationHandlerBD } bd busFromCy
+                _ <- liftEff $ subscribeBDEvents { range: parseRangeEventBD } bd busFromBD
+                pure Nothing
+              _ -> pure $ Just unit
+            liftEff $ log "creating BD"
+            io.query $ H.action (CreateBD mkBd)
+
+            liftEff $ log "created BD!"
 
 
-          liftEff $ log "creating BD"
-          io.query $ H.action (CreateBD mkBd)
-
-          io.subscribe $ CR.consumer $ case _ of
-            CyInstance cy -> do
-              liftEff $ log "attaching Cy event handlers"
-              _ <- createCyHandler { range: rangeHandlerCy } cy busFromBD
-              _ <- liftEff $ subscribeCyEvents { location: parseLocationEventCy } cy busFromCy
-              pure Nothing
-            _ -> pure $ Just unit
-
-          liftEff $ log "created BD!"
           liftEff $ log $ "cytoscape enabled: " <> show (not null cyGraphs.results)
-          -- when (not null cyGraphs.results) $ do
-          liftEff $ log "creating Cy.js"
-          io.query $ H.action (CreateCy "http://localhost:8080/eles.json")
-          liftEff $ log "created cy!"
+          case uncons cyGraphs.results of
+            Nothing -> pure unit
+            Just {head, tail} -> do
+              io.subscribe $ CR.consumer $ case _ of
+                CyInstance cy -> do
+                  liftEff $ log "attaching Cy event handlers"
+                  _ <- createCyHandler { range: rangeHandlerCy } cy busFromBD
+                  _ <- liftEff $ subscribeCyEvents { location: parseLocationEventCy } cy busFromCy
+                  pure Nothing
+                _ -> pure $ Just unit
+
+              liftEff $ log "creating Cy.js"
+              io.query $ H.action (CreateCy $ _.elementsUri <<< unwrap $ head)
+              liftEff $ log "created cy!"
