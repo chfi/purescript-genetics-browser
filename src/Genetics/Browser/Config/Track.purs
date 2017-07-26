@@ -11,6 +11,7 @@ module Genetics.Browser.Config.Track
        where
 
 import Prelude
+
 import Data.Argonaut (Json, _Array, _Object, _String)
 import Data.Array ((:))
 import Data.Either (Either(..))
@@ -21,6 +22,7 @@ import Data.Generic.Rep.Show (genericShow)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (Maybe(..), maybe)
+import Data.Newtype (class Newtype)
 import Data.StrMap (StrMap)
 import Data.Traversable (sequence)
 
@@ -59,12 +61,13 @@ validateBDConfig json = case json ^? _Object <<< ix "name" of
   Just c  -> Right $ BDTrackConfig $ json
 
 
-newtype CyGraphConfig = CyGraphConfig Json
+newtype CyGraphConfig = CyGraphConfig { elementsUri :: String }
+derive instance newtypeCyGraphConfig :: Newtype CyGraphConfig _
 
 validateCyConfig :: Json -> Either String CyGraphConfig
-validateCyConfig json = case json ^? _Object <<< ix "elementsUri" of
-  Nothing -> Left $ "cy graph config does not have an elementsUri"
-  Just c  -> Right $ CyGraphConfig $ json
+validateCyConfig json = case json ^? _Object <<< ix "elementsUri"  <<< _String of
+  Nothing  -> Left $ "cy graph config does not have an elementsUri"
+  Just uri -> Right $ CyGraphConfig { elementsUri: uri }
 
 
 
