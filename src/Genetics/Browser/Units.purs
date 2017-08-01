@@ -73,6 +73,7 @@ derive instance newtypeChr :: Newtype Chr _
 derive newtype instance eqChr :: Eq Chr
 derive newtype instance encodeChr :: Encode Chr
 derive newtype instance decodeChr :: Decode Chr
+derive newtype instance showChr :: Show Chr
 
 _Chr :: Iso' Chr String
 _Chr = _Newtype
