@@ -15,7 +15,7 @@ import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Except (runExcept)
 import Control.Monad.Rec.Class (forever)
 import DOM.HTML.Types (HTMLElement)
-import Data.Argonaut (_Number, _Object, _String)
+import Data.Argonaut (_Number, _Object, _String, (.?))
 import Data.Argonaut.Core (JObject)
 import Data.Array (null, uncons, (:))
 import Data.Const (Const)
@@ -38,7 +38,7 @@ import Genetics.Browser.Config (BrowserConfig(..), parseBrowserConfig)
 import Genetics.Browser.Config.Track (CyGraphConfig, validateConfigs)
 import Genetics.Browser.Cytoscape (ParsedEvent(..))
 import Genetics.Browser.Cytoscape as Cytoscape
-import Genetics.Browser.Cytoscape.Collection (filter)
+import Genetics.Browser.Cytoscape.Collection (filter, connectedNodes, isEdge, isNode, sourceNodes, targetNodes)
 import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
 import Genetics.Browser.Events (Event(..), Location, Range)
 import Genetics.Browser.Renderer.GWAS as GWAS
@@ -47,7 +47,7 @@ import Genetics.Browser.Renderer.Lineplot as QTL
 import Genetics.Browser.Types (BD, Biodalliance, Renderer)
 import Genetics.Browser.UI.Biodalliance as UIBD
 import Genetics.Browser.UI.Cytoscape as UICy
-import Genetics.Browser.Units (Bp(Bp), Chr, _Bp, _BpMBp, _Chr, _MBp, bp)
+import Genetics.Browser.Units (Bp(Bp), Chr(Chr), _Bp, _BpMBp, _Chr, _MBp, bp)
 import Global.Unsafe (unsafeStringify)
 import Halogen as H
 import Halogen.Aff as HA
@@ -77,12 +77,15 @@ type CyEventEff eff = (console :: CONSOLE, cy :: CY, avar :: AVAR | eff)
 rangeHandlerCy :: forall eff. Cytoscape -> Range -> Eff (CyEventEff eff) Unit
 rangeHandlerCy cy ran = do
   log "cy got range"
+  log $ "chr: " <> show ran.chr
   let pred el = case parseLocationElementCy el of
         Nothing -> false
-        Just loc -> loc.chr /= ran.chr
+        Just loc -> loc.chr == ran.chr
+
   graphColl <- liftEff $ Cytoscape.graphGetCollection cy
-  let eles = filter (wrap pred) graphColl
-  _ <- liftEff $ Cytoscape.graphRemoveCollection eles
+  let edges = filter ((not $ wrap pred) && isEdge) graphColl
+
+  _ <- liftEff $ Cytoscape.graphRemoveCollection $ targetNodes edges
   pure unit
 
 
