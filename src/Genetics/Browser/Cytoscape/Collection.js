@@ -38,6 +38,14 @@ exports.connectedNodes = function(a) {
     return a.connectedNodes();
 };
 
+exports.sourceNodes = function(a) {
+    return a.sources();
+};
+
+exports.targetNodes = function(a) {
+    return a.targets();
+};
+
 exports.filter = function(pred) {
     return function(coll) {
         return coll.filter(pred);

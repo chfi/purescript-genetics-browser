@@ -45,6 +45,12 @@ foreign import connectedEdges :: forall e. CyCollection e
 foreign import connectedNodes :: forall e. CyCollection e
                               -> CyCollection e
 
+foreign import sourceNodes :: forall e. CyCollection e
+                           -> CyCollection e
+
+foreign import targetNodes :: forall e. CyCollection e
+                           -> CyCollection e
+
 foreign import filter :: forall e.
                          Predicate e
                       -> CyCollection e
