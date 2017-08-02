@@ -18,6 +18,7 @@ import Data.Record.Unsafe (unsafeGet)
 import Data.Symbol (class IsSymbol, SProxy(..))
 import Data.Tuple (Tuple(..))
 import Data.Variant (Variant, case_, expand, match, on, prj)
+import Type.Prelude (class RowLacks)
 import Unsafe.Coerce (unsafeCoerce)
 
 -- 'rin' is the row of types that this can handle,
@@ -40,6 +41,39 @@ appendHandler :: ∀ l a rin1 rin2 b rfun1 rfun2.
 appendHandler l f (InputHandler r) = InputHandler $ insert l f r
 
 
+
+class ConsHandler (rin :: # Type) (rfun :: # Type) (l :: Symbol) a b (rin2 :: # Type) (rfun2 :: # Type)
+      | rin l a -> rin2, rfun l a b -> rfun2
+
+instance consHandler
+         :: ( RowLacks l rin2
+            , RowLacks l rfun2
+            , RowCons l a rin1 rin2
+            , RowCons l (a -> b) rfun1 rfun2
+            )
+         => ConsHandler rin rfun l a b rin2 rfun2
+
+class AppendHandlerImpl (rin :: # Type) (rfun :: # Type) (l :: RowList) a b (rin2 :: # Type) (rfun2 :: # Type)
+
+instance appendHandlerNil
+         :: AppendHandlerImpl rin rfun Nil a b rin2 rfun2
+
+
+instance appendHandlerCons
+         :: ConsHandler rin rfun k a b rin2 rfun2
+         => AppendHandlerImpl rin rfun (Cons k ty rest) a b rin2 rfun2
+
+
+class AppendHandler (rin :: # Type) (rfun :: # Type) (l :: # Type) a b (rin2 :: # Type) (rfun2 :: # Type)
+
+instance appendHandlerInstance
+         :: ( RowToList l llist
+            , AppendHandlerImpl rin rfun llist a b rin2 rfun2
+            )
+         => AppendHandler rin rfun ls a b rin2 rfun2
+
+
+
 emptyHandler :: ∀ b.
                 InputHandler () () b
 emptyHandler = InputHandler {}
@@ -57,11 +91,11 @@ applyHandler (InputHandler h) v =
         coerceV = unsafeCoerce
 
 
-forkHandler :: ∀ lt a rin rfun.
+forkHandler :: ∀ lt a rin rfun eff.
                Union lt a rin
-            => InputHandler rin rfun (Eff _ Unit)
+            => InputHandler rin rfun (Eff (avar :: AVAR | eff) Unit)
             -> BusRW (Variant lt)
-            -> _
+            -> Aff ( avar :: AVAR | eff ) (Canceler ( avar :: AVAR | eff ))
 forkHandler h bus = forkAff $ forever do
   val <- Bus.read bus
   liftEff $ applyHandler h val
