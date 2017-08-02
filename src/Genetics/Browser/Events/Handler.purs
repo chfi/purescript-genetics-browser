@@ -28,11 +28,11 @@ data InputHandler (rin :: # Type) (rfun :: # Type) b = InputHandler (Record rfun
 
 
 appendHandler :: ∀ l a rin1 rin2 b rfun1 rfun2.
-                 IsSymbol l
-              => RowLacks l rin1
+                 RowLacks l rin1
               => RowLacks l rfun1
               => RowCons l (a -> b) rfun1 rfun2
               => RowCons l a rin1 rin2
+              => IsSymbol l
               => SProxy l
               -> (a -> b)
               -> InputHandler rin1 rfun1 b
@@ -40,7 +40,7 @@ appendHandler :: ∀ l a rin1 rin2 b rfun1 rfun2.
 appendHandler l f (InputHandler r) = InputHandler $ insert l f r
 
 
-emptyHandler :: ∀ a b.
+emptyHandler :: ∀ b.
                 InputHandler () () b
 emptyHandler = InputHandler {}
 
@@ -51,9 +51,9 @@ applyHandler :: ∀ lt a rin rfun b.
              -> Variant lt
              -> b
 applyHandler (InputHandler h) v =
-  case coerceV (expand v) of
+  case coerceV v of
     Tuple tag a -> a # unsafeGet tag h
-  where coerceV :: ∀ c. Variant rin -> Tuple String c
+  where coerceV :: ∀ c. Variant lt -> Tuple String c
         coerceV = unsafeCoerce
 
 
