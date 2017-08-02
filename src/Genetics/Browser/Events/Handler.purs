@@ -13,7 +13,8 @@ import Control.Monad.Eff (Eff, kind Effect)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Rec.Class (forever)
-import Data.Maybe (Maybe(..))
+import Data.List (List)
+import Data.Maybe (Maybe, Maybe(..))
 import Data.Record.Unsafe (unsafeGet)
 import Data.Symbol (class IsSymbol, SProxy(..))
 import Data.Tuple (Tuple(..))
@@ -73,6 +74,20 @@ instance appendHandlerInstance
          => AppendHandler rin rfun ls a b rin2 rfun2
 
 
+class ConcatHandler (rin1 :: # Type) (rfun1 :: # Type)
+                    (rin2 :: # Type) (rfun2 :: # Type)
+                    (rin3 :: # Type) (rfun3 :: # Type)
+      | rin1 rin2 -> rin3, rfun1 rfun2 -> rfun3
+      , rin1 rin3 -> rin2, rfun1 rfun3 -> rfun2
+      , rin2 rin3 -> rin1, rfun2 rfun3 -> rfun1
+
+class ConcatHandlerImpl (lin1 :: RowList) (lfun1 :: RowList)
+                        (lin2 :: RowList) (lfun2 :: RowList)
+                        (lin3 :: RowList) (lfun3 :: RowList)
+
+instance concatHandlerNil :: ConcatHandlerImpl Nil Nil Nil Nil Nil Nil
+
+
 
 emptyHandler :: ∀ b.
                 InputHandler () () b
@@ -99,3 +114,49 @@ forkHandler :: ∀ lt a rin rfun eff.
 forkHandler h bus = forkAff $ forever do
   val <- Bus.read bus
   liftEff $ applyHandler h val
+
+
+-- 'a' is the input type; the type of data that this handler can parse
+-- 'rout' is the row of types that this can produce
+-- 'rfun' is the row of types that corresponds to the record with functions
+data OutputHandler a (rout :: # Type) (rfun :: # Type) = OutputHandler (Record rfun)
+
+
+-- appendOutputHandler :: ∀ l a rout1 rout2 rfun1 rfun2.
+                    --    RowLacks l rout1
+                    -- => RowLacks l rfun1
+                    -- => RowCons l (a -> Maybe rout1) rfun1 rfun2
+                    -- => RowCons l a rout1 rout2
+                    -- => IsSymbol l
+                    -- => SProxy l
+                    -- -> (a -> Maybe rout1)
+                    -- -> OutputHandler rout1 rfun1 a
+                    -- -> OutputHandler rout2 rfun2 a
+appendOutputHandler :: ∀ l a b rout1 rout2 rfun1 rfun2.
+                       RowLacks l rout1
+                    => RowLacks l rfun1
+                    => RowCons l (a -> Maybe b) rfun1 rfun2
+                    => RowCons l b rout1 rout2
+                    => IsSymbol l
+                    => SProxy l
+                    -> (a -> Maybe b)
+                    -> OutputHandler a rout1 rfun1
+                    -> OutputHandler a rout2 rfun2
+appendOutputHandler l f (OutputHandler r) = OutputHandler $ insert l f r
+
+
+emptyOutputHandler :: ∀ a.
+                      OutputHandler a () ()
+emptyOutputHandler = OutputHandler {}
+
+
+runOutputHandler :: ∀ lt a rout rfun b.
+                    -- Union lt a rin
+                    OutputHandler a rout rfun
+                 -> a
+                 -> List (Variant rout)
+runOutputHandler (OutputHandler h) v = ?help
+  -- case coerceV v of
+  --   Tuple tag a -> a # unsafeGet tag h
+  -- where coerceV :: ∀ c. Variant lt -> Tuple String c
+  --       coerceV = unsafeCoerce
