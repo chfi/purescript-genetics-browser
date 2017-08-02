@@ -9,6 +9,7 @@ import Test.Spec.Reporter.Console (consoleReporter)
 import Test.Spec.Runner (run)
 import Test.Track as Track
 import Test.Units as Units
+import Test.Events as Events
 
 
 main :: Eff _ Unit
@@ -20,5 +21,6 @@ main = do
     Cytoscape.spec
     Config.spec
     Track.spec
+    Events.spec
 
   Glyph.svgCanvasTest

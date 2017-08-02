@@ -40,14 +40,11 @@ stringNumH = appendHandler (SProxy :: SProxy "numTest") show stringH
         f x = show x
 
 
-input :: Variant (stringTest :: String, numTest :: Number)
+input :: Variant (stringTest :: String)
 input = inj (SProxy :: SProxy "stringTest") "hello"
 
-input2 :: Variant (stringTest :: String)
-input2 = inj (SProxy :: SProxy "stringTest") "hello"
-
-input3 :: Variant (stringTest :: String, numTest :: Number)
-input3 = inj (SProxy :: SProxy "numTest") 123.0
+input2 :: Variant (numTest :: Number)
+input2 = inj (SProxy :: SProxy "numTest") 123.0
 
 
 x2 :: String
@@ -56,5 +53,13 @@ x2 = applyHandler stringNumH input2
 spec :: Spec _ Unit
 spec = do
   describe "Event Input Handlers" do
-    it "Can be appended to without changing output of already handled labels" do
-      fail "not implemented"
+    it "can be extended without affecting the existing handlers" do
+      let handler2 :: InputHandler (stringTest :: String, test :: Unit)
+                                   (stringTest :: String -> String, test :: Unit -> String) String
+          handler2 = appendHandler (SProxy :: SProxy "test") (const "unit") stringH
+      applyHandler stringH input `shouldEqual` applyHandler handler2 input
+
+    it "can handle subsets of its input event type" do
+      let inputBig :: Variant (stringTest :: String, numTest :: Number)
+          inputBig = expand input
+      applyHandler stringNumH input `shouldEqual` applyHandler stringNumH inputBig
