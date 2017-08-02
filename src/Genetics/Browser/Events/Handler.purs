@@ -3,22 +3,22 @@ module Genetics.Browser.Events.Handler where
 import Data.Record
 import Prelude
 import Type.Row
-
+import Control.Monad.Aff.Bus as Bus
 import Control.Alternative ((<|>))
 import Control.Monad.Aff (Aff, Canceler, forkAff)
 import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Aff.Bus (BusRW)
-import Control.Monad.Aff.Bus as Bus
 import Control.Monad.Eff (Eff, kind Effect)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Rec.Class (forever)
-import Data.List (List)
-import Data.Maybe (Maybe, Maybe(..))
+import Data.List (List, (:))
+import Data.Maybe (Maybe(..), Maybe(..), maybe)
+import Data.Monoid (mempty)
 import Data.Record.Unsafe (unsafeGet)
 import Data.Symbol (class IsSymbol, SProxy(..))
 import Data.Tuple (Tuple(..))
-import Data.Variant (Variant, case_, expand, match, on, prj)
+import Data.Variant (Variant, case_, expand, match, on, prj, inj)
 import Type.Prelude (class RowLacks)
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -118,44 +118,71 @@ forkHandler h bus = forkAff $ forever do
 
 -- 'a' is the input type; the type of data that this handler can parse
 -- 'rout' is the row of types that this can produce
--- 'rfun' is the row of types that corresponds to the record with functions
-data OutputHandler a (rout :: # Type) (rfun :: # Type) = OutputHandler (Record rfun)
+data OutputHandler a (rout :: # Type) = OutputHandler (List (a -> Maybe (Variant rout)))
+
+maybeToVariant :: ∀ l a r.
+                  RowCons l a () r
+               => IsSymbol l
+               => SProxy l
+               -> Maybe a
+               -> Maybe (Variant r)
+maybeToVariant l m = do
+  x <- m
+  pure $ (inj l x)
 
 
--- appendOutputHandler :: ∀ l a rout1 rout2 rfun1 rfun2.
-                    --    RowLacks l rout1
-                    -- => RowLacks l rfun1
-                    -- => RowCons l (a -> Maybe rout1) rfun1 rfun2
-                    -- => RowCons l a rout1 rout2
-                    -- => IsSymbol l
-                    -- => SProxy l
-                    -- -> (a -> Maybe rout1)
-                    -- -> OutputHandler rout1 rfun1 a
-                    -- -> OutputHandler rout2 rfun2 a
-appendOutputHandler :: ∀ l a b rout1 rout2 rfun1 rfun2.
-                       RowLacks l rout1
-                    => RowLacks l rfun1
-                    => RowCons l (a -> Maybe b) rfun1 rfun2
-                    => RowCons l b rout1 rout2
+maybeFunToVariant :: ∀ l a b r.
+                     RowCons l b () r
+                  => IsSymbol l
+                  => SProxy l
+                  -> (a -> Maybe b)
+                  -> (a -> Maybe (Variant r))
+maybeFunToVariant l f = \a -> do
+  x <- f a
+  pure $ (inj l x)
+
+maybeFun2 :: ∀ l a b r1 r r2.
+             Union r1 r r2
+          => RowLacks l r1
+          => RowCons l b r1 r2
+          => IsSymbol l
+          => SProxy l
+          -> (a -> Maybe b)
+          -> List (a -> Maybe (Variant r1))
+          -> List (a -> Maybe (Variant r2))
+maybeFun2 l f list = fun2:((map <<< map <<< map) expand list)
+  where fun2 :: a -> Maybe (Variant r2)
+        fun2 = \a -> do
+                x <- f a
+                pure $ (inj l x)
+
+appendOutputHandler :: ∀ l a b r1 r r2.
+                      Union r1 r r2
+                    => RowLacks l r1
+                    => RowCons l b r1 r2
                     => IsSymbol l
                     => SProxy l
                     -> (a -> Maybe b)
-                    -> OutputHandler a rout1 rfun1
-                    -> OutputHandler a rout2 rfun2
-appendOutputHandler l f (OutputHandler r) = OutputHandler $ insert l f r
-
+                    -> OutputHandler a r1
+                    -> OutputHandler a r2
+appendOutputHandler l f (OutputHandler h) = OutputHandler (maybeFun2 l f h)
 
 emptyOutputHandler :: ∀ a.
-                      OutputHandler a () ()
-emptyOutputHandler = OutputHandler {}
+                      OutputHandler a ()
+emptyOutputHandler = OutputHandler mempty
 
 
-runOutputHandler :: ∀ lt a rout rfun b.
-                    -- Union lt a rin
-                    OutputHandler a rout rfun
-                 -> a
-                 -> List (Variant rout)
-runOutputHandler (OutputHandler h) v = ?help
+-- given an input, try _all_ handlers (parsers), and output a list of variants,
+-- containing all valid parses.
+-- so, actually
+-- applyOutputHandler
+
+
+-- runOutputHandler :: ∀ lt a rout rfun b.
+--                     OutputHandler a rout rfun
+--                  -> a
+--                  -> List (Variant rout)
+-- runOutputHandler (OutputHandler h) v = ?help
   -- case coerceV v of
   --   Tuple tag a -> a # unsafeGet tag h
   -- where coerceV :: ∀ c. Variant lt -> Tuple String c
