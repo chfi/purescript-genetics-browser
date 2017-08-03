@@ -12,8 +12,8 @@ import Control.Monad.Eff (Eff, kind Effect)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Rec.Class (forever)
-import Data.List (List, (:))
-import Data.Maybe (Maybe(..), Maybe(..), maybe)
+import Data.List (List, (:), mapMaybe)
+import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (mempty)
 import Data.Record.Unsafe (unsafeGet)
 import Data.Symbol (class IsSymbol, SProxy(..))
@@ -167,23 +167,14 @@ appendOutputHandler :: ∀ l a b r1 r r2.
                     -> OutputHandler a r2
 appendOutputHandler l f (OutputHandler h) = OutputHandler (maybeFun2 l f h)
 
+
 emptyOutputHandler :: ∀ a.
                       OutputHandler a ()
 emptyOutputHandler = OutputHandler mempty
 
 
--- given an input, try _all_ handlers (parsers), and output a list of variants,
--- containing all valid parses.
--- so, actually
--- applyOutputHandler
-
-
--- runOutputHandler :: ∀ lt a rout rfun b.
---                     OutputHandler a rout rfun
---                  -> a
---                  -> List (Variant rout)
--- runOutputHandler (OutputHandler h) v = ?help
-  -- case coerceV v of
-  --   Tuple tag a -> a # unsafeGet tag h
-  -- where coerceV :: ∀ c. Variant lt -> Tuple String c
-  --       coerceV = unsafeCoerce
+applyOutputHandler :: ∀ a rout.
+                      OutputHandler a rout
+                   -> a
+                   -> List (Variant rout)
+applyOutputHandler (OutputHandler h) a = mapMaybe (\f -> f a) h
