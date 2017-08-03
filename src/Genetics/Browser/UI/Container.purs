@@ -2,88 +2,82 @@ module Genetics.Browser.UI.Container
        where
 
 import Prelude
+
 import Control.Coroutine as CR
+import Control.Monad.Aff (Aff)
 import Control.Monad.Aff as Aff
-import Control.Monad.Aff.Bus as Bus
-import Genetics.Browser.Biodalliance as Biodalliance
-import Genetics.Browser.Cytoscape as Cytoscape
-import Genetics.Browser.Renderer.GWAS as GWAS
-import Genetics.Browser.Renderer.Lineplot as QTL
-import Genetics.Browser.UI.Biodalliance as UIBD
-import Genetics.Browser.UI.Cytoscape as UICy
-import Halogen as H
-import Halogen.Aff as HA
-import Halogen.Component.ChildPath as CP
-import Halogen.HTML as HH
-import Halogen.HTML.Events as HE
-import Control.Monad.Aff (Aff, Canceler(..), forkAff)
 import Control.Monad.Aff.AVar (AVAR)
-import Control.Monad.Aff.Bus (BusR, BusRW)
+import Control.Monad.Aff.Bus (BusRW)
+import Control.Monad.Aff.Bus as Bus
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Except (runExcept)
-import Control.Monad.Rec.Class (forever)
 import DOM.HTML.Types (HTMLElement)
-import Data.Argonaut (_Number, _Object, _String, (.?))
-import Data.Argonaut.Core (JObject)
-import Data.Array (null, uncons, (:))
+import Data.Argonaut (JObject, _Number, _Object, _String)
+import Data.Array (null, uncons)
 import Data.Const (Const)
 import Data.Either (Either(..))
-import Data.Either.Nested (Either2, Either1)
+import Data.Either.Nested (Either2)
 import Data.Foldable (foldMap, sequence_)
 import Data.Foreign (Foreign, renderForeignError)
 import Data.Functor.Coproduct.Nested (type (<\/>))
 import Data.Lens (re, (^?))
 import Data.Lens.Index (ix)
-import Data.Maybe (Maybe(Just, Nothing), maybe)
+import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap, wrap)
 import Data.Options (Options, (:=))
 import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse_)
-import Data.Tuple (fst)
-import Data.Variant (Variant, case_, default, inj, on)
+import Data.Variant (Variant)
 import Genetics.Browser.Biodalliance (RendererInfo, initBD, renderers, setLocation, sources)
+import Genetics.Browser.Biodalliance as Biodalliance
 import Genetics.Browser.Config (BrowserConfig(..), parseBrowserConfig)
-import Genetics.Browser.Config.Track (CyGraphConfig, validateConfigs)
+import Genetics.Browser.Config.Track (validateConfigs)
 import Genetics.Browser.Cytoscape (ParsedEvent(..))
-import Genetics.Browser.Cytoscape.Collection (filter, connectedNodes, isEdge, isNode, sourceNodes, targetNodes)
+import Genetics.Browser.Cytoscape as Cytoscape
+import Genetics.Browser.Cytoscape.Collection (filter, isEdge, targetNodes)
 import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
-import Genetics.Browser.Events (Event(..), Location, Range)
-import Genetics.Browser.Events.Handler (InputHandler(..), OutputHandler(..), appendInputHandler, appendOutputHandler, applyOutputHandler, emptyInputHandler, emptyOutputHandler, forkInputHandler)
+import Genetics.Browser.Events (Location, Range)
+import Genetics.Browser.Events.Handler (InputHandler, OutputHandler, appendInputHandler, appendOutputHandler, applyOutputHandler, emptyInputHandler, emptyOutputHandler, forkInputHandler)
+import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
+import Genetics.Browser.Renderer.Lineplot as QTL
 import Genetics.Browser.Types (BD, Biodalliance, Renderer)
-import Genetics.Browser.Units (Bp(Bp), Chr(Chr), _Bp, _BpMBp, _Chr, _MBp, bp)
-import Global.Unsafe (unsafeStringify)
+import Genetics.Browser.UI.Biodalliance as UIBD
+import Genetics.Browser.UI.Cytoscape as UICy
+import Genetics.Browser.Units (Bp(Bp), Chr, _Bp, _BpMBp, _Chr, _MBp, bp)
+import Halogen as H
+import Halogen.Aff as HA
+import Halogen.Component.ChildPath as CP
+import Halogen.HTML as HH
+import Halogen.HTML.Events as HE
 import Halogen.VDom.Driver (runUI)
-import Unsafe.Coerce (unsafeCoerce)
 
 
 type BDEventEff eff = (console :: CONSOLE, bd :: BD, avar :: AVAR | eff)
-type CYEventEff eff = (console :: CONSOLE, cy :: CY, avar :: AVAR | eff)
+type CyEventEff eff = (console :: CONSOLE, cy :: CY, avar :: AVAR | eff)
 
-type BDHandlerOutput = Biodalliance -> Eff (BDEventEff ()) Unit
-type CyHandlerOutput = Cytoscape -> Eff (CyEventEff ()) Unit
+type BDHandlerOutput eff = Biodalliance -> Eff (BDEventEff eff) Unit
+type CyHandlerOutput eff = Cytoscape -> Eff (CyEventEff eff) Unit
 
 
-locationInputBD :: InputHandler (location :: Location) (location :: Location -> BDHandlerOutput) BDHandlerOutput
+locationInputBD :: InputHandler (location :: Location) _ (BDHandlerOutput _)
 locationInputBD = appendInputHandler (SProxy :: SProxy "location") f emptyInputHandler
   where f loc bd = do
             log "bd got location"
             setLocation bd loc.chr (bp loc.pos - Bp 1000000.0) (bp loc.pos + Bp 1000000.0)
 
-rangeInputBD :: InputHandler ( range :: Range, location :: Location ) _ BDHandlerOutput
+rangeInputBD :: InputHandler ( range :: Range, location :: Location ) _ (BDHandlerOutput _)
 rangeInputBD = appendInputHandler (SProxy :: SProxy "range") f locationInputBD
-  where f :: Range -> BDHandlerOutput
+  where f :: Range -> BDHandlerOutput _
         f ran bd = do
             log "bd got range"
             setLocation bd ran.chr ran.minPos ran.maxPos
 
 
-type CyEventEff eff = (console :: CONSOLE, cy :: CY, avar :: AVAR | eff)
 
-
-rangeInputCy :: InputHandler (range :: Range) _ CyHandlerOutput
+rangeInputCy :: ∀ eff. InputHandler (range :: Range) _ (CyHandlerOutput _)
 rangeInputCy = appendInputHandler (SProxy :: SProxy "range") f emptyInputHandler
   where f ran cy = do
             log "cy got range"
@@ -99,35 +93,6 @@ rangeInputCy = appendInputHandler (SProxy :: SProxy "range") f emptyInputHandler
             pure unit
 
 
-
-forkBDInputHandler bd bus = forkInputHandler rangeInputBD bd bus
-
-
--- createBDHandler :: forall eff. { location :: Biodalliance -> Location -> Eff _ Unit }
---                                -- , range :: Biodalliance -> Range -> Eff _ Unit }
---                 -> Biodalliance
---                 -> BusRW (Variant (location :: Location))
---                 -> Aff _ (Canceler _)
--- createBDHandler {location} bd bus = forkAff $ forever do
---   val <- Bus.read bus
---   liftEff $ (default (pure unit)
---     # on (SProxy :: SProxy "location") (location bd)
---     -- # on (SProxy :: SProxy "range") (range bd)
---     ) val
-
-forkCyInputHandler cy bus = forkInputHandler rangeInputCy cy bus
-
-createCyHandler :: forall eff. { range :: Cytoscape -> Range -> Eff _ Unit }
-                -> Cytoscape
-                -> BusRW (Variant (range :: Range))
-                -> Aff _ (Canceler _)
-createCyHandler {range} cy bus = forkAff $ forever do
-  val <- Bus.read bus
-  liftEff $ (default (pure unit)
-    # on (SProxy :: SProxy "range") (range cy)
-    ) val
-
-
 rangeEventOutputBD :: OutputHandler JObject (range :: Range)
 rangeEventOutputBD = appendOutputHandler (SProxy :: SProxy "range") f emptyOutputHandler
   where f obj =  do
@@ -135,7 +100,6 @@ rangeEventOutputBD = appendOutputHandler (SProxy :: SProxy "range") f emptyOutpu
               minPos <- obj ^? ix "min" <<< _Number <<< re _Bp
               maxPos <- obj ^? ix "max" <<< _Number <<< re _Bp
               pure $ {chr, minPos, maxPos}
-
 
 
 parseLocationElementCy :: Element -> Maybe Location
@@ -155,15 +119,21 @@ locationEventOutputCy = appendOutputHandler (SProxy :: SProxy "location") f empt
             Right _ -> Nothing
 
 
-
-subscribeBDEvents :: _ -> Biodalliance -> _ -> _
+subscribeBDEvents :: ∀ r.
+                     OutputHandler JObject r
+                  -> Biodalliance
+                  -> BusRW (Variant r)
+                  -> Eff _ Unit
 subscribeBDEvents h bd bus =
   Biodalliance.addFeatureListener bd $ \obj -> do
     let evs = applyOutputHandler h obj
     traverse_ (\x -> Aff.launchAff $ Bus.write x bus) evs
 
 
-subscribeCyEvents :: _ -> Cytoscape -> _ -> _
+subscribeCyEvents :: ∀ r.
+                     OutputHandler ParsedEvent r
+                  -> Cytoscape
+                  -> BusRW (Variant r) -> Eff _ Unit
 subscribeCyEvents h cy bus =
   Cytoscape.onClick cy $ \obj -> do
     let evs = applyOutputHandler h obj
@@ -236,10 +206,6 @@ component =
         ]
       ]
 
-  -- addCyGraph :: Maybe CyGraphConfig -> _
-  -- addCyGraph = case _ of
-  --   Nothing -> []
-  --   Just cy -> [HH.div [] [HH.slot' CP.cp2 UICy.Slot UICy.component unit handleCyMessage]]
 
   handleBDMessage :: UIBD.Message -> Maybe (Query Unit)
   handleBDMessage UIBD.Initialized = Nothing
@@ -336,15 +302,12 @@ main fConfig = HA.runHalogenAff do
             io.subscribe $ CR.consumer $ case _ of
               BDInstance bd -> do
                 liftEff $ log "attaching BD event handlers"
-
                 _ <- forkInputHandler rangeInputBD bd busFromCy
                 _ <- liftEff $ subscribeBDEvents rangeEventOutputBD bd busFromBD
-
                 pure Nothing
               _ -> pure $ Just unit
             liftEff $ log "creating BD"
             io.query $ H.action (CreateBD mkBd)
-
             liftEff $ log "created BD!"
 
 
