@@ -120,44 +120,8 @@ forkHandler h bus = forkAff $ forever do
 -- 'rout' is the row of types that this can produce
 data OutputHandler a (rout :: # Type) = OutputHandler (List (a -> Maybe (Variant rout)))
 
-maybeToVariant :: ∀ l a r.
-                  RowCons l a () r
-               => IsSymbol l
-               => SProxy l
-               -> Maybe a
-               -> Maybe (Variant r)
-maybeToVariant l m = do
-  x <- m
-  pure $ (inj l x)
-
-
-maybeFunToVariant :: ∀ l a b r.
-                     RowCons l b () r
-                  => IsSymbol l
-                  => SProxy l
-                  -> (a -> Maybe b)
-                  -> (a -> Maybe (Variant r))
-maybeFunToVariant l f = \a -> do
-  x <- f a
-  pure $ (inj l x)
-
-maybeFun2 :: ∀ l a b r1 r r2.
-             Union r1 r r2
-          => RowLacks l r1
-          => RowCons l b r1 r2
-          => IsSymbol l
-          => SProxy l
-          -> (a -> Maybe b)
-          -> List (a -> Maybe (Variant r1))
-          -> List (a -> Maybe (Variant r2))
-maybeFun2 l f list = fun2:((map <<< map <<< map) expand list)
-  where fun2 :: a -> Maybe (Variant r2)
-        fun2 = \a -> do
-                x <- f a
-                pure $ (inj l x)
-
 appendOutputHandler :: ∀ l a b r1 r r2.
-                      Union r1 r r2
+                       Union r1 r r2
                     => RowLacks l r1
                     => RowCons l b r1 r2
                     => IsSymbol l
@@ -165,7 +129,9 @@ appendOutputHandler :: ∀ l a b r1 r r2.
                     -> (a -> Maybe b)
                     -> OutputHandler a r1
                     -> OutputHandler a r2
-appendOutputHandler l f (OutputHandler h) = OutputHandler (maybeFun2 l f h)
+appendOutputHandler l f (OutputHandler h) = OutputHandler $ f' : (map <<< map <<< map) expand h
+  where f' :: a -> Maybe (Variant r2)
+        f' a = inj l <$> f a
 
 
 emptyOutputHandler :: ∀ a.
