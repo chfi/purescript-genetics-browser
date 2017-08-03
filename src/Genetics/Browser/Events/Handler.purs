@@ -29,17 +29,17 @@ data InputHandler (rin :: # Type) (rfun :: # Type) b = InputHandler (Record rfun
 
 
 
-appendHandler :: ∀ l a rin1 rin2 b rfun1 rfun2.
-                 RowLacks l rin1
-              => RowLacks l rfun1
-              => RowCons l (a -> b) rfun1 rfun2
-              => RowCons l a rin1 rin2
-              => IsSymbol l
-              => SProxy l
-              -> (a -> b)
-              -> InputHandler rin1 rfun1 b
-              -> InputHandler rin2 rfun2 b
-appendHandler l f (InputHandler r) = InputHandler $ insert l f r
+appendInputHandler :: ∀ l a rin1 rin2 b rfun1 rfun2.
+                     RowLacks l rin1
+                   => RowLacks l rfun1
+                   => RowCons l (a -> b) rfun1 rfun2
+                   => RowCons l a rin1 rin2
+                   => IsSymbol l
+                   => SProxy l
+                   -> (a -> b)
+                   -> InputHandler rin1 rfun1 b
+                   -> InputHandler rin2 rfun2 b
+appendInputHandler l f (InputHandler r) = InputHandler $ insert l f r
 
 
 
@@ -89,31 +89,32 @@ instance concatHandlerNil :: ConcatHandlerImpl Nil Nil Nil Nil Nil Nil
 
 
 
-emptyHandler :: ∀ b.
+emptyInputHandler :: ∀ b.
                 InputHandler () () b
-emptyHandler = InputHandler {}
+emptyInputHandler = InputHandler {}
 
 
-applyHandler :: ∀ lt a rin rfun b.
-                Union lt a rin
-             => InputHandler rin rfun b
-             -> Variant lt
-             -> b
-applyHandler (InputHandler h) v =
+applyInputHandler :: ∀ lt a rin rfun b.
+                     Union lt a rin
+                  => InputHandler rin rfun b
+                  -> Variant lt
+                  -> b
+applyInputHandler (InputHandler h) v =
   case coerceV v of
     Tuple tag a -> a # unsafeGet tag h
   where coerceV :: ∀ c. Variant lt -> Tuple String c
         coerceV = unsafeCoerce
 
 
-forkHandler :: ∀ lt a rin rfun eff.
-               Union lt a rin
-            => InputHandler rin rfun (Eff (avar :: AVAR | eff) Unit)
-            -> BusRW (Variant lt)
-            -> Aff ( avar :: AVAR | eff ) (Canceler ( avar :: AVAR | eff ))
-forkHandler h bus = forkAff $ forever do
+forkInputHandler :: ∀ lt a rin rfun eff env.
+                    Union lt a rin
+                 => InputHandler rin rfun (env -> Eff (avar :: AVAR | eff) Unit)
+                 -> env
+                 -> BusRW (Variant lt)
+                 -> Aff ( avar :: AVAR | eff ) (Canceler ( avar :: AVAR | eff ))
+forkInputHandler h env bus = forkAff $ forever do
   val <- Bus.read bus
-  liftEff $ applyHandler h val
+  liftEff $ applyInputHandler h val $ env
 
 
 -- 'a' is the input type; the type of data that this handler can parse
