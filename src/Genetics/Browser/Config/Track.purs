@@ -16,9 +16,7 @@ import Data.Argonaut (Json, _Array, _Object, _String)
 import Data.Array ((:))
 import Data.Either (Either(..))
 import Data.Foldable (foldr)
-import Data.Foreign (Foreign, toForeign)
 import Data.Generic.Rep (class Generic)
-import Data.Generic.Rep.Show (genericShow)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (Maybe(..), maybe)
@@ -26,13 +24,14 @@ import Data.Newtype (class Newtype)
 import Data.StrMap (StrMap)
 import Data.Traversable (sequence)
 
-
+-- | Contains arrays of track configurations, inedxed by track types (e.g. BD or Cy)
 newtype TracksMap = TracksMap (StrMap Json)
 
 getConfigs :: TracksMap -> TrackType -> Either String (Array Json)
 getConfigs (TracksMap ts) tt =
   maybe (Left "Incorrect trackType") Right $ ts ^? ix (show tt) <<< _Array
 
+-- | The different types of track configuration
 data TrackType = BDTrack | CyGraph
 
 derive instance eqTrackType :: Eq TrackType
@@ -53,17 +52,22 @@ readTrackType _ = Nothing
 -- validateTrackConfig :: Json -> Either String (Either BDTrackConfig CyGraphConfig)
 -- validateTrackConfig :: Json -> Either String (Either3 BDTrackConfig PSTrackConfig CyGraphConfig)
 
+-- | Represents a Biodalliance track configuration
 newtype BDTrackConfig = BDTrackConfig Json
 
+-- | Validate a Biodalliance track configuration; currently only checks for the presence of a name
 validateBDConfig :: Json -> Either String BDTrackConfig
 validateBDConfig json = case json ^? _Object <<< ix "name" of
   Nothing -> Left $ "BD track config does not have a name"
   Just c  -> Right $ BDTrackConfig $ json
 
 
+-- | Represents a Cytoscape.js graph configuration
 newtype CyGraphConfig = CyGraphConfig { elementsUri :: String }
 derive instance newtypeCyGraphConfig :: Newtype CyGraphConfig _
 
+-- | Validate a Cytoscape.js graph configuration; currently only checks for the presence of a URI
+-- | to some JSON-formatted elements
 validateCyConfig :: Json -> Either String CyGraphConfig
 validateCyConfig json = case json ^? _Object <<< ix "elementsUri"  <<< _String of
   Nothing  -> Left $ "cy graph config does not have an elementsUri"
@@ -94,6 +98,8 @@ foldConfig :: forall a
 foldConfig tm tt f = foldErrors $ map (_ >>= f) $ sequence $ getConfigs tm tt
 
 
+-- | Given a TracksMap of configurations,
+-- | Returns the validated configurations and any errors, indexed by track type
 validateConfigs :: TracksMap
                 -> { bdTracks :: ValidatedConfigs BDTrackConfig
                    , cyGraphs :: ValidatedConfigs CyGraphConfig

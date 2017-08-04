@@ -1,19 +1,15 @@
 module Test.Events where
 
 
-import Genetics.Browser.Events.Handler
+import Genetics.Browser.Events.Handler (InputHandler, OutputHandler, appendInputHandler, appendOutputHandler, applyInputHandler, applyOutputHandler, emptyInputHandler, emptyOutputHandler)
 import Prelude
 import Data.Argonaut (Json, _Number, _Object, _String)
 import Data.Array (fromFoldable)
-import Data.Either (isLeft, isRight)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
-import Data.List (singleton)
 import Data.Maybe (Maybe(..))
-import Data.Monoid (mempty)
 import Data.Symbol (SProxy(..))
 import Data.Variant (Variant, expand, inj, prj)
-import Genetics.Browser.Config.Track (TrackType(..), readTrackType, validateBDConfig)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
 
@@ -65,7 +61,7 @@ input2 = inj (SProxy :: SProxy "numTest") 123.0
 
 
 eOut :: OutputHandler Json ()
-eOut = OutputHandler $ mempty
+eOut = emptyOutputHandler
 
 jsonToStringH :: OutputHandler Json (stringTest :: String)
 jsonToStringH = appendOutputHandler (SProxy :: SProxy "stringTest") f eOut
@@ -95,12 +91,10 @@ foreign import numberJson :: Json
 foreign import recordJson :: Json
 
 record :: Outer
-record = { "inner": { pos: 1.23, name: "recordJson" },
-                       "number": 456.0 }
+record = { "inner": { pos: 1.23, name: "recordJson" }, "number": 456.0 }
 
 
-
-spec :: Spec _ Unit
+spec :: forall e. Spec e Unit
 spec = do
   describe "Event Input Handlers" do
     it "can be extended without affecting the existing handlers" do

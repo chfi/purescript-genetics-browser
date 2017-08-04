@@ -33,7 +33,7 @@ import Global.Unsafe (unsafeStringify)
 import Network.HTTP.Affjax (AJAX)
 
 
--- TODO: elemsUrl should be safer. Maybe it should cache too, idk
+-- TODO: elemsUrl should be safer.
 type State = { cy :: Maybe Cytoscape
              , elemsUrl :: String
              }
@@ -57,10 +57,6 @@ data Slot = Slot
 derive instance eqCySlot :: Eq Slot
 derive instance ordCySlot :: Ord Slot
 
-
--- type HandledEvents r = ( range :: Range | r )
-
--- type PossibleEvents r = ( location :: Location | r)
 
 component :: ∀ eff. H.Component HH.HTML Query Unit Output (Aff (Effects eff))
 component =

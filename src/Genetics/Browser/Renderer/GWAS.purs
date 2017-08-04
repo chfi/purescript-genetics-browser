@@ -75,6 +75,7 @@ writeResult g q = toForeign { glyphs: g
 
 -- TODO right now all other data in the feature is thrown away in the parsing...
 -- we should send the original Foreign value as the feature!
+-- | Renderer for drawing GWAS (Manhattan) plots in BD
 render :: Renderer
 render = Renderer $ \v fs ->
   let fs' = readGWASFeature v.chr <$> fs

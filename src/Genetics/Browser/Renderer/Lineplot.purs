@@ -1,5 +1,7 @@
 module Genetics.Browser.Renderer.Lineplot
-       where
+       ( render
+       , LinePlotConfig
+       ) where
 
 import Prelude
 import Control.Alt ((<|>))
@@ -55,6 +57,7 @@ writeResult g q = toForeign { glyphs: [g]
                   --                      Nothing -> toNullable Nothing
 
 
+-- | Renderer for drawing lineplots in Biodalliance
 render :: LinePlotConfig -> Renderer
 render cfg = Renderer $ \v fs ->
   let fs' :: _

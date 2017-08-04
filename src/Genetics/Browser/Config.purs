@@ -1,5 +1,7 @@
 module Genetics.Browser.Config
-       where
+       ( BrowserConfig(..)
+       , parseBrowserConfig
+       ) where
 
 import Prelude
 import Control.Monad.Except (withExcept)
@@ -16,6 +18,7 @@ import Unsafe.Coerce (unsafeCoerce)
 
 -- TODO `wrapRenderer` and `browser` should both be in a BD-specific config,
 -- and be optional if there are no BD tracks.
+-- | The configuration type for the whole browser
 newtype BrowserConfig = BrowserConfig { wrapRenderer :: RenderWrapper
                                       , browser :: BrowserConstructor
                                       , tracks :: TracksMap

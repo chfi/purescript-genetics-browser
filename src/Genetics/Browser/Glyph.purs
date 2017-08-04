@@ -9,6 +9,7 @@ import Genetics.Browser.GlyphF (GlyphF(..))
 import Genetics.Browser.Types (Point)
 import Prelude
 
+-- | Free monad for constructing glyphs
 type Glyph = Free GlyphF
 
 circle :: Point -> Number -> Glyph Unit

@@ -1,4 +1,15 @@
-module Genetics.Browser.Units where
+module Genetics.Browser.Units
+       ( class HCoordinate
+       , bp, mbp
+       , Bp(..)
+       , MBp(..)
+       , _Bp
+       , _MBp
+       , _BpMBp
+       , Chr(..)
+       , _Chr
+       , toScreen
+       )where
 
 -- TODO: feels like there are better ways of dealing with this (units/dimensions);
 -- need to look for libraries
@@ -11,11 +22,14 @@ import Data.Lens.Types (Iso')
 import Data.Newtype (class Newtype, unwrap)
 import Test.QuickCheck (class Arbitrary)
 
+-- | Newtype wrapper for a basepair location
 newtype Bp = Bp Number
 derive instance newtypeBp :: Newtype Bp _
 derive newtype instance eqBp :: Eq Bp
 derive newtype instance ordBp :: Ord Bp
 derive newtype instance fieldBp :: Field Bp
+derive newtype instance euclideanRingBp :: EuclideanRing Bp
+derive newtype instance commutativeRingBp :: CommutativeRing Bp
 derive newtype instance semiringBp :: Semiring Bp
 derive newtype instance ringBp :: Ring Bp
 derive newtype instance arbitraryBp :: Arbitrary Bp
@@ -35,11 +49,14 @@ _MBp = _Newtype
 _BpMBp :: Iso' Bp MBp
 _BpMBp = iso mbp bp
 
+-- | Newtype wrapper for a megabasepair location
 newtype MBp = MBp Number
 derive instance newtypeMBp :: Newtype MBp _
 derive newtype instance eqMBp :: Eq MBp
 derive newtype instance ordMBp :: Ord MBp
 derive newtype instance fieldMBp :: Field MBp
+derive newtype instance euclideanRingMBp :: EuclideanRing MBp
+derive newtype instance commutativeRingMBp :: CommutativeRing MBp
 derive newtype instance semiringMBp :: Semiring MBp
 derive newtype instance ringMBp :: Ring MBp
 derive newtype instance arbitraryMBp :: Arbitrary MBp
@@ -67,7 +84,7 @@ instance hCoordMBp :: HCoordinate MBp where
   bp (MBp x) = Bp (x * 1000000.0)
   mbp  = id
 
-
+-- | Newtype wrapper for a chromosome identifier
 newtype Chr = Chr String
 derive instance newtypeChr :: Newtype Chr _
 derive newtype instance eqChr :: Eq Chr

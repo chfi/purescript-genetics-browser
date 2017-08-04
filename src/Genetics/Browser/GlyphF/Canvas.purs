@@ -52,6 +52,6 @@ glyphEffN ctx (Path ps a) = do
   _ <- C.stroke ctx
   pure a
 
-
+-- | Produce an effect to render the glyph to a canvas
 renderGlyph :: ∀ eff. Context2D -> Glyph ~> Eff (canvas :: CANVAS | eff)
 renderGlyph = foldFree <<< glyphEffN

@@ -38,7 +38,7 @@ writeGlyph' f g = toForeign { "draw": unsafePerformEff <<< \ctx -> Canvas.render
     where p = unwrap $ glyphToGlyphPosition g
           f' = toNullable $ (map helper) f
 
-
+-- | Write the glyph to a Biodalliance-compatible format
 writeGlyph :: ∀ a c r. Maybe (Feature c r) -> F (Glyph a) -> Foreign
 writeGlyph f fG = case runExcept fG of
   Left errors -> toForeign $ fold $ renderForeignError <$> errors

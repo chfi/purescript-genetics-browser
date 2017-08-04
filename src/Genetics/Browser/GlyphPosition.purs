@@ -20,6 +20,9 @@ import Test.QuickCheck (class Arbitrary, arbitrary)
 -- check to see if the click was within some radius of the data point (right now lineplots
 -- can't really have positions!)
 
+-- | GlyphPositions are used by Biodalliance to calculate the hitbox for a glyph,
+-- | for seeing if the user has clicked on it.
+-- | Easily combined using the Monoid instance.
 newtype GlyphPosition = GlyphPos { min :: Number
                                  , max :: Number
                                  , minY :: Number

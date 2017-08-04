@@ -6,6 +6,7 @@ module Genetics.Browser.GlyphF
 import Genetics.Browser.Types (Point)
 import Prelude
 
+-- | DSL for constructing new glyphs
 data GlyphF a =
     Circle Point Number a
   | Line Point Point a

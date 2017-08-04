@@ -38,5 +38,6 @@ interpSVGEff (Path ps a) = do
 runSVGEff :: ∀ a. Glyph a -> Array SVGElement
 runSVGEff = execWriter <<< (flip runStateT SVG.initialSVG) <<< foldFree interpSVGEff
 
+-- | Render a glyph to an SVG element
 renderGlyph :: ∀ a eff. Glyph a -> Eff ( dom :: DOM | eff ) Element
 renderGlyph = SVG.renderSVG <<< runSVGEff

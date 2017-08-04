@@ -34,6 +34,6 @@ glyphLogN (Path ps a) = do
   traverse_ (\p -> tell ("(" <> show p.x <> ", " <> show p.y <> ")")) ps
   pure a
 
-
+-- | Print the process of drawing a glyph to a string
 showGlyph :: ∀ a. Glyph a -> String
 showGlyph = execWriter <<< foldFree glyphLogN

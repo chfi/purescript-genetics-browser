@@ -1,36 +1,48 @@
-module Genetics.Browser.Events.Handler where
+module Genetics.Browser.Events.Handler
+       ( InputHandler
+       , emptyInputHandler
+       , appendInputHandler
+       , applyInputHandler
+       , forkInputHandler
+       , OutputHandler
+       , emptyOutputHandler
+       , appendOutputHandler
+       , applyOutputHandler
+       ) where
 
-import Data.Record
 import Prelude
-import Type.Row
-import Control.Monad.Aff.Bus as Bus
-import Control.Alternative ((<|>))
+
 import Control.Monad.Aff (Aff, Canceler, forkAff)
 import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Aff.Bus (BusRW)
+import Control.Monad.Aff.Bus as Bus
 import Control.Monad.Eff (Eff, kind Effect)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (CONSOLE, log)
 import Control.Monad.Rec.Class (forever)
 import Data.List (List, (:), mapMaybe)
-import Data.Maybe (Maybe(..), maybe)
+import Data.Maybe (Maybe)
 import Data.Monoid (mempty)
+import Data.Record (insert)
 import Data.Record.Unsafe (unsafeGet)
-import Data.Symbol (class IsSymbol, SProxy(..))
+import Data.Symbol (class IsSymbol, SProxy)
 import Data.Tuple (Tuple(..))
-import Data.Variant (Variant, case_, expand, match, on, prj, inj)
-import Type.Prelude (class RowLacks)
+import Data.Variant (Variant, expand, inj)
+import Type.Row (class RowLacks, Cons, Nil, kind RowList)
 import Unsafe.Coerce (unsafeCoerce)
 
--- 'rin' is the row of types that this can handle,
--- 'rfun' is the row of types that corresponds to the record with functions
--- 'b' is the output type; all functions in 'rfun' must have 'b' as domain
-data InputHandler (rin :: # Type) (rfun :: # Type) b = InputHandler (Record rfun)
+
+-- | An InputHandler is basically a record of functions which can handle some
+-- | input in the form of Variants.
+-- | `rin` is the row of types that this can handle,
+-- | `rfun` is the row of types that corresponds to the record with functions
+-- | `out` is the output type; all functions in `rfun` must have `out` as output
+data InputHandler (rin :: # Type) (rfun :: # Type) out = InputHandler (Record rfun)
 
 
-
+-- | Given a label and function, adds a handler to an existing InputHandler.
+-- | The label must not already be handled by the InputHandler.
 appendInputHandler :: ∀ l a rin1 rin2 b rfun1 rfun2.
-                     RowLacks l rin1
+                      RowLacks l rin1
                    => RowLacks l rfun1
                    => RowCons l (a -> b) rfun1 rfun2
                    => RowCons l a rin1 rin2
@@ -54,24 +66,26 @@ instance consHandler
             )
          => ConsHandler rin rfun l a b rin2 rfun2
 
-class AppendHandlerImpl (rin :: # Type) (rfun :: # Type) (l :: RowList) a b (rin2 :: # Type) (rfun2 :: # Type)
+class AppendHandlerImpl (rin :: # Type) (rfun :: # Type) (lin :: RowList) (lfun :: RowList) a b (rin2 :: # Type) (rfun2 :: # Type)
 
 instance appendHandlerNil
-         :: AppendHandlerImpl rin rfun Nil a b rin2 rfun2
+         :: AppendHandlerImpl rin rfun Nil Nil a b rin2 rfun2
 
 
 instance appendHandlerCons
-         :: ConsHandler rin rfun k a b rin2 rfun2
-         => AppendHandlerImpl rin rfun (Cons k ty rest) a b rin2 rfun2
+         :: ( AppendHandlerImpl rin rfun lin lfun a b rin2 rfun2
+            )
+         => AppendHandlerImpl rin rfun (Cons label a lin) (Cons label (a -> b) lfun) a b rin2 rfun2
 
 
 class AppendHandler (rin :: # Type) (rfun :: # Type) (l :: # Type) a b (rin2 :: # Type) (rfun2 :: # Type)
 
-instance appendHandlerInstance
-         :: ( RowToList l llist
-            , AppendHandlerImpl rin rfun llist a b rin2 rfun2
-            )
-         => AppendHandler rin rfun ls a b rin2 rfun2
+-- instance appendHandlerInstance
+--          :: ( RowToList l llist
+--             , AppendHandlerImpl rin rfun lin lfun a b rin2 rfun2
+--             )
+--          => AppendHandler rin rfun lin lfun a b rin2 rfun2
+
 
 
 class ConcatHandler (rin1 :: # Type) (rfun1 :: # Type)
@@ -94,6 +108,8 @@ emptyInputHandler :: ∀ b.
 emptyInputHandler = InputHandler {}
 
 
+-- | Runs a handler on an input, where the input is a Variant whose row is a subset of the
+-- | InputHandler input row.
 applyInputHandler :: ∀ lt a rin rfun b.
                      Union lt a rin
                   => InputHandler rin rfun b
@@ -106,6 +122,8 @@ applyInputHandler (InputHandler h) v =
         coerceV = unsafeCoerce
 
 
+-- | Forks an Aff process with a Handler that performs effects, using some environment.
+-- | For example, `env` could be a Biodalliance instance.
 forkInputHandler :: ∀ lt a rin rfun eff env.
                     Union lt a rin
                  => InputHandler rin rfun (env -> Eff (avar :: AVAR | eff) Unit)
@@ -117,10 +135,15 @@ forkInputHandler h env bus = forkAff $ forever do
   liftEff $ applyInputHandler h val $ env
 
 
--- 'a' is the input type; the type of data that this handler can parse
--- 'rout' is the row of types that this can produce
+-- | An OutputHandler has a list of parsers for some input, and can be used to
+-- | produce heterogenous lists of parsed values
+-- | `in` is the input type; the type of data that this handler can parse
+-- | `rout` is the row of types that this can produce
 data OutputHandler a (rout :: # Type) = OutputHandler (List (a -> Maybe (Variant rout)))
 
+
+-- | Given a label and parser, adds a handler to an existing OutputHandler.
+-- | The label must not already be produced by the OutputHandler.
 appendOutputHandler :: ∀ l a b r1 r r2.
                        Union r1 r r2
                     => RowLacks l r1
@@ -140,6 +163,7 @@ emptyOutputHandler :: ∀ a.
 emptyOutputHandler = OutputHandler mempty
 
 
+-- | Runs an OutputHandler, producing a list of all successful parses of the input.
 applyOutputHandler :: ∀ a rout.
                       OutputHandler a rout
                    -> a

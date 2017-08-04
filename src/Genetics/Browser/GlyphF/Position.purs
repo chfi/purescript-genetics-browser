@@ -49,5 +49,6 @@ glyphPosN (Path ps a) = do
   pure a
 
 
+-- | Derive the hitbox for a glyph
 glyphToGlyphPosition :: ∀ a. Glyph a -> GlyphPosition
 glyphToGlyphPosition = execWriter <<< foldFree glyphPosN

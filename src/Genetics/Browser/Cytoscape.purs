@@ -1,4 +1,19 @@
-module Genetics.Browser.Cytoscape where
+module Genetics.Browser.Cytoscape
+       ( cytoscape
+       , graphAddCollection
+       , graphGetCollection
+       , graphRemoveCollection
+       , graphRemoveAll
+       , unsafeParseCollection
+       , runLayout
+       , resizeContainer
+       , ParsedEvent(..)
+       , parseEvent
+       , onEvent
+       , onClick
+       , Layout
+       , circle
+       ) where
 
 import Prelude
 import Control.Monad.Eff (Eff, kind Effect)
@@ -15,8 +30,8 @@ import Unsafe.Coerce (unsafeCoerce)
 
 
 -- TODO: move to separate module
+-- | Wrapper for layout names
 newtype Layout = Layout String
-
 circle :: Layout
 circle = Layout "circle"
 
@@ -24,9 +39,9 @@ foreign import cytoscapeImpl :: ∀ eff. Nullable HTMLElement
                              -> Nullable JArray
                              -> Eff (cy :: CY | eff) Cytoscape
 
--- TODO: just realized the cytoscape constructor actually doesn't take a CyCollection,
--- but an array of Json...
--- makes more sense, too, since we need a Cytoscape to create a CyCollection!
+-- | Creates a Cytoscape.js graph instance.
+-- | `htmlEl` is the element to place it in; if Nothing, the graph is headless.
+-- | `els` is the array of elements to fill the browser with.
 cytoscape :: forall eff.
              Maybe HTMLElement
           -> Maybe JArray
@@ -37,21 +52,27 @@ cytoscape htmlEl els = liftEff $ cytoscapeImpl (toNullable htmlEl) (toNullable e
 unsafeParseCollection :: Foreign -> CyCollection Element
 unsafeParseCollection = unsafeCoerce
 
-foreign import graphAddCollection :: ∀ eff. Cytoscape
-                                 -> CyCollection Element
-                                 -> Eff (cy :: CY | eff) Unit
+-- | Add a Collection of elements to the graph
+foreign import graphAddCollection :: ∀ eff.
+                                     Cytoscape
+                                  -> CyCollection Element
+                                  -> Eff (cy :: CY | eff) Unit
 
-foreign import graphGetCollection :: ∀ eff. Cytoscape -> Eff (cy :: CY | eff) (CyCollection Element)
+-- | Get all elements in the graph
+foreign import graphGetCollection :: ∀ eff.
+                                     Cytoscape
+                                  -> Eff (cy :: CY | eff) (CyCollection Element)
 
-
+-- | Apply a layout to the graph
 foreign import runLayout :: forall eff.
                             Cytoscape
                          -> Layout
                          -> Eff (cy :: CY | eff) Unit
 
--- Used to recalculate the container bounds; if the div moves for some reason (other stuff on the page),
--- mouse clicks are off until this is called.
-foreign import resizeContainer :: forall eff. Cytoscape -> Eff (cy :: CY | eff) Unit
+-- | Recalculate the container bounds, fixes the mouse click offset
+foreign import resizeContainer :: forall eff.
+                                  Cytoscape
+                               -> Eff (cy :: CY | eff) Unit
 
 foreign import onEventImpl :: ∀ eff a.
                               Cytoscape
@@ -60,7 +81,8 @@ foreign import onEventImpl :: ∀ eff a.
                            -> Eff (cy :: CY | eff) Unit
 
 
--- TODO: move all event stuff to separate module
+-- TODO: This is poorly named and clumsy
+-- | Basic wrapper over the Cy.js on-click events
 newtype ParsedEvent = ParsedEvent { cy :: Cytoscape
                                   , target :: Either Element Cytoscape
                                   }
@@ -75,6 +97,8 @@ parseEvent :: CyEvent -> ParsedEvent
 parseEvent = parseEventImpl Left Right
 
 
+-- | Set a Cy.js event handler
+-- | `ev` is the string identifier of the event type
 onEvent :: forall a eff.
            Cytoscape
         -> String
@@ -90,9 +114,13 @@ onClick :: ∀ eff.
 onClick cy = onEvent cy "click"
 
 
--- is `graphRemoveWithCollection` or similar a better name? ...
+-- | Remove a collection of elements from the graph,
+-- | Returning the removed elements
 foreign import graphRemoveCollection :: ∀ eff.
-                                 CyCollection Element
-                              -> Eff (cy :: CY | eff) (CyCollection Element)
+                                        CyCollection Element
+                                     -> Eff (cy :: CY | eff) (CyCollection Element)
 
-foreign import graphRemoveAll :: forall eff. Cytoscape -> Eff (cy :: CY | eff) Unit
+-- | Empty the graph
+foreign import graphRemoveAll :: forall eff.
+                                 Cytoscape
+                              -> Eff (cy :: CY | eff) Unit

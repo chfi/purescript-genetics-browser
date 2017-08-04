@@ -68,13 +68,13 @@ locationInputBD = appendInputHandler (SProxy :: SProxy "location") f emptyInputH
             log "bd got location"
             setLocation bd loc.chr (bp loc.pos - Bp 1000000.0) (bp loc.pos + Bp 1000000.0)
 
+
 rangeInputBD :: InputHandler ( range :: Range, location :: Location ) _ (BDHandlerOutput _)
 rangeInputBD = appendInputHandler (SProxy :: SProxy "range") f locationInputBD
   where f :: Range -> BDHandlerOutput _
         f ran bd = do
             log "bd got range"
             setLocation bd ran.chr ran.minPos ran.maxPos
-
 
 
 rangeInputCy :: ∀ eff. InputHandler (range :: Range) _ (CyHandlerOutput _)
@@ -168,6 +168,7 @@ type ChildSlot = Either2 UIBD.Slot UICy.Slot
 
 type ChildQuery = UIBD.Query <\/> UICy.Query <\/> Const Void
 type Effects eff = UIBD.Effects (UICy.Effects eff)
+
 
 component :: ∀ eff. H.Component HH.HTML Query Unit Message (Aff (Effects eff))
 component =
