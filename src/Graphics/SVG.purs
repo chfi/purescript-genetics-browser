@@ -1,7 +1,21 @@
+module Graphics.SVG
+       ( SVG
+       , SVGContext
+       , SVGTransform
+       , SVGElement
+       , renderSVG
+       , initialSVG
+       , setStrokeStyle
+       , setFillStyle
+       , circle
+       , line
+       , path
+       , rect
+       , translate
+       , scale
+       ) where
+
 -- TODO: This deserves to be in a separate package (and better modularized)
-
-module Graphics.SVG where
-
 import Control.Monad.Eff (Eff)
 import Control.Monad.State (get, put)
 import Control.Monad.State.Trans (StateT)
@@ -23,6 +37,7 @@ import Data.Traversable (intercalate, traverse_)
 import Data.Tuple (Tuple(..))
 import Prelude
 
+
 createElementSVG :: ∀ eff. String -> Eff (dom :: DOM | eff) Element
 createElementSVG tag = do
   win <- window
@@ -38,7 +53,7 @@ type Attribute = Tuple String String
 setAttributes :: ∀ f eff. Foldable f => f Attribute -> Element -> Eff (dom :: DOM | eff) Unit
 setAttributes attrs ele = traverse_ (\ (Tuple n v) -> Element.setAttribute n v ele) attrs
 
-
+-- | An SVG element is a name with attributes
 data SVGElement = SVGElement String (Array Attribute)
 
 data SVGPathOp = SVGPathMoveTo Number Number
@@ -52,13 +67,21 @@ instance showSVGPathOp :: Show SVGPathOp where
   show (SVGPathLineTo x y) = "L " <> show x <> " " <> show y
   show SVGPathClose = "Z"
 
-renderSVGElement :: ∀ eff. SVGElement -> Eff (dom :: DOM | eff) Element
+
+renderSVGElement :: ∀ eff.
+                    SVGElement
+                 -> Eff (dom :: DOM | eff) Element
 renderSVGElement (SVGElement tag as) = do
   ele <- createElementSVG tag
   setAttributes as ele
   pure ele
 
-renderSVG :: ∀ f eff. Foldable f => f SVGElement -> Eff (dom :: DOM | eff) Element
+
+-- | Renders some SVGElements, returning an HTML element
+renderSVG :: ∀ f eff.
+             Foldable f
+          => f SVGElement
+          -> Eff (dom :: DOM | eff) Element
 renderSVG as = do
   win <- window
   doc <- document win
@@ -75,6 +98,7 @@ derive instance eqSVGElement :: Eq SVGElement
 instance showSVGElement :: Show SVGElement where
   show x = genericShow x
 
+
 type SVGTransform = { translate :: { x :: Number, y :: Number }
                     , scale :: { x :: Number, y :: Number}
                     }
@@ -83,12 +107,14 @@ showTransform :: SVGTransform -> String
 showTransform t = "translate(" <> show t.translate.x <> "," <> show t.translate.y <> ") " <>
                   "scale(" <> show t.scale.x <> "," <> show t.scale.y <> ")"
 
+-- | The SVG context (incomplete)
 type SVGContext = { stroke :: String
                   , fill :: String
                   , strokeWidth :: Number
                   , transform :: SVGTransform
                   }
 
+-- | Contains the current state of the SVG context as well as the SVG document as an array of elements
 type SVG a = StateT SVGContext (Writer (Array SVGElement)) a
 
 svgToAttribs :: SVGContext -> Array Attribute
@@ -98,6 +124,8 @@ svgToAttribs svg = [ Tuple "fill" svg.fill
                    , Tuple "transform" (showTransform svg.transform)
                    ]
 
+
+-- | The empty/initial SVGContext
 initialSVG :: SVGContext
 initialSVG = { stroke: "none"
              , fill: "none"
@@ -108,13 +136,15 @@ initialSVG = { stroke: "none"
              }
 
 
-setStrokeStyle :: String -> SVG Unit
+setStrokeStyle :: String
+               -> SVG Unit
 setStrokeStyle color = do
   cur <- get
   let cur' = cur { stroke = color }
   put cur'
 
-setFillStyle :: String ->  SVG Unit
+setFillStyle :: String
+             -> SVG Unit
 setFillStyle color = do
   cur <- get
   let cur' = cur { fill = color }
@@ -125,7 +155,9 @@ setFillStyle color = do
 -- using some suitable/more restrictive abstraction, maybe.
 -- there's an obvious pattern to many of them:
 -- cur <- get; ~stuff~; tell [Element tag attribs]
-circle :: Number -> Number -> Number
+circle :: Number
+       -> Number
+       -> Number
        -> SVG Unit
 circle x y r = do
   cur <- get
@@ -135,7 +167,10 @@ circle x y r = do
                 ] <> svgToAttribs cur
   tell [SVGElement "circle" circle']
 
-line ::  Number -> Number -> Number -> Number
+line :: Number
+     -> Number
+     -> Number
+     -> Number
      -> SVG Unit
 line x1 y1 x2 y2 = path [ {x:x1, y:y1}, {x:x2, y:y2} ]
 
@@ -155,7 +190,10 @@ path ps = do
       tell [SVGElement "path" attribs]
 
 
-rect :: Number -> Number -> Number -> Number
+rect :: Number
+     -> Number
+     -> Number
+     -> Number
      -> SVG Unit
 rect x1 y1 x2 y2 = do
   cur <- get
@@ -167,7 +205,8 @@ rect x1 y1 x2 y2 = do
   tell [SVGElement "rect" rect']
 
 
-translate :: Number -> Number
+translate :: Number
+          -> Number
           -> SVG Unit
 translate x y = do
   cur <- get
@@ -177,7 +216,8 @@ translate x y = do
   put new
 
 
-scale :: Number -> Number
+scale :: Number
+      -> Number
       -> SVG Unit
 scale x y = do
   cur <- get
