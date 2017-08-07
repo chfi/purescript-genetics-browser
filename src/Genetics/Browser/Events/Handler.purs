@@ -1,13 +1,16 @@
 module Genetics.Browser.Events.Handler
-       ( InputHandler
-       , emptyInputHandler
-       , appendInputHandler
-       , applyInputHandler
-       , forkInputHandler
-       , OutputHandler
-       , emptyOutputHandler
-       , appendOutputHandler
-       , applyOutputHandler
+       ( TrackSink
+       , emptyTrackSink
+       , appendTrackSink
+       , applyTrackSink
+       , forkTrackSink
+       , TrackSource
+       , emptyTrackSource
+       , appendTrackSource
+       , applyTrackSource
+       , class AppendHandlerImpl
+       , class AppendHandler
+       , concatHandler
        ) where
 
 import Prelude
@@ -27,21 +30,22 @@ import Data.Record.Unsafe (unsafeGet)
 import Data.Symbol (class IsSymbol, SProxy)
 import Data.Tuple (Tuple(..))
 import Data.Variant (Variant, expand, inj)
+import Type.Prelude (class RowToList)
 import Type.Row (class RowLacks, Cons, Nil, kind RowList)
 import Unsafe.Coerce (unsafeCoerce)
 
 
--- | An InputHandler is basically a record of functions which can handle some
+-- | TrackSink is basically a record of functions which can handle some
 -- | input in the form of Variants.
 -- | `rin` is the row of types that this can handle,
 -- | `rfun` is the row of types that corresponds to the record with functions
 -- | `out` is the output type; all functions in `rfun` must have `out` as output
-data InputHandler (rin :: # Type) (rfun :: # Type) out = InputHandler (Record rfun)
+data TrackSink (rin :: # Type) (rfun :: # Type) out = TrackSink (Record rfun)
 
 
--- | Given a label and function, adds a handler to an existing InputHandler.
--- | The label must not already be handled by the InputHandler.
-appendInputHandler :: ∀ l a rin1 rin2 b rfun1 rfun2.
+-- | Given a label and function, adds a handler to an existing TrackSink.
+-- | The label must not already be handled by the TrackSink.
+appendTrackSink :: ∀ l a rin1 rin2 b rfun1 rfun2.
                       RowLacks l rin1
                    => RowLacks l rfun1
                    => RowCons l (a -> b) rfun1 rfun2
@@ -49,24 +53,18 @@ appendInputHandler :: ∀ l a rin1 rin2 b rfun1 rfun2.
                    => IsSymbol l
                    => SProxy l
                    -> (a -> b)
-                   -> InputHandler rin1 rfun1 b
-                   -> InputHandler rin2 rfun2 b
-appendInputHandler l f (InputHandler r) = InputHandler $ insert l f r
+                   -> TrackSink rin1 rfun1 b
+                   -> TrackSink rin2 rfun2 b
+appendTrackSink l f (TrackSink r) = TrackSink $ insert l f r
 
 
 
-class ConsHandler (rin :: # Type) (rfun :: # Type) (l :: Symbol) a b (rin2 :: # Type) (rfun2 :: # Type)
-      | rin l a -> rin2, rfun l a b -> rfun2
-
-instance consHandler
-         :: ( RowLacks l rin2
-            , RowLacks l rfun2
-            , RowCons l a rin1 rin2
-            , RowCons l (a -> b) rfun1 rfun2
-            )
-         => ConsHandler rin rfun l a b rin2 rfun2
-
-class AppendHandlerImpl (rin :: # Type) (rfun :: # Type) (lin :: RowList) (lfun :: RowList) a b (rin2 :: # Type) (rfun2 :: # Type)
+class AppendHandlerImpl
+      (rin :: # Type) (rfun :: # Type)
+      (lin :: RowList) (lfun :: RowList)
+      a
+      b
+      (rin2 :: # Type) (rfun2 :: # Type)
 
 instance appendHandlerNil
          :: AppendHandlerImpl rin rfun Nil Nil a b rin2 rfun2
@@ -74,11 +72,35 @@ instance appendHandlerNil
 
 instance appendHandlerCons
          :: ( AppendHandlerImpl rin rfun lin lfun a b rin2 rfun2
+            , RowLacks label rin
+            , RowLacks label rfun
+            , RowCons label (a -> b) rfun rfun2
+            , RowCons label a rin rin2
+            , IsSymbol label
             )
          => AppendHandlerImpl rin rfun (Cons label a lin) (Cons label (a -> b) lfun) a b rin2 rfun2
 
 
-class AppendHandler (rin :: # Type) (rfun :: # Type) (l :: # Type) a b (rin2 :: # Type) (rfun2 :: # Type)
+class AppendHandler
+      (rin :: # Type) (rfun :: # Type)
+      (rin2 :: # Type) (rfun2 :: # Type)
+      (rin3 :: # Type) (rfun3 :: # Type)
+      out
+
+instance appendHandlerInstance
+         :: ( RowToList rin2 lin
+            , RowToList rfun2 lfun
+            , AppendHandlerImpl rin rfun lin lfun a out rin3 rfun3
+            )
+         => AppendHandler rin rfun rin2 rfun2 rin3 rfun3 out
+
+
+foreign import concatHandler :: forall rin1 rfun1 rin2 rfun2 rin3 rfun3 out.
+                                AppendHandler rin1 rfun1 rin2 rfun2 rin3 rfun3 out
+                             => TrackSink rin1 rfun1 out
+                             -> TrackSink rin2 rfun2 out
+                             -> TrackSink rin3 rfun3 out
+-- concatHandler (TrackSink h1) (TrackSink h2) =
 
 -- instance appendHandlerInstance
 --          :: ( RowToList l llist
@@ -88,34 +110,22 @@ class AppendHandler (rin :: # Type) (rfun :: # Type) (l :: # Type) a b (rin2 :: 
 
 
 
-class ConcatHandler (rin1 :: # Type) (rfun1 :: # Type)
-                    (rin2 :: # Type) (rfun2 :: # Type)
-                    (rin3 :: # Type) (rfun3 :: # Type)
-      | rin1 rin2 -> rin3, rfun1 rfun2 -> rfun3
-      , rin1 rin3 -> rin2, rfun1 rfun3 -> rfun2
-      , rin2 rin3 -> rin1, rfun2 rfun3 -> rfun1
-
-class ConcatHandlerImpl (lin1 :: RowList) (lfun1 :: RowList)
-                        (lin2 :: RowList) (lfun2 :: RowList)
-                        (lin3 :: RowList) (lfun3 :: RowList)
-
-instance concatHandlerNil :: ConcatHandlerImpl Nil Nil Nil Nil Nil Nil
 
 
 
-emptyInputHandler :: ∀ b.
-                InputHandler () () b
-emptyInputHandler = InputHandler {}
+emptyTrackSink :: ∀ b.
+                TrackSink () () b
+emptyTrackSink = TrackSink {}
 
 
 -- | Runs a handler on an input, where the input is a Variant whose row is a subset of the
--- | InputHandler input row.
-applyInputHandler :: ∀ lt a rin rfun b.
+-- | TrackSink input row.
+applyTrackSink :: ∀ lt a rin rfun b.
                      Union lt a rin
-                  => InputHandler rin rfun b
+                  => TrackSink rin rfun b
                   -> Variant lt
                   -> b
-applyInputHandler (InputHandler h) v =
+applyTrackSink (TrackSink h) v =
   case coerceV v of
     Tuple tag a -> a # unsafeGet tag h
   where coerceV :: ∀ c. Variant lt -> Tuple String c
@@ -124,48 +134,48 @@ applyInputHandler (InputHandler h) v =
 
 -- | Forks an Aff process with a Handler that performs effects, using some environment.
 -- | For example, `env` could be a Biodalliance instance.
-forkInputHandler :: ∀ lt a rin rfun eff env.
+forkTrackSink :: ∀ lt a rin rfun eff env.
                     Union lt a rin
-                 => InputHandler rin rfun (env -> Eff (avar :: AVAR | eff) Unit)
+                 => TrackSink rin rfun (env -> Eff (avar :: AVAR | eff) Unit)
                  -> env
                  -> BusRW (Variant lt)
                  -> Aff ( avar :: AVAR | eff ) (Canceler ( avar :: AVAR | eff ))
-forkInputHandler h env bus = forkAff $ forever do
+forkTrackSink h env bus = forkAff $ forever do
   val <- Bus.read bus
-  liftEff $ applyInputHandler h val $ env
+  liftEff $ applyTrackSink h val $ env
 
 
--- | An OutputHandler has a list of parsers for some input, and can be used to
+-- | An TrackSource has a list of parsers for some input, and can be used to
 -- | produce heterogenous lists of parsed values
 -- | `in` is the input type; the type of data that this handler can parse
 -- | `rout` is the row of types that this can produce
-data OutputHandler a (rout :: # Type) = OutputHandler (List (a -> Maybe (Variant rout)))
+data TrackSource a (rout :: # Type) = TrackSource (List (a -> Maybe (Variant rout)))
 
 
--- | Given a label and parser, adds a handler to an existing OutputHandler.
--- | The label must not already be produced by the OutputHandler.
-appendOutputHandler :: ∀ l a b r1 r r2.
+-- | Given a label and parser, adds a handler to an existing TrackSource.
+-- | The label must not already be produced by the TrackSource.
+appendTrackSource :: ∀ l a b r1 r r2.
                        Union r1 r r2
                     => RowLacks l r1
                     => RowCons l b r1 r2
                     => IsSymbol l
                     => SProxy l
                     -> (a -> Maybe b)
-                    -> OutputHandler a r1
-                    -> OutputHandler a r2
-appendOutputHandler l f (OutputHandler h) = OutputHandler $ f' : (map <<< map <<< map) expand h
+                    -> TrackSource a r1
+                    -> TrackSource a r2
+appendTrackSource l f (TrackSource h) = TrackSource $ f' : (map <<< map <<< map) expand h
   where f' :: a -> Maybe (Variant r2)
         f' a = inj l <$> f a
 
 
-emptyOutputHandler :: ∀ a.
-                      OutputHandler a ()
-emptyOutputHandler = OutputHandler mempty
+emptyTrackSource :: ∀ a.
+                      TrackSource a ()
+emptyTrackSource = TrackSource mempty
 
 
--- | Runs an OutputHandler, producing a list of all successful parses of the input.
-applyOutputHandler :: ∀ a rout.
-                      OutputHandler a rout
+-- | Runs an TrackSource, producing a list of all successful parses of the input.
+applyTrackSource :: ∀ a rout.
+                      TrackSource a rout
                    -> a
                    -> List (Variant rout)
-applyOutputHandler (OutputHandler h) a = mapMaybe (\f -> f a) h
+applyTrackSource (TrackSource h) a = mapMaybe (\f -> f a) h

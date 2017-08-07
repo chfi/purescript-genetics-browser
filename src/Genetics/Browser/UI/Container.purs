@@ -39,7 +39,7 @@ import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Cytoscape.Collection (filter, isEdge, targetNodes)
 import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
 import Genetics.Browser.Events (Location, Range)
-import Genetics.Browser.Events.Handler (InputHandler, OutputHandler, appendInputHandler, appendOutputHandler, applyOutputHandler, emptyInputHandler, emptyOutputHandler, forkInputHandler)
+import Genetics.Browser.Events.Handler (TrackSink, TrackSource, appendTrackSink, appendTrackSource, applyTrackSource, emptyTrackSink, emptyTrackSource, forkTrackSink)
 import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
 import Genetics.Browser.Renderer.Lineplot as QTL
@@ -62,23 +62,23 @@ type BDHandlerOutput eff = Biodalliance -> Eff (BDEventEff eff) Unit
 type CyHandlerOutput eff = Cytoscape -> Eff (CyEventEff eff) Unit
 
 
-locationInputBD :: InputHandler (location :: Location) _ (BDHandlerOutput _)
-locationInputBD = appendInputHandler (SProxy :: SProxy "location") f emptyInputHandler
+locationInputBD :: TrackSink (location :: Location) _ (BDHandlerOutput _)
+locationInputBD = appendTrackSink (SProxy :: SProxy "location") f emptyTrackSink
   where f loc bd = do
             log "bd got location"
             setLocation bd loc.chr (bp loc.pos - Bp 1000000.0) (bp loc.pos + Bp 1000000.0)
 
 
-rangeInputBD :: InputHandler ( range :: Range, location :: Location ) _ (BDHandlerOutput _)
-rangeInputBD = appendInputHandler (SProxy :: SProxy "range") f locationInputBD
+rangeInputBD :: TrackSink ( range :: Range, location :: Location ) _ (BDHandlerOutput _)
+rangeInputBD = appendTrackSink (SProxy :: SProxy "range") f locationInputBD
   where f :: Range -> BDHandlerOutput _
         f ran bd = do
             log "bd got range"
             setLocation bd ran.chr ran.minPos ran.maxPos
 
 
-rangeInputCy :: ∀ eff. InputHandler (range :: Range) _ (CyHandlerOutput _)
-rangeInputCy = appendInputHandler (SProxy :: SProxy "range") f emptyInputHandler
+rangeInputCy :: ∀ eff. TrackSink (range :: Range) _ (CyHandlerOutput _)
+rangeInputCy = appendTrackSink (SProxy :: SProxy "range") f emptyTrackSink
   where f ran cy = do
             log "cy got range"
             log $ "chr: " <> show ran.chr
@@ -93,8 +93,8 @@ rangeInputCy = appendInputHandler (SProxy :: SProxy "range") f emptyInputHandler
             pure unit
 
 
-rangeEventOutputBD :: OutputHandler JObject (range :: Range)
-rangeEventOutputBD = appendOutputHandler (SProxy :: SProxy "range") f emptyOutputHandler
+rangeEventOutputBD :: TrackSource JObject (range :: Range)
+rangeEventOutputBD = appendTrackSource (SProxy :: SProxy "range") f emptyTrackSource
   where f obj =  do
               chr <- obj ^? ix "chr" <<< _String <<< re _Chr
               minPos <- obj ^? ix "min" <<< _Number <<< re _Bp
@@ -112,31 +112,31 @@ parseLocationElementCy el = do
     pure $ { chr, pos }
 
 
-locationEventOutputCy :: OutputHandler ParsedEvent (location :: Location)
-locationEventOutputCy = appendOutputHandler (SProxy :: SProxy "location") f emptyOutputHandler
+locationEventOutputCy :: TrackSource ParsedEvent (location :: Location)
+locationEventOutputCy = appendTrackSource (SProxy :: SProxy "location") f emptyTrackSource
   where f (ParsedEvent ev) = case ev.target of
             Left el -> parseLocationElementCy el
             Right _ -> Nothing
 
 
 subscribeBDEvents :: ∀ r.
-                     OutputHandler JObject r
+                     TrackSource JObject r
                   -> Biodalliance
                   -> BusRW (Variant r)
                   -> Eff _ Unit
 subscribeBDEvents h bd bus =
   Biodalliance.addFeatureListener bd $ \obj -> do
-    let evs = applyOutputHandler h obj
+    let evs = applyTrackSource h obj
     traverse_ (\x -> Aff.launchAff $ Bus.write x bus) evs
 
 
 subscribeCyEvents :: ∀ r.
-                     OutputHandler ParsedEvent r
+                     TrackSource ParsedEvent r
                   -> Cytoscape
                   -> BusRW (Variant r) -> Eff _ Unit
 subscribeCyEvents h cy bus =
   Cytoscape.onClick cy $ \obj -> do
-    let evs = applyOutputHandler h obj
+    let evs = applyTrackSource h obj
     traverse_ (\x -> Aff.launchAff $ Bus.write x bus) evs
 
 
@@ -303,7 +303,7 @@ main fConfig = HA.runHalogenAff do
             io.subscribe $ CR.consumer $ case _ of
               BDInstance bd -> do
                 liftEff $ log "attaching BD event handlers"
-                _ <- forkInputHandler rangeInputBD bd busFromCy
+                _ <- forkTrackSink rangeInputBD bd busFromCy
                 _ <- liftEff $ subscribeBDEvents rangeEventOutputBD bd busFromBD
                 pure Nothing
               _ -> pure $ Just unit
@@ -319,7 +319,7 @@ main fConfig = HA.runHalogenAff do
               io.subscribe $ CR.consumer $ case _ of
                 CyInstance cy -> do
                   liftEff $ log "attaching Cy event handlers"
-                  _ <- forkInputHandler rangeInputCy cy busFromBD
+                  _ <- forkTrackSink rangeInputCy cy busFromBD
                   _ <- liftEff $ subscribeCyEvents locationEventOutputCy cy busFromCy
                   pure Nothing
                 _ -> pure $ Just unit
