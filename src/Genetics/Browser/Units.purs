@@ -9,12 +9,18 @@ module Genetics.Browser.Units
        , Chr(..)
        , _Chr
        , toScreen
+       , genBp
+       , genMBp
+       , genChr
        )where
 
 -- TODO: feels like there are better ways of dealing with this (units/dimensions);
 -- need to look for libraries
 
 import Prelude
+
+import Control.Monad.Gen (class MonadGen, chooseFloat, chooseInt)
+import Control.Monad.Rec.Class (class MonadRec)
 import Data.Foreign.Class (class Decode, class Encode)
 import Data.Lens (iso)
 import Data.Lens.Iso.Newtype (_Newtype)
@@ -35,6 +41,12 @@ derive newtype instance ringBp :: Ring Bp
 derive newtype instance arbitraryBp :: Arbitrary Bp
 derive newtype instance encodeBp :: Encode Bp
 derive newtype instance decodeBp :: Decode Bp
+
+genBp :: forall m.
+         MonadGen m
+      => MonadRec m
+      => m Bp
+genBp = Bp <$> chooseFloat 1.0 10000000.0
 
 instance showBp :: Show Bp where
   show (Bp n) = show n <> "Bp"
@@ -62,6 +74,12 @@ derive newtype instance ringMBp :: Ring MBp
 derive newtype instance arbitraryMBp :: Arbitrary MBp
 derive newtype instance encodeMBp :: Encode MBp
 derive newtype instance decodeMBp :: Decode MBp
+
+genMBp :: forall m.
+          MonadGen m =>
+          MonadRec m =>
+          m MBp
+genMBp = mbp <$> genBp
 
 instance showMBp :: Show MBp where
   show (MBp n) = show n <> "MBp"
@@ -94,3 +112,9 @@ derive newtype instance showChr :: Show Chr
 
 _Chr :: Iso' Chr String
 _Chr = _Newtype
+
+genChr :: ∀ m.
+          MonadGen m
+       => MonadRec m
+       => m Chr
+genChr = (Chr <<< show) <$> chooseInt 1 15

@@ -11,7 +11,6 @@ import Prelude
 import Data.Bifunctor (class Bifunctor, lmap)
 import Data.Foreign (Foreign)
 import Genetics.Browser.Units (class HCoordinate, toScreen)
-import Test.QuickCheck (class Arbitrary, arbitrary)
 
 -- String = chromosome, c = coordinate, r = rest of feature data
 data Feature c r = Feature String c c r
@@ -24,14 +23,6 @@ feature = Feature
 -- unwrapFeature :: ∀ c r. Feature c r -> { chr :: String, xl :: c, xr :: c, rest :: r }
 -- unwrapFeature (Feature chr xl xr r) = { chr, xl, xr, rest: r }
 
-
-instance arbitraryFeature :: (Arbitrary c, Arbitrary r) => Arbitrary (Feature c r) where
-  arbitrary = do
-    chr <- arbitrary
-    xl <- arbitrary
-    xr <- arbitrary
-    r <- arbitrary
-    pure $ Feature chr xl xr r
 
 
 instance bifunctorFeature :: Bifunctor Feature where

@@ -1,14 +1,18 @@
 module Genetics.Browser.GlyphPosition
-       ( GlyphPosition(..) )
+       ( GlyphPosition(..)
+       , genGlyphPosition
+       )
        where
 
+import Prelude
+
+import Control.Monad.Gen (class MonadGen, chooseFloat)
+import Control.Monad.Rec.Class (class MonadRec)
 import Data.Generic.Rep (class Generic)
 import Data.Monoid (class Monoid)
 import Data.Newtype (class Newtype)
 import Global (infinity)
 import Math as Math
-import Prelude
-import Test.QuickCheck (class Arbitrary, arbitrary)
 
 
 -- this is really a silly way of checking whether the user has clicked on a glyph or not.
@@ -33,13 +37,19 @@ derive instance genericGlyphPosition :: Generic GlyphPosition _
 derive instance newtypeGlyphPosition :: Newtype GlyphPosition _
 derive instance eqGlyphPosition :: Eq GlyphPosition
 
-instance arbitraryGlyphPosition :: Arbitrary GlyphPosition where
-  arbitrary = do
-    min <- arbitrary
-    max <- arbitrary
-    minY <- arbitrary
-    maxY <- arbitrary
-    pure $ GlyphPos { min, max, minY, maxY }
+
+genGlyphPosition :: ∀ m.
+                    MonadGen m
+                 => MonadRec m
+                 => m GlyphPosition
+genGlyphPosition = do
+  let cf = chooseFloat (-10000000.0) (10000000.0)
+  min <- cf
+  max <- cf
+  minY <- cf
+  maxY <- cf
+  pure $ GlyphPos { min, max, minY, maxY }
+                   -- GlyphPos { min, max, minY, maxY }
 
 instance showGlyphPosition :: Show GlyphPosition where
   show (GlyphPos (gp)) = "{ min: "  <> show gp.min  <>
