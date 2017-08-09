@@ -16,12 +16,14 @@ module Genetics.Browser.Cytoscape
        ) where
 
 import Prelude
+
 import Control.Monad.Eff (Eff, kind Effect)
-import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Uncurried (EffFn1, EffFn2, EffFn3, runEffFn1, runEffFn2, runEffFn3)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut.Core (JArray)
 import Data.Either (Either(..))
 import Data.Foreign (Foreign)
+import Data.Function.Uncurried (Fn3, runFn3)
 import Data.Maybe (Maybe)
 import Data.Nullable (Nullable, toNullable)
 import Genetics.Browser.Cytoscape.Collection (CyCollection)
@@ -35,9 +37,11 @@ newtype Layout = Layout String
 circle :: Layout
 circle = Layout "circle"
 
-foreign import cytoscapeImpl :: ∀ eff. Nullable HTMLElement
-                             -> Nullable JArray
-                             -> Eff (cy :: CY | eff) Cytoscape
+foreign import cytoscapeImpl :: ∀ eff.
+                                EffFn2 (cy :: CY | eff)
+                                (Nullable HTMLElement)
+                                (Nullable JArray)
+                                Cytoscape
 
 -- | Creates a Cytoscape.js graph instance.
 -- | `htmlEl` is the element to place it in; if Nothing, the graph is headless.
@@ -46,39 +50,67 @@ cytoscape :: forall eff.
              Maybe HTMLElement
           -> Maybe JArray
           -> Eff (cy :: CY | eff) Cytoscape
-cytoscape htmlEl els = liftEff $ cytoscapeImpl (toNullable htmlEl) (toNullable els)
+cytoscape htmlEl els = runEffFn2 cytoscapeImpl (toNullable htmlEl) (toNullable els)
 
 
 unsafeParseCollection :: Foreign -> CyCollection Element
 unsafeParseCollection = unsafeCoerce
 
 -- | Add a Collection of elements to the graph
-foreign import graphAddCollection :: ∀ eff.
-                                     Cytoscape
-                                  -> CyCollection Element
-                                  -> Eff (cy :: CY | eff) Unit
+foreign import graphAddCollectionImpl :: ∀ eff.
+                                         EffFn2 (cy :: CY | eff)
+                                         Cytoscape
+                                         (CyCollection Element)
+                                         Unit
+
+graphAddCollection :: ∀ eff.
+                      Cytoscape
+                   -> CyCollection Element
+                   -> Eff (cy :: CY | eff) Unit
+graphAddCollection = runEffFn2 graphAddCollectionImpl
 
 -- | Get all elements in the graph
-foreign import graphGetCollection :: ∀ eff.
-                                     Cytoscape
-                                  -> Eff (cy :: CY | eff) (CyCollection Element)
+foreign import graphGetCollectionImpl :: ∀ eff.
+                                         EffFn1 (cy :: CY | eff)
+                                         Cytoscape
+                                         (CyCollection Element)
+
+graphGetCollection :: ∀eff.
+                      Cytoscape
+                   -> Eff (cy :: CY | eff) (CyCollection Element)
+graphGetCollection = runEffFn1 graphGetCollectionImpl
 
 -- | Apply a layout to the graph
-foreign import runLayout :: forall eff.
-                            Cytoscape
-                         -> Layout
-                         -> Eff (cy :: CY | eff) Unit
+foreign import runLayoutImpl :: forall eff.
+                                EffFn2 (cy :: CY | eff)
+                                Cytoscape
+                                Layout
+                                Unit
+
+runLayout :: forall eff.
+             Cytoscape
+          -> Layout
+          -> Eff (cy :: CY | eff) Unit
+runLayout = runEffFn2 runLayoutImpl
 
 -- | Recalculate the container bounds, fixes the mouse click offset
-foreign import resizeContainer :: forall eff.
-                                  Cytoscape
-                               -> Eff (cy :: CY | eff) Unit
+foreign import resizeContainerImpl :: forall eff.
+                                      EffFn1 (cy :: CY | eff)
+                                      Cytoscape
+                                      Unit
+
+resizeContainer :: forall eff.
+                   Cytoscape
+                -> Eff ( cy :: CY | eff ) Unit
+resizeContainer = runEffFn1 resizeContainerImpl
 
 foreign import onEventImpl :: ∀ eff a.
+                              EffFn3 (cy :: CY | eff)
                               Cytoscape
-                           -> String
-                           -> (CyEvent -> Eff (cy :: CY | eff) a)
-                           -> Eff (cy :: CY | eff) Unit
+                              String
+                              (CyEvent -> Eff (cy :: CY | eff) a)
+                              Unit
+
 
 
 -- TODO: This is poorly named and clumsy
@@ -88,13 +120,14 @@ newtype ParsedEvent = ParsedEvent { cy :: Cytoscape
                                   }
 
 foreign import parseEventImpl :: forall a b.
+                                 Fn3
                                  (a -> Either a b)
-                              -> (b -> Either a b)
-                              -> CyEvent
-                              -> ParsedEvent
+                                 (b -> Either a b)
+                                 CyEvent
+                                 ParsedEvent
 
 parseEvent :: CyEvent -> ParsedEvent
-parseEvent = parseEventImpl Left Right
+parseEvent = runFn3 parseEventImpl Left Right
 
 
 -- | Set a Cy.js event handler
@@ -104,7 +137,7 @@ onEvent :: forall a eff.
         -> String
         -> (ParsedEvent -> Eff (cy :: CY | eff) a)
         -> Eff (cy :: CY | eff) Unit
-onEvent cy ev f = onEventImpl cy ev (f <<< parseEvent)
+onEvent cy ev f = runEffFn3 onEventImpl cy ev (f <<< parseEvent)
 
 
 onClick :: ∀ eff.
@@ -116,11 +149,23 @@ onClick cy = onEvent cy "click"
 
 -- | Remove a collection of elements from the graph,
 -- | Returning the removed elements
-foreign import graphRemoveCollection :: ∀ eff.
-                                        CyCollection Element
-                                     -> Eff (cy :: CY | eff) (CyCollection Element)
+foreign import graphRemoveCollectionImpl :: ∀ eff.
+                                            EffFn1 (cy :: CY | eff)
+                                            (CyCollection Element)
+                                            (CyCollection Element)
+
+graphRemoveCollection :: forall eff.
+                         CyCollection Element
+                      -> Eff ( cy :: CY | eff) (CyCollection Element)
+graphRemoveCollection = runEffFn1 graphRemoveCollectionImpl
 
 -- | Empty the graph
-foreign import graphRemoveAll :: forall eff.
-                                 Cytoscape
-                              -> Eff (cy :: CY | eff) Unit
+foreign import graphRemoveAllImpl :: forall eff.
+                                     EffFn1 (cy :: CY | eff)
+                                     Cytoscape
+                                     Unit
+
+graphRemoveAll :: forall eff.
+                  Cytoscape
+               -> Eff (cy :: CY | eff) Unit
+graphRemoveAll = runEffFn1 graphRemoveAllImpl

@@ -4,26 +4,20 @@ exports.collectionJson = function(coll) {
     return coll.jsons();
 };
 
-exports.collectionsEqual = function(collA) {
-    return function(collB) {
-        return collA.same(collB);
-    };
+exports.collectionsEqual = function(collA, collB) {
+    return collA.same(collB);
 };
 
-exports.union = function(a) {
-    return function(b) {
-        return a.union(b);
-    };
+exports.union = function(a, b) {
+    return a.union(b);
 };
 
 exports.size = function(coll) {
     return coll.size();
 };
 
-exports.contains = function(collA) {
-    return function(collB) {
-        return collA.contains(collB);
-    };
+exports.containsImpl = function(collA, collB) {
+    return collA.contains(collB);
 };
 
 exports.emptyCollection = function(cy) {
@@ -46,10 +40,8 @@ exports.targetNodes = function(a) {
     return a.targets();
 };
 
-exports.filter = function(pred) {
-    return function(coll) {
-        return coll.filter(pred);
-    };
+exports.filterImpl = function(pred, coll) {
+    return coll.filter(pred);
 };
 
 exports.isNode = function(elem) {
@@ -58,11 +50,4 @@ exports.isNode = function(elem) {
 
 exports.isEdge = function(elem) {
     return elem.isEdge();
-};
-
-
-exports.collectionsEqual = function(collA) {
-    return function(collB) {
-        return collA.same(collB);
-    };
 };

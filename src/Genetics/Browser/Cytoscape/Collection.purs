@@ -14,10 +14,12 @@ module Genetics.Browser.Cytoscape.Collection
        ) where
 
 import Prelude
+
 import Data.Argonaut (_Object, _String, (.?))
 import Data.Argonaut.Core (JObject, JArray)
 import Data.Either (Either(..))
 import Data.Foldable (and)
+import Data.Function.Uncurried (Fn2, Fn3, runFn2, runFn3)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (maybe)
@@ -30,18 +32,27 @@ import Genetics.Browser.Cytoscape.Types (Cytoscape, Element, elementJObject)
 foreign import data CyCollection :: Type -> Type
 
 -- | Convert a collection to a JSON array of the contained elements' JSON representations
-foreign import collectionJson :: forall e. CyCollection e -> JArray
-foreign import collectionsEqual :: forall e. CyCollection e -> CyCollection e -> Boolean
+foreign import collectionJson :: forall e.
+                                 CyCollection e
+                              -> JArray
+
+foreign import collectionsEqual :: forall e.
+                                   Fn2
+                                   (CyCollection e)
+                                   (CyCollection e)
+                                   Boolean
 
 instance eqCyCollection :: Eq (CyCollection e) where
-  eq = collectionsEqual
+  eq = runFn2 collectionsEqual
 
-foreign import union :: forall e. CyCollection e
-                     -> CyCollection e
-                     -> CyCollection e
+foreign import union :: forall e.
+                        Fn2
+                        (CyCollection e)
+                        (CyCollection e)
+                        (CyCollection e)
 
 instance semigroupCyCollection :: Semigroup (CyCollection e) where
-  append = union
+  append = runFn2 union
 
 -- can't be made a monoid since an empty collection can only be created
 -- in the context of an existing cytoscape instance
@@ -59,10 +70,17 @@ foreign import size :: forall e.
                     -> Int
 
 -- | True if the first collection contains the second
-foreign import contains :: forall e.
-                           CyCollection e
-                        -> CyCollection e
-                        -> Boolean
+foreign import containsImpl :: forall e.
+                               Fn2
+                               (CyCollection e)
+                               (CyCollection e)
+                               Boolean
+
+contains :: forall e.
+            CyCollection e
+         -> CyCollection e
+         -> Boolean
+contains = runFn2 containsImpl
 
 -- | Returns the connected edges of the nodes in the given collection
 foreign import connectedEdges :: forall e.
@@ -80,52 +98,22 @@ foreign import sourceNodes :: forall e.
                            -> CyCollection e
 
 -- | Returns the target-side nodes of the edges in the collection
-foreign import targetNodes :: forall e. CyCollection e
+foreign import targetNodes :: forall e.
+                              CyCollection e
                            -> CyCollection e
 
 -- | Filter a collection with a predicate
-foreign import filter :: forall e.
-                         Predicate e
-                      -> CyCollection e
-                      -> CyCollection e
+foreign import filterImpl :: forall e.
+                             Fn2
+                             (Predicate e)
+                             (CyCollection e)
+                             (CyCollection e)
+
+filter :: forall e.
+          Predicate e
+       -> CyCollection e
+       -> CyCollection e
+filter = runFn2 filterImpl
 
 foreign import isNode :: Predicate Element
 foreign import isEdge :: Predicate Element
-
-evenEdges :: CyCollection Element -> CyCollection Element
-evenEdges =
-  let evenId = wrap $ \el -> case (elementJObject el) .? "id" of
-        Left _  -> false
-        Right i -> i `mod` 2 == 0
-      -- get all nodes with even IDs
-  in filter (conj isNode evenId)
-      -- get the connected edges (discarding the nodes)
-     >>> connectedEdges
-
-
-evenEdgesWithNodes :: CyCollection Element -> CyCollection Element
-evenEdgesWithNodes coll =
-  let evenId = wrap $ \el -> case elementJObject el .? "id" of
-        Left _  -> false
-        Right i -> i `mod` 2 == 0
-      edges = filter (and [isNode, evenId]) coll
-  in coll `union` edges
-
-
-evenEdgesWithNodes' :: CyCollection Element -> CyCollection Element
-evenEdgesWithNodes' =
-  let evenId = wrap $ \el -> case elementJObject el .? "id" of
-        Left _  -> false
-        Right i -> i `mod` 2 == 0
-  in union <$> filter (and [isNode, evenId]) <*> connectedNodes
-
-
-locPred :: String -> JObject -> Boolean
-locPred chr obj = maybe false id $ do
-  loc <- obj ^? ix "lrsLoc" <<< _Object
-  chr' <- loc ^? ix "chr" <<< _String
-  pure $ chr' == chr
-
-
-edgesLoc :: String -> CyCollection Element -> CyCollection Element
-edgesLoc chr = filter $ wrap $ locPred chr <<< elementJObject
