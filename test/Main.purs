@@ -8,7 +8,7 @@ import Test.Cytoscape as Cytoscape
 import Test.Spec.Reporter.Console (consoleReporter)
 import Test.Spec.Runner (run)
 import Test.Track as Track
-import Test.Units as Units
+-- import Test.Units as Units
 import Test.Events as Events
 
 
@@ -17,7 +17,7 @@ main = do
   run [consoleReporter] do
     Glyph.spec
 
-    Units.spec
+    -- Units.spec
     Cytoscape.spec
     Config.spec
     Track.spec

@@ -45,6 +45,9 @@
     "cytoscape": "^3.0.0",
     "purescript-profunctor-lenses": "^3.2.0",
     "purescript-spec": "^1.0.0",
-    "purescript-options": "^3.0.0"
+    "purescript-options": "^3.0.0",
+    "purescript-quickcheck": "^4.4.0",
+    "purescript-quickcheck-laws": "^3.0.0",
+    "purescript-jack": "^2.0.0"
   }
 }

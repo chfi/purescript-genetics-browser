@@ -4,35 +4,67 @@ module Test.Glyph
        ) where
 
 import Prelude
-import DOM.Node.Types as DOM
-import Genetics.Browser.GlyphF.Canvas as Canvas
-import Genetics.Browser.GlyphF.SVG as SVG
-import Test.QuickCheck.Laws.Data as Data
+
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
+import Control.Monad.Gen (class MonadGen)
+import Control.Monad.Rec.Class (class MonadRec)
 import DOM (DOM)
+import DOM.Node.Types as DOM
 import Data.Maybe (Maybe(Just, Nothing))
 import Data.Traversable (traverse_)
 import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, rect, stroke)
-import Genetics.Browser.GlyphPosition (GlyphPosition)
+import Genetics.Browser.GlyphF.Canvas as Canvas
+import Genetics.Browser.GlyphF.SVG as SVG
+import Genetics.Browser.GlyphPosition (GlyphPosition, genGlyphPosition)
 import Genetics.Browser.Units (Bp(..), MBp(..))
 import Graphics.Canvas (getCanvasElementById, getContext2D, translate)
+import Jack (Property, forAll, property)
+import Test.QuickCheck.Laws.Data as Data
 import Test.Spec (Spec, describe, it)
 import Type.Proxy (Proxy(..))
 
 
 -- QuickCheck & unit tests
 spec :: ∀ eff. Spec _ Unit
-spec = do
-  let prxGlyph = Proxy :: Proxy GlyphPosition
-  describe "GlyphPosition instances" do
-    it "is a Semigroup" $ do
-      liftEff $ Data.checkSemigroup prxGlyph
-    it "is a Monoid" $ do
-      liftEff $ Data.checkMonoid prxGlyph
+-- spec :: _
+spec = pure unit
+-- spec = do
+  -- let prxGlyph = Proxy :: Proxy GlyphPosition
+  -- describe "GlyphPosition instances" do
+  --   it "is a Semigroup" $ do
+  --     liftEff $ Data.checkSemigroup prxGlyph
+  --   it "is a Monoid" $ do
+  --     liftEff $ Data.checkMonoid prxGlyph
 
+
+
+newtype ThreeGlyphs = ThreeGlyphs {l :: GlyphPosition, c :: GlyphPosition, r :: GlyphPosition}
+
+instance showThreeGlyphs :: Show ThreeGlyphs where
+  show (ThreeGlyphs {l,c,r}) = "{ l: " <> show l <> ", c:" <> show c <> ", r:" <> show r <> "}"
+
+
+genThreeGlyphs :: ∀ m.
+                  MonadGen m
+               => MonadRec m
+               => m ThreeGlyphs
+genThreeGlyphs = do
+  l <- genGlyphPosition
+  c <- genGlyphPosition
+  r <- genGlyphPosition
+  pure $ ThreeGlyphs {l, c, r}
+
+prop_semigroup :: Property
+prop_semigroup =
+  forAll genThreeGlyphs \(ThreeGlyphs pos) ->
+    property $ (pos.l <> pos.c) <> pos.r == pos.l <> (pos.c <> pos.r)
+
+
+-- prop_monoid :: Property
+-- prop_monoid = ?prp
 
 -- In browser SVG/Canvas tests
 foreign import addElementToDiv :: ∀ eff. String -> DOM.Element -> Eff ( dom :: DOM | eff ) Unit
