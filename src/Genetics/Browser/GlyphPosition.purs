@@ -1,13 +1,10 @@
 module Genetics.Browser.GlyphPosition
        ( GlyphPosition(..)
-       , genGlyphPosition
        )
        where
 
 import Prelude
 
-import Control.Monad.Gen (class MonadGen, chooseFloat)
-import Control.Monad.Rec.Class (class MonadRec)
 import Data.Generic.Rep (class Generic)
 import Data.Monoid (class Monoid)
 import Data.Newtype (class Newtype)
@@ -38,17 +35,6 @@ derive instance newtypeGlyphPosition :: Newtype GlyphPosition _
 derive instance eqGlyphPosition :: Eq GlyphPosition
 
 
-genGlyphPosition :: ∀ m.
-                    MonadGen m
-                 => MonadRec m
-                 => m GlyphPosition
-genGlyphPosition = do
-  let cf = chooseFloat (-10000000.0) (10000000.0)
-  min <- cf
-  max <- cf
-  minY <- cf
-  maxY <- cf
-  pure $ GlyphPos { min, max, minY, maxY }
                    -- GlyphPos { min, max, minY, maxY }
 
 instance showGlyphPosition :: Show GlyphPosition where
