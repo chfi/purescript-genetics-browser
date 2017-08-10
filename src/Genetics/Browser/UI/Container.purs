@@ -39,7 +39,8 @@ import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Cytoscape.Collection (filter, isEdge, targetNodes)
 import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
 import Genetics.Browser.Events (Location, Range)
-import Genetics.Browser.Events.Handler (TrackSink, TrackSource, appendTrackSink, appendTrackSource, applyTrackSource, emptyTrackSink, emptyTrackSource, forkTrackSink)
+import Genetics.Browser.Events.TrackSink (TrackSink, appendTrackSink, emptyTrackSink, forkTrackSink)
+import Genetics.Browser.Events.TrackSource (TrackSource, appendTrackSource, applyTrackSource, emptyTrackSource)
 import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
 import Genetics.Browser.Renderer.Lineplot as QTL

@@ -1,7 +1,9 @@
 module Test.Events where
 
 
-import Genetics.Browser.Events.Handler (TrackSink, TrackSource, appendTrackSink, appendTrackSource, applyTrackSink, applyTrackSource, emptyTrackSink, emptyTrackSource)
+-- import Genetics.Browser.Events.Handler (TrackSink, TrackSource, appendTrackSink, appendTrackSource, applyTrackSink, applyTrackSource, emptyTrackSink, emptyTrackSource)
+import Genetics.Browser.Events.TrackSink (TrackSink, appendTrackSink, emptyTrackSink, applyTrackSink)
+import Genetics.Browser.Events.TrackSource (TrackSource, appendTrackSource, applyTrackSource, emptyTrackSource)
 import Prelude
 import Data.Argonaut (Json, _Number, _Object, _String)
 import Data.Array (fromFoldable)
