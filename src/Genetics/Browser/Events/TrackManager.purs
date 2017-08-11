@@ -1,17 +1,11 @@
 module Genetics.Browser.Events.TrackManager where
 
 import Prelude
-
+import Control.Monad.Aff (Aff)
 import Control.Monad.Aff.Bus (BusRW)
-import Data.List (List)
-import Data.Monoid (mempty)
-import Data.StrMap (StrMap)
-import Data.Symbol (class IsSymbol, SProxy(..))
-import Data.Variant (Variant)
-import Genetics.Browser.Events.TrackSink (TrackSink)
-import Genetics.Browser.Events.TrackSink as Sink
-import Genetics.Browser.Events.TrackSource as Source
+import Data.Variant (Variant, expand)
 import Type.Proxy (Proxy(..))
+import Unsafe.Coerce (unsafeCoerce)
 
 
 
@@ -19,10 +13,41 @@ import Type.Proxy (Proxy(..))
 --                                             , sinks :: StrMap sis
 --                                             }
 
-newtype SourceManager sources = SourceManager (List (BusRW (Variant sources)))
 
-mkSourceManager :: SourceManager ()
-mkSourceManager = SourceManager mempty
+-- A SourceManager simply keeps track of the incoming event bus.
+-- we currently just use one event bus since we don't care about
+-- from where the events are coming
+newtype SourceManager events = SourceManager (BusRW (Variant events))
+
+-- mkSourceManager :: SourceManager ()
+-- mkSourceManager = SourceManager ?makeBus
+
+-- A source can be added as long as the label and type don't conflict
+-- with an existing source; i.e. if the label is already in the SourceManager,
+-- the types for that label must be the same
+
+
+
+-- adding a source is really...
+-- providing a producer of the appropriate variants.
+--
+-- rather, attaching another producer to the bus.
+-- the sourcemanager itself is just the bus, after all.
+
+-- Need this since Bus doesn't have a Functor instance
+expandBus :: ∀ lt a gt.
+             Union lt a gt
+          => BusRW (Variant lt)
+          -> BusRW (Variant gt)
+expandBus = unsafeCoerce
+
+addSource :: ∀ eff events1 evC events2.
+             Union events1 evC events2
+          => (BusRW (Variant events2) -> Aff _ Unit)
+          -> SourceManager events1
+          -> Aff _ (SourceManager events2)
+addSource cb (SourceManager bus) = cb bus2 *> (pure $ SourceManager bus2)
+  where bus2 = expandBus bus
 
 -- addSource :: ∀ l a r1 r2.
 --              TrackSource
