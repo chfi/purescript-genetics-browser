@@ -19,6 +19,8 @@
     "build": "pulp browserify --main Genetics.Browser.UI.Container --skip-entry-point --standalone PS --to",
     "watch": "pulp --watch browserify --main Genetics.Browser.UI.Container --skip-entry-point --standalone PS --to",
     "test": "pulp test",
-    "watch-test": "pulp --watch test"
+    "watch-test": "pulp --watch test",
+    "docs": "pulp docs"
+
   }
 }
