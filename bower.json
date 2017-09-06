@@ -28,7 +28,9 @@
     "purescript-aff-bus": "^2.0.0",
     "purescript-rx": "^2.0.0",
     "purescript-record": "^0.2.0",
-    "purescript-typelevel-prelude": "^2.4.0"
+    "purescript-typelevel-prelude": "^2.4.0",
+    "purescript-ipfs-api": "https://github.com/chfi/purescript-ipfs-api",
+    "purescript-aff-promise": "^0.7.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0",
@@ -46,8 +48,6 @@
     "purescript-profunctor-lenses": "^3.2.0",
     "purescript-spec": "^1.0.0",
     "purescript-options": "^3.0.0",
-    "purescript-quickcheck": "^4.4.0",
-    "purescript-quickcheck-laws": "^3.0.0",
     "purescript-jack": "^2.0.0"
   }
 }
