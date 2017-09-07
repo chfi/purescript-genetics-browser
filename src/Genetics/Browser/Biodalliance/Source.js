@@ -1,5 +1,9 @@
 "use strict";
 
+exports.dummySourceBase = function() {
+    return {};
+};
+
 exports.createSourceImpl = function(ForeignSourceBase) {
     return function(fetchFun) {
         var Source = {};

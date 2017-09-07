@@ -24,14 +24,16 @@ foreign import data Source :: Type -> Type
 
 type FetchFunction f a = Chr -> Bp -> Bp -> f a
 
+foreign import dummySourceBase :: ForeignSourceBase
+
 foreign import createSourceImpl :: ∀ a eff.
                                    ForeignSourceBase
                                 -> FetchFunction (Eff eff) (Promise a)
                                 -> Source a
 
-createSource :: ∀ a.
+createSource :: ∀ eff a.
                 ForeignSourceBase
-             -> FetchFunction (Aff _) a
+             -> FetchFunction (Aff eff) a
              -> Source a
 createSource fsb ff = createSourceImpl fsb ff'
   where ff' chr min max = Promise.fromAff $ ff chr min max
