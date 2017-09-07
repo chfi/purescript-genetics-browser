@@ -29,8 +29,8 @@
     "purescript-rx": "^2.0.0",
     "purescript-record": "^0.2.0",
     "purescript-typelevel-prelude": "^2.4.0",
-    "purescript-ipfs-api": "https://github.com/chfi/purescript-ipfs-api",
-    "purescript-aff-promise": "^0.7.0"
+    "purescript-aff-promise": "^0.7.0",
+    "purescript-ipfs-api": "^0.0.1"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0",
