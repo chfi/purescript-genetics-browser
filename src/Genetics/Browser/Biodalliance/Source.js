@@ -1,7 +1,7 @@
 "use strict";
 
-exports.dummySourceBase = function() {
-    return {};
+exports.dummySourceBase = function(x) {
+    return new Object();
 };
 
 exports.createSourceImpl = function(ForeignSourceBase) {
@@ -12,10 +12,12 @@ exports.createSourceImpl = function(ForeignSourceBase) {
 
         Source.fetch = function(chr, min, max, scale, types, pool, callback) {
             fetchFun(chr)(min)(max)().then(function(result) {
-                callback(result);
+                callback(null, result);
             }, function(error) {
                 callback(error);
             });
         };
+
+        return Source;
     };
 };
