@@ -32,6 +32,8 @@ import Data.Traversable (traverse_)
 import Data.Variant (Variant)
 import Genetics.Browser.Biodalliance (RendererInfo, initBD, renderers, setLocation, sources)
 import Genetics.Browser.Biodalliance as Biodalliance
+import Genetics.Browser.Biodalliance.Source (ForeignSourceBase)
+import Genetics.Browser.Biodalliance.Source as Source
 import Genetics.Browser.Config (BrowserConfig(..), parseBrowserConfig)
 import Genetics.Browser.Config.Track (validateConfigs)
 import Genetics.Browser.Cytoscape (ParsedEvent(..))
@@ -266,6 +268,11 @@ gwasRenderer = { name: "gwasRenderer"
 bdOpts :: Options Biodalliance
 bdOpts = renderers := [ qtlRenderer, gwasRenderer ]
 
+
+createSource = Source.createSource
+
+fetchHelloWorld :: ∀ a b c. a -> b -> c -> Aff _ String
+fetchHelloWorld _ _ _ = pure "Hello world"
 
 main :: Foreign -> Eff _ Unit
 main fConfig = HA.runHalogenAff do
