@@ -19,8 +19,7 @@ import Test.Track as Track
 fetchFun :: Chr -> Bp -> Bp -> Aff _ String
 fetchFun _ _ _ = pure "hello world"
 
-foreign import testFetch :: ∀ eff a. Source a -> Eff eff a
-
+foreign import testFetch :: ∀ eff a. Source a -> Eff eff Unit
 
 testSource :: Eff _ Unit
 testSource = do

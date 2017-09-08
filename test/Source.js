@@ -2,6 +2,8 @@
 
 exports.testFetch = function(source) {
     return function() {
-        return source.fetch("11", 10, 20);
+        var out = source.fetch("11", 10, 20, null, null, null, function(err, res) {
+            console.log(res);
+        });
     };
 };
