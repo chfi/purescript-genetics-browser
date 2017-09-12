@@ -32,7 +32,7 @@ import Data.Traversable (traverse_)
 import Data.Variant (Variant)
 import Genetics.Browser.Biodalliance (RendererInfo, initBD, renderers, setLocation, sources)
 import Genetics.Browser.Biodalliance as Biodalliance
-import Genetics.Browser.Biodalliance.Source (ForeignSourceBase)
+import Genetics.Browser.Biodalliance.Source (Source)
 import Genetics.Browser.Biodalliance.Source as Source
 import Genetics.Browser.Config (BrowserConfig(..), parseBrowserConfig)
 import Genetics.Browser.Config.Track (validateConfigs)
@@ -49,7 +49,7 @@ import Genetics.Browser.Renderer.Lineplot as QTL
 import Genetics.Browser.Types (BD, Biodalliance, Renderer)
 import Genetics.Browser.UI.Biodalliance as UIBD
 import Genetics.Browser.UI.Cytoscape as UICy
-import Genetics.Browser.Units (Bp(Bp), Chr, _Bp, _BpMBp, _Chr, _MBp, bp)
+import Genetics.Browser.Units (Bp(Bp), Chr(..), _Bp, _BpMBp, _Chr, _MBp, bp)
 import Halogen as H
 import Halogen.Aff as HA
 import Halogen.Component.ChildPath as CP
@@ -269,12 +269,33 @@ bdOpts :: Options Biodalliance
 bdOpts = renderers := [ qtlRenderer, gwasRenderer ]
 
 
+createSource :: forall eff a. (Chr -> Bp -> Bp -> Aff eff a) -> Source a
 createSource = Source.createSource
+
 
 fetchHelloWorld :: ∀ a b c. a -> b -> c -> Aff _ String
 fetchHelloWorld _ _ _ = pure "Hello world"
 
+
+
+fetchFeature :: Chr -> Bp -> Bp -> Aff _ (Array
+                                          { chr :: String
+                                          , min :: Int
+                                          , max :: Int
+                                          })
+fetchFeature chr pmin pmax =
+  let f chr min max = { chr, min, max }
+  in do
+     liftEff $ log "Fetching a purescript feature!!"
+     pure [ f "11" 10000000 11000000
+          , f "11"  9000000 12000000
+          , f "11"  9500000  9900000
+          ]
+
+
 foreign import setBDRef :: ∀ eff. Biodalliance -> Eff eff Unit
+
+
 main :: Foreign -> Eff _ Unit
 main fConfig = HA.runHalogenAff do
   case runExcept $ parseBrowserConfig fConfig of
