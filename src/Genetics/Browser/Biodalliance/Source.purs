@@ -14,26 +14,16 @@ import Genetics.Browser.Units (Bp, Chr)
 
 -- fetch(chr, min, max, scale, types, pool, callback)
 
--- they also extend FeatureSourceBase...
--- how to provide that, I wonder
--- probably best to provide it as a function argument.
-
-foreign import data ForeignSourceBase :: Type
-
 foreign import data Source :: Type -> Type
 
 type FetchFunction f a = Chr -> Bp -> Bp -> f a
 
-foreign import dummySourceBase :: ForeignSourceBase
-
 foreign import createSourceImpl :: ∀ a eff.
-                                   ForeignSourceBase
-                                -> FetchFunction (Eff eff) (Promise a)
+                                   FetchFunction (Eff eff) (Promise a)
                                 -> Source a
 
 createSource :: ∀ eff a.
-                ForeignSourceBase
-             -> FetchFunction (Aff eff) a
+                FetchFunction (Aff eff) a
              -> Source a
-createSource fsb ff = createSourceImpl fsb ff'
+createSource ff = createSourceImpl ff'
   where ff' chr min max = Promise.fromAff $ ff chr min max

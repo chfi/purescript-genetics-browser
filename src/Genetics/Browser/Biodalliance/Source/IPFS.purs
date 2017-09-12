@@ -7,7 +7,7 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Exception (EXCEPTION, Error, error, throw)
 import Control.Monad.Error.Class (throwError)
 import Data.Maybe (Maybe(..))
-import Genetics.Browser.Biodalliance.Source (FetchFunction, ForeignSourceBase, Source, createSource)
+import Genetics.Browser.Biodalliance.Source (FetchFunction, Source, createSource)
 import IPFS (IPFS, IPFSEff)
 import IPFS.Files as Files
 import IPFS.Types (IPFSEff, IPFSPath(..))
@@ -37,7 +37,6 @@ ipfsSource :: ∀ a.
               IPFS
            -> String
            -> (String -> Maybe a)
-           -> ForeignSourceBase
            -> Source a
-ipfsSource ipfs path parser fsb =
-  createSource fsb $ ipfsFetch ipfs path parser
+ipfsSource ipfs path parser =
+  createSource $ ipfsFetch ipfs path parser
