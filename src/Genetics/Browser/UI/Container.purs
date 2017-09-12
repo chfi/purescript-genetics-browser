@@ -274,6 +274,7 @@ createSource = Source.createSource
 fetchHelloWorld :: ∀ a b c. a -> b -> c -> Aff _ String
 fetchHelloWorld _ _ _ = pure "Hello world"
 
+foreign import setBDRef :: ∀ eff. Biodalliance -> Eff eff Unit
 main :: Foreign -> Eff _ Unit
 main fConfig = HA.runHalogenAff do
   case runExcept $ parseBrowserConfig fConfig of
@@ -313,6 +314,7 @@ main fConfig = HA.runHalogenAff do
                 liftEff $ log "attaching BD event handlers"
                 _ <- forkTrackSink rangeInputBD bd busFromCy
                 _ <- liftEff $ subscribeBDEvents rangeEventOutputBD bd busFromBD
+                liftEff $ setBDRef bd
                 pure Nothing
               _ -> pure $ Just unit
             liftEff $ log "creating BD"
