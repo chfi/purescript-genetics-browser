@@ -4,7 +4,7 @@ module Genetics.Browser.UI.Container
 import Prelude
 
 import Control.Coroutine as CR
-import Control.Monad.Aff (Aff)
+import Control.Monad.Aff (Aff, makeAff)
 import Control.Monad.Aff as Aff
 import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Aff.Bus (BusRW)
@@ -12,24 +12,29 @@ import Control.Monad.Aff.Bus as Bus
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE, log)
+import Control.Monad.Eff.Exception (error)
+import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExcept)
+import Control.MonadPlus (guard)
 import DOM.HTML.Types (HTMLElement)
-import Data.Argonaut (JObject, _Number, _Object, _String)
-import Data.Array (null, uncons)
+import Data.Argonaut (class EncodeJson, JObject, Json, _Array, _Number, _Object, _String, decodeJson, encodeJson, jsonEmptyObject, jsonParser, (.?), (~>))
+import Data.Array (mapMaybe, null, uncons)
 import Data.Const (Const)
 import Data.Either (Either(..))
 import Data.Either.Nested (Either2)
 import Data.Foldable (foldMap, sequence_)
 import Data.Foreign (Foreign, renderForeignError)
 import Data.Functor.Coproduct.Nested (type (<\/>))
+import Data.Int (round)
 import Data.Lens (re, (^?))
 import Data.Lens.Index (ix)
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), maybe)
 import Data.Newtype (unwrap, wrap)
 import Data.Options (Options, (:=))
 import Data.Symbol (SProxy(..))
-import Data.Traversable (traverse_)
+import Data.Traversable (sequence, traverse, traverse_)
 import Data.Variant (Variant)
+import Debug.Trace (traceShow)
 import Genetics.Browser.Biodalliance (RendererInfo, initBD, renderers, setLocation, sources)
 import Genetics.Browser.Biodalliance as Biodalliance
 import Genetics.Browser.Biodalliance.Source (Source)
@@ -50,12 +55,20 @@ import Genetics.Browser.Types (BD, Biodalliance, Renderer)
 import Genetics.Browser.UI.Biodalliance as UIBD
 import Genetics.Browser.UI.Cytoscape as UICy
 import Genetics.Browser.Units (Bp(Bp), Chr(..), _Bp, _BpMBp, _Chr, _MBp, bp)
+import Global.Unsafe (unsafeStringify)
 import Halogen as H
 import Halogen.Aff as HA
 import Halogen.Component.ChildPath as CP
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.VDom.Driver (runUI)
+import IPFS as IPFS
+import IPFS.Files as Files
+import IPFS.Types (IPFSPath(..))
+import Node.Encoding (Encoding, Encoding(..))
+import Node.Stream (Readable, readString)
+import Node.Stream as Stream
+import Unsafe.Coerce (unsafeCoerce)
 
 
 type BDEventEff eff = (console :: CONSOLE, bd :: BD, avar :: AVAR | eff)
@@ -273,27 +286,48 @@ createSource :: forall eff a. (Chr -> Bp -> Bp -> Aff eff a) -> Source a
 createSource = Source.createSource
 
 
-fetchHelloWorld :: ∀ a b c. a -> b -> c -> Aff _ String
-fetchHelloWorld _ _ _ = pure "Hello world"
+type BasicFeature r = { chr :: String
+                      , min :: Int
+                      , max :: Int
+                      | r
+                      }
+
+testPath = "QmQwtu1Lr1R3syY15Ak2U85NZjbWrtda8pE8Dp4mnQLPEx"
 
 
+affOnDataString :: Readable _ _
+                -> Encoding
+                -> Aff _ String
+affOnDataString stream encoding =
+  makeAff (\error success -> Stream.onDataString stream encoding success)
 
-fetchFeature :: Chr -> Bp -> Bp -> Aff _ (Array
-                                          { chr :: String
-                                          , min :: Int
-                                          , max :: Int
-                                          })
-fetchFeature chr pmin pmax =
-  let f chr min max = { chr, min, max }
-  in do
-     liftEff $ log "Fetching a purescript feature!!"
-     pure [ f "11" 10000000 11000000
-          , f "11"  9000000 12000000
-          , f "11"  9500000  9900000
-          ]
+
+fetchIPFSFeature :: ∀ r.
+                    (Json -> Either String (BasicFeature r))
+                 -> String
+                 -> Chr -> Bp -> Bp -> Aff _ (Array (BasicFeature r))
+fetchIPFSFeature parse path chr min max = do
+  ipfs <- liftEff $ IPFS.connect "localhost" 5001
+  str  <- Files.cat ipfs (IPFSPathString path)
+  raw  <- jsonParser <$> affOnDataString str UTF8
+  case raw >>= decodeJson >>= traverse parse of
+    Left err -> throwError $ error err
+    Right fs -> pure fs
+
+
+parseScoreFeature :: Json -> Either String (BasicFeature (score :: Number))
+parseScoreFeature j = do
+  obj <- decodeJson j
+  chr <- (obj .? "chr")
+  min <- round <$> obj .? "min"
+  max <- round <$> obj .? "max"
+  score <- (obj .? "score")
+  pure {chr, min, max, score}
+
 
 
 foreign import setBDRef :: ∀ eff. Biodalliance -> Eff eff Unit
+
 
 
 main :: Foreign -> Eff _ Unit

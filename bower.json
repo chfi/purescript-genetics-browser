@@ -30,7 +30,7 @@
     "purescript-record": "^0.2.0",
     "purescript-typelevel-prelude": "^2.4.0",
     "purescript-aff-promise": "^0.7.0",
-    "purescript-ipfs-api": "^0.0.1"
+    "purescript-ipfs-api": "^0.0.2"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0",
