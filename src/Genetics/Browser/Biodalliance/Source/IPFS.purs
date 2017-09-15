@@ -5,10 +5,10 @@ import Prelude
 import Control.Monad.Aff (Aff, makeAff)
 import Control.Monad.Eff.Exception (EXCEPTION, Error, error, throw)
 import Control.Monad.Error.Class (throwError)
-import Data.Argonaut (Json, decodeJson, jsonParser)
+import Data.Argonaut (class DecodeJson, Json, decodeJson, jsonParser)
 import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
-import Data.Traversable (traverse)
+import Data.Traversable (class Traversable, traverse)
 import Genetics.Browser.Biodalliance.Source (FetchFunction, Source, createSource)
 import Genetics.Browser.Units (Bp(..), Chr(..))
 import IPFS (IPFS, IPFSEff)
@@ -26,12 +26,15 @@ affOnDataString stream encoding =
   makeAff (\error success -> Stream.onDataString stream encoding success)
 
 
-fetchIPFSFeature :: ∀ a.
-                    IPFS
-                 -> (Json -> Either String a)
-                 -> String
-                 -> Chr -> Bp -> Bp -> Aff _ (Array a)
-fetchIPFSFeature ipfs parse path chr min max = do
+fetchIPFSFeatures :: ∀ f a.
+                     Functor f
+                  => DecodeJson f
+                  => Traversable f
+                  => IPFS
+                  -> (Json -> Either String a)
+                  -> String
+                  -> Chr -> Bp -> Bp -> Aff _ (f a)
+fetchIPFSFeatures ipfs parse path chr min max = do
   str  <- Files.cat ipfs (IPFSPathString path)
   raw  <- jsonParser <$> affOnDataString str UTF8
   case raw >>= decodeJson >>= traverse parse of
