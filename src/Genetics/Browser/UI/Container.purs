@@ -295,26 +295,6 @@ type BasicFeature r = { chr :: String
 testPath = "QmQwtu1Lr1R3syY15Ak2U85NZjbWrtda8pE8Dp4mnQLPEx"
 
 
-affOnDataString :: Readable _ _
-                -> Encoding
-                -> Aff _ String
-affOnDataString stream encoding =
-  makeAff (\error success -> Stream.onDataString stream encoding success)
-
-
-fetchIPFSFeature :: ∀ r.
-                    (Json -> Either String (BasicFeature r))
-                 -> String
-                 -> Chr -> Bp -> Bp -> Aff _ (Array (BasicFeature r))
-fetchIPFSFeature parse path chr min max = do
-  ipfs <- liftEff $ IPFS.connect "localhost" 5001
-  str  <- Files.cat ipfs (IPFSPathString path)
-  raw  <- jsonParser <$> affOnDataString str UTF8
-  case raw >>= decodeJson >>= traverse parse of
-    Left err -> throwError $ error err
-    Right fs -> pure fs
-
-
 parseScoreFeature :: Json -> Either String (BasicFeature (score :: Number))
 parseScoreFeature j = do
   obj <- decodeJson j
@@ -325,9 +305,7 @@ parseScoreFeature j = do
   pure {chr, min, max, score}
 
 
-
 foreign import setBDRef :: ∀ eff. Biodalliance -> Eff eff Unit
-
 
 
 main :: Foreign -> Eff _ Unit

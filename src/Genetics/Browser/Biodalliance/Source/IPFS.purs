@@ -2,41 +2,38 @@ module Genetics.Browser.Biodalliance.Source.IPFS where
 
 import Prelude
 
-import Control.Monad.Aff (Aff)
-import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Aff (Aff, makeAff)
 import Control.Monad.Eff.Exception (EXCEPTION, Error, error, throw)
 import Control.Monad.Error.Class (throwError)
+import Data.Argonaut (Json, decodeJson, jsonParser)
+import Data.Either (Either(..))
 import Data.Maybe (Maybe(..))
+import Data.Traversable (traverse)
 import Genetics.Browser.Biodalliance.Source (FetchFunction, Source, createSource)
+import Genetics.Browser.Units (Bp(..), Chr(..))
 import IPFS (IPFS, IPFSEff)
 import IPFS.Files as Files
 import IPFS.Types (IPFSEff, IPFSPath(..))
-import Node.Encoding (Encoding(..))
+import Node.Encoding (Encoding, Encoding(..))
+import Node.Stream (Readable)
 import Node.Stream as Stream
 
 
-ipfsFetch :: ∀ a eff.
-             IPFS
-          -> String
-          -> (String -> Maybe a)
-          -> FetchFunction (Aff ( ipfs :: IPFSEff
-                                , exception :: EXCEPTION | eff ) ) a
-ipfsFetch ipfs path parse = \chr min max -> do
-  stream <- Files.cat ipfs (IPFSPathString path)
-
-  liftEff $ Stream.pause stream
-
-  file <- liftEff $ Stream.readString stream Nothing UTF8
-
-  case file >>= parse of
-    Just a  -> pure a
-    Nothing -> throwError $ error "Failed"
+affOnDataString :: Readable _ _
+                -> Encoding
+                -> Aff _ String
+affOnDataString stream encoding =
+  makeAff (\error success -> Stream.onDataString stream encoding success)
 
 
-ipfsSource :: ∀ a.
-              IPFS
-           -> String
-           -> (String -> Maybe a)
-           -> Source a
-ipfsSource ipfs path parser =
-  createSource $ ipfsFetch ipfs path parser
+fetchIPFSFeature :: ∀ a.
+                    IPFS
+                 -> (Json -> Either String a)
+                 -> String
+                 -> Chr -> Bp -> Bp -> Aff _ (Array a)
+fetchIPFSFeature ipfs parse path chr min max = do
+  str  <- Files.cat ipfs (IPFSPathString path)
+  raw  <- jsonParser <$> affOnDataString str UTF8
+  case raw >>= decodeJson >>= traverse parse of
+    Left err -> throwError $ error err
+    Right fs -> pure fs
