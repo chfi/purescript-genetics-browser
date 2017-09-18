@@ -7,8 +7,8 @@ module Genetics.Browser.Cytoscape
        , unsafeParseCollection
        , runLayout
        , resizeContainer
-       , ParsedEvent(..)
-       , parseEvent
+       -- , ParsedEvent(..)
+       -- , parseEvent
        , onEvent
        , onClick
        , Layout
@@ -20,6 +20,7 @@ import Prelude
 import Control.Monad.Eff (Eff, kind Effect)
 import Control.Monad.Eff.Uncurried (EffFn1, EffFn2, EffFn3, runEffFn1, runEffFn2, runEffFn3)
 import DOM.HTML.Types (HTMLElement)
+import Data.Argonaut (Json)
 import Data.Argonaut.Core (JArray)
 import Data.Either (Either(..))
 import Data.Foreign (Foreign)
@@ -112,22 +113,21 @@ foreign import onEventImpl :: ∀ eff a.
                               Unit
 
 
-
 -- TODO: This is poorly named and clumsy
 -- | Basic wrapper over the Cy.js on-click events
-newtype ParsedEvent = ParsedEvent { cy :: Cytoscape
-                                  , target :: Either Element Cytoscape
-                                  }
+-- newtype ParsedEvent = ParsedEvent { cy :: Cytoscape
+--                                   , target :: Either Element Cytoscape
+--                                   }
 
-foreign import parseEventImpl :: forall a b.
-                                 Fn3
-                                 (a -> Either a b)
-                                 (b -> Either a b)
-                                 CyEvent
-                                 ParsedEvent
+-- foreign import parseEventImpl :: forall a b.
+--                                  Fn3
+--                                  (a -> Either a b)
+--                                  (b -> Either a b)
+--                                  CyEvent
+--                                  ParsedEvent
 
-parseEvent :: CyEvent -> ParsedEvent
-parseEvent = runFn3 parseEventImpl Left Right
+-- parseEvent :: CyEvent -> ParsedEvent
+-- parseEvent = runFn3 parseEventImpl Left Right
 
 
 -- | Set a Cy.js event handler
@@ -135,14 +135,14 @@ parseEvent = runFn3 parseEventImpl Left Right
 onEvent :: forall a eff.
            Cytoscape
         -> String
-        -> (ParsedEvent -> Eff (cy :: CY | eff) a)
+        -> (CyEvent -> Eff (cy :: CY | eff) a)
         -> Eff (cy :: CY | eff) Unit
-onEvent cy ev f = runEffFn3 onEventImpl cy ev (f <<< parseEvent)
+onEvent cy ev f = runEffFn3 onEventImpl cy ev f
 
 
 onClick :: ∀ eff.
            Cytoscape
-        -> (ParsedEvent -> Eff (cy :: CY | eff) Unit)
+        -> (CyEvent -> Eff (cy :: CY | eff) Unit)
         -> Eff (cy :: CY | eff) Unit
 onClick cy = onEvent cy "click"
 

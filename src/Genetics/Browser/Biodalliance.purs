@@ -6,6 +6,7 @@ module Genetics.Browser.Biodalliance
        , RendererInfo
        , renderers
        -- , maxHeight
+       , BDEvent(..)
        , addFeatureListener
        , addInitListener
        , setLocation
@@ -18,9 +19,11 @@ import Prelude
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn4, runEffFn2, runEffFn4)
 import DOM.HTML.Types (HTMLElement)
+import Data.Argonaut (Json)
 import Data.Argonaut.Core (JObject)
 import Data.Foreign (Foreign)
 import Data.Function.Uncurried (Fn3, runFn3)
+import Data.Newtype (class Newtype)
 import Data.Options (Option, Options, opt, options)
 import Genetics.Browser.Config.Track (BDTrackConfig)
 import Genetics.Browser.Types (BD, Biodalliance) as Export
@@ -74,13 +77,17 @@ maxHeight :: Option Biodalliance Int
 maxHeight = opt "maxHeight"
 
 
+newtype BDEvent = BDEvent Json
+
+derive instance newtypeBDEvent :: Newtype BDEvent _
+
 
 -- | Add a callback that's run when the user clicks on a feature in the BD browser.
 -- | The callback receives the clicked on feature.
 foreign import addFeatureListenerImpl :: ∀ eff a.
                                          EffFn2 (bd :: BD | eff)
                                          Biodalliance
-                                         (JObject -> Eff eff a)
+                                         (BDEvent -> Eff eff a)
                                          Unit
 
 addFeatureListener :: _
