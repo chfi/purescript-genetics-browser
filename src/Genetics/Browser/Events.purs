@@ -15,6 +15,9 @@ module Genetics.Browser.Events
        where
 
 import Prelude
+
+import Data.Lens (re)
+import Data.Newtype (class Newtype)
 import Data.Symbol (SProxy(..))
 import Data.Variant (Variant, on)
 import Genetics.Browser.Units (Bp, Chr)
@@ -23,11 +26,17 @@ import Genetics.Browser.Units (Bp, Chr)
 newtype Event r = Event (Variant r)
 
 
-type Location = { chr :: Chr
-                , pos :: Bp
-                }
-_eventLocation = (SProxy :: SProxy "location")
+newtype Location = Location { chr :: Chr
+                            , pos :: Bp
+                            }
+
+derive instance newtypeLocation :: Newtype Location _
+derive newtype instance genericLocation :: Generic Location _
+
+
+
 type EventLocation r = ( location :: Location | r)
+
 handleLocation :: forall r a.
                   (Location -> a)
                -> (Variant r -> a)
