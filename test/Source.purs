@@ -5,7 +5,7 @@ import Prelude
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (log)
-import Genetics.Browser.Biodalliance.Source (Source, createSource, dummySourceBase)
+import Genetics.Browser.Biodalliance.Source (Source, createSource)
 import Genetics.Browser.Units (Bp(..), Chr(..))
 import Jack (jackMain)
 import Test.Config as Config
@@ -19,11 +19,10 @@ import Test.Track as Track
 fetchFun :: Chr -> Bp -> Bp -> Aff _ String
 fetchFun _ _ _ = pure "hello world"
 
-foreign import testFetch :: ∀ eff a. Source a -> Eff eff Unit
+foreign import testFetch :: ∀ eff a. a -> Source a -> Eff eff Unit
 
 testSource :: Eff _ Unit
 testSource = do
-  let src = createSource dummySourceBase fetchFun
-
-  log "LOOKIE HERE NOW"
-  log =<< testFetch src
+  let src = createSource fetchFun
+  log "Test Fetch equal:"
+  testFetch "hello world" src
