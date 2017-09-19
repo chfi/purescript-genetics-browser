@@ -44,7 +44,7 @@ import Genetics.Browser.Config.Track (validateConfigs)
 import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Cytoscape.Collection (filter, isEdge, targetNodes)
 import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
-import Genetics.Browser.Events (Location, Range)
+import Genetics.Browser.Events (Location(..), Range(..))
 import Genetics.Browser.Events.TrackSink (TrackSink, appendTrackSinks, emptyTrackSink, forkTrackSink, mkTrackSink)
 import Genetics.Browser.Events.TrackSource (TrackSource, appendTrackSources, applyTrackSource, emptyTrackSource, mkTrackSource)
 import Genetics.Browser.Events.Types (Event)
@@ -74,33 +74,41 @@ import Unsafe.Coerce (unsafeCoerce)
 type BDEventEff eff = (console :: CONSOLE, bd :: BD, avar :: AVAR | eff)
 type CyEventEff eff = (console :: CONSOLE, cy :: CY, avar :: AVAR | eff)
 
-type BDHandlerOutput eff = Biodalliance -> Eff (BDEventEff eff) Unit
-type CyHandlerOutput eff = Cytoscape -> Eff (CyEventEff eff) Unit
+type BDHandlerOutput eff = Biodalliance -> Maybe (Eff (BDEventEff eff) Unit)
+type CyHandlerOutput eff = Cytoscape -> Maybe (Eff (CyEventEff eff) Unit)
 
 
 locationInputBD :: ∀ eff. TrackSink Biodalliance (BDEventEff eff)
 locationInputBD = mkTrackSink "location" f
-  where f loc bd = do
+  where f locJson bd = case decodeJson locJson of
+          Left _ -> Nothing
+          Right (Location loc) -> Just do
             log "bd got location"
             setLocation bd loc.chr (bp loc.pos - Bp 1000000.0) (bp loc.pos + Bp 1000000.0)
 
 
 rangeInputBD :: ∀ eff. TrackSink Biodalliance (BDEventEff eff)
 rangeInputBD = mkTrackSink "range" f
-  where f :: Range -> BDHandlerOutput _
-        f ran bd = do
-            log "bd got range"
-            setLocation bd ran.chr ran.minPos ran.maxPos
+  -- where f :: Json -> BDHandlerOutput _
+  where f :: Json -> Biodalliance -> Maybe (Eff _ Unit)
+        f rangeJson bd =
+            case decodeJson rangeJson of
+              Left _ -> Nothing
+              Right (Range ran) -> Just do
+                log "bd got range"
+                setLocation bd ran.chr ran.minPos ran.maxPos
 
 
-rangeInputCy :: ∀ eff. TrackSink Biodalliance (BDEventEff eff)
+rangeInputCy :: ∀ eff. TrackSink Cytoscape (CyEventEff eff)
 rangeInputCy = mkTrackSink "range" f
-  where f ran cy = do
+  where f rangeJson cy = case decodeJson rangeJson of
+          Left _ -> Nothing
+          Right (Range ran) -> Just do
             log "cy got range"
             log $ "chr: " <> show ran.chr
             let pred el = case parseLocationElementCy el of
                   Nothing -> false
-                  Just loc -> loc.chr == ran.chr
+                  Just (Location loc) -> loc.chr == ran.chr
 
             graphColl <- liftEff $ Cytoscape.graphGetCollection cy
             let edges = filter ((not $ wrap pred) && isEdge) graphColl
@@ -111,11 +119,13 @@ rangeInputCy = mkTrackSink "range" f
 
 rangeEventOutputBD :: TrackSource
 rangeEventOutputBD = mkTrackSource "range" f
-  where f obj =  do
-              chr <- obj ^? ix "chr" <<< _String <<< re _Chr
-              minPos <- obj ^? ix "min" <<< _Number <<< re _Bp
-              maxPos <- obj ^? ix "max" <<< _Number <<< re _Bp
-              pure $ {chr, minPos, maxPos}
+  where f :: Json -> Maybe Json
+        f json = do
+            obj <- json ^? _Object
+            chr <- obj ^? ix "chr" <<< _String <<< re _Chr
+            minPos <- obj ^? ix "min" <<< _Number <<< re _Bp
+            maxPos <- obj ^? ix "max" <<< _Number <<< re _Bp
+            pure $ encodeJson $ Range {chr, minPos, maxPos}
 
 
 parseLocationElementCy :: Element -> Maybe Location
@@ -125,15 +135,19 @@ parseLocationElementCy el = do
             -- ridiculous.
     pos <- loc ^? _Object <<< ix "pos" <<< _Number
                     <<< re _MBp <<< re _BpMBp
-    pure $ { chr, pos }
+    pure $ Location { chr, pos }
 
 
 locationEventOutputCy :: TrackSource
 locationEventOutputCy = mkTrackSource "location" f
-  where f ev = let ev' = unwrap ev in
-          case _.target ev' of
-            "element" -> parseLocationElementCy ev'
-            Right _ -> Nothing
+  where f :: Json -> Maybe Json
+        f ev = do
+            loc <- ev ^? _Object <<< ix "data" <<< _Object <<< ix "lrsLoc"
+            chr <- loc ^? _Object <<< ix "chr" <<< _String <<< re _Chr
+                    -- ridiculous.
+            pos <- loc ^? _Object <<< ix "pos" <<< _Number
+                            <<< re _MBp <<< re _BpMBp
+            pure $ encodeJson $ Location { chr, pos }
 
 
 subscribeBDEvents :: ∀ r.
@@ -143,7 +157,7 @@ subscribeBDEvents :: ∀ r.
                   -> Eff _ Unit
 subscribeBDEvents h bd bus =
   Biodalliance.addFeatureListener bd $ \obj -> do
-    let evs = applyTrackSource h obj
+    let evs = applyTrackSource h (unwrap obj)
     traverse_ (\x -> Aff.launchAff $ Bus.write x bus) evs
 
 

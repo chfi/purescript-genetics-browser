@@ -6,29 +6,15 @@ import Genetics.Browser.Biodalliance as Biodalliance
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Properties as HP
-import Control.Monad.Aff (Aff, forkAff)
+import Control.Monad.Aff (Aff)
 import Control.Monad.Aff.AVar (AVAR)
-import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (class MonadEff, liftEff)
-import Control.Monad.Eff.Console (CONSOLE, log)
-import Control.Monad.Except (runExcept)
-import Control.Monad.Rec.Class (forever)
+import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (CONSOLE)
 import DOM.HTML.Types (HTMLElement)
-import Data.Argonaut (_Number, _String)
-import Data.Argonaut.Core (JObject)
-import Data.Either (Either(..))
-import Data.Foreign (F)
-import Data.Foreign.Class (decode, encode)
-import Data.Lens (re, (^?))
-import Data.Lens.Index (ix)
 import Data.Maybe (Maybe(..))
-import Data.Variant (Variant, default, inj, on)
-import Genetics.Browser.Events (Event(..), EventLocation, EventRange, Location, Range, _eventLocation, _eventRange, handleLocation, handleRange)
 import Genetics.Browser.Types (BD, Biodalliance)
-import Genetics.Browser.Units (Bp, Chr, MBp(MBp), _Bp, _Chr, bp, mbp)
-import Global.Unsafe (unsafeStringify)
-import Unsafe.Coerce (unsafeCoerce)
+import Genetics.Browser.Units (Bp, Chr)
 
 
 type State = { bd :: Maybe Biodalliance

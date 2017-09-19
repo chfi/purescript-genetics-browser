@@ -1,12 +1,9 @@
 module Genetics.Browser.UI.Cytoscape
        where
 
+
 import Prelude
-import Genetics.Browser.Cytoscape as Cytoscape
-import Halogen as H
-import Halogen.HTML as HH
-import Halogen.HTML.Properties as HP
-import Network.HTTP.Affjax as Affjax
+
 import Control.Monad.Aff (Aff)
 import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Aff.Class (liftAff)
@@ -21,16 +18,18 @@ import Data.Foreign.Class (decode, encode)
 import Data.Lens (re, (^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (Maybe(..))
-import Data.Newtype (wrap)
-import Data.Predicate (Predicate(..))
-import Data.Variant (default, inj)
+import Data.Predicate (Predicate)
 import Genetics.Browser.Cytoscape (runLayout, resizeContainer)
+import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Cytoscape.Collection (filter)
 import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
-import Genetics.Browser.Events (Event(..), EventLocation, EventRange, Location, Range, _eventLocation, handleRange)
+import Genetics.Browser.Events (Location)
 import Genetics.Browser.Units (_BpMBp, _Chr, _MBp)
-import Global.Unsafe (unsafeStringify)
+import Halogen as H
+import Halogen.HTML as HH
+import Halogen.HTML.Properties as HP
 import Network.HTTP.Affjax (AJAX)
+import Network.HTTP.Affjax as Affjax
 
 
 -- TODO: elemsUrl should be safer.
