@@ -1,29 +1,14 @@
 module Genetics.Browser.Events
-       ( Event(..)
-       , handleLocation
-       , handleRange
-       , _eventLocation
-       , _eventRange
-       , _eventScore
-       , EventLocation(..)
-       , EventRange(..)
-       , EventScore(..)
-       , Location(..)
+       ( Location(..)
        , Range(..)
        , Score(..)
        )
        where
 
 import Prelude
-
-import Data.Lens (re)
-import Data.Newtype (class Newtype)
-import Data.Symbol (SProxy(..))
-import Data.Variant (Variant, on)
+import Data.Argonaut (class DecodeJson, class EncodeJson, decodeJson, jsonEmptyObject, (.?), (:=), (~>))
+import Data.Newtype (class Newtype, unwrap, wrap)
 import Genetics.Browser.Units (Bp, Chr)
-
-
-newtype Event r = Event (Variant r)
 
 
 newtype Location = Location { chr :: Chr
@@ -31,32 +16,56 @@ newtype Location = Location { chr :: Chr
                             }
 
 derive instance newtypeLocation :: Newtype Location _
-derive newtype instance genericLocation :: Generic Location _
+
+instance encodeJSONLocation :: EncodeJson Location where
+  encodeJson (Location {chr, pos})
+    = "chr" := (unwrap chr)
+   ~> "pos" := (unwrap pos)
+   ~> jsonEmptyObject
+
+instance decodeJSONLocation :: DecodeJson Location where
+  decodeJson json = do
+    obj <- decodeJson json
+    chr <- wrap <$> obj .? "chr"
+    pos <- wrap <$> obj .? "pos"
+    pure $ Location { chr, pos }
 
 
+newtype Range = Range { chr :: Chr
+                      , minPos :: Bp
+                      , maxPos :: Bp
+                      }
 
-type EventLocation r = ( location :: Location | r)
+derive instance newtypeRange :: Newtype Range _
 
-handleLocation :: forall r a.
-                  (Location -> a)
-               -> (Variant r -> a)
-               -> Variant (EventLocation r)
-               -> a
-handleLocation = on _eventLocation
 
-type Range = { chr :: Chr
-             , minPos :: Bp
-             , maxPos :: Bp
-             }
-_eventRange = (SProxy :: SProxy "range")
-type EventRange r = ( range :: Range | r)
-handleRange :: forall r a.
-                  (Range -> a)
-               -> (Variant r -> a)
-               -> Variant (EventRange r)
-               -> a
-handleRange = on _eventRange
+instance encodeJSONRange :: EncodeJson Range where
+  encodeJson (Range {chr, minPos, maxPos})
+    = "chr" := (unwrap chr)
+   ~> "minPos" := (unwrap minPos)
+   ~> "maxPos" := (unwrap maxPos)
+   ~> jsonEmptyObject
 
-type Score = { score :: Number }
-_eventScore = (SProxy :: SProxy "score")
-type EventScore r = ( score :: Score | r)
+instance decodeJSONRange :: DecodeJson Range where
+  decodeJson json = do
+    obj <- decodeJson json
+    chr <- wrap <$> obj .? "chr"
+    minPos <- wrap <$> obj .? "minPos"
+    maxPos <- wrap <$> obj .? "maxPos"
+    pure $ Range { chr, minPos, maxPos }
+
+
+newtype Score = Score { score :: Number }
+
+derive instance newtypeScore :: Newtype Score _
+
+instance encodeJSONScore :: EncodeJson Score where
+  encodeJson (Score {score})
+    = "score" := score
+   ~> jsonEmptyObject
+
+instance decodeJSONScore :: DecodeJson Score where
+  decodeJson json = do
+    obj <- decodeJson json
+    score <- obj .? "score"
+    pure $ Score { score }
