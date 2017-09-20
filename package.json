@@ -8,7 +8,8 @@
   },
   "devDependencies": {
     "bower": "1.8.0",
-    "pulp": "11.0.0"
+    "pulp": "11.0.0",
+    "pscid": "2.0.2"
   },
   "license": "MIT",
   "repository": {
@@ -16,13 +17,13 @@
     "url": "git+https://github.com/chfi/purescript-genetics-browser.git"
   },
   "scripts": {
-    "deps": "bower install",
+    "bower": "bower",
+    "dep": "bower install",
     "build": "pulp build",
     "build-to": "pulp browserify --main Genetics.Browser.UI.Container --skip-entry-point --standalone PS --to",
     "watch-to": "pulp --watch browserify --main Genetics.Browser.UI.Container --skip-entry-point --standalone PS --to",
     "test": "pulp test",
     "watch-test": "pulp --watch test",
     "docs": "pulp docs"
-
   }
 }
