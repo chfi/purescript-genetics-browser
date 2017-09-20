@@ -3,8 +3,7 @@ module Genetics.Browser.GlyphF.Interpret
        where
 
 import Prelude
-import Genetics.Browser.GlyphF.Canvas as Canvas
-import Genetics.Browser.GlyphF.SVG as SVG
+
 import Control.Monad.Eff.Unsafe (unsafePerformEff)
 import Control.Monad.Except (runExcept)
 import Data.Either (Either(..))
@@ -15,15 +14,18 @@ import Data.Newtype (unwrap)
 import Data.Nullable (toNullable)
 import Genetics.Browser.Feature (Feature(..))
 import Genetics.Browser.Glyph (Glyph)
+import Genetics.Browser.GlyphF.Canvas as Canvas
 import Genetics.Browser.GlyphF.Position (glyphToGlyphPosition)
+import Genetics.Browser.GlyphF.SVG as SVG
+import Genetics.Browser.Units (Chr)
 
 -- TODO: this should be dealt with in Feature, in a safer way
 helper :: ∀ c r.
-  Feature c r
-  -> { chr :: String
-     , min :: c
-     , max :: c
-     }
+          Feature c r
+       -> { chr :: Chr
+          , min :: c
+          , max :: c
+          }
 helper (Feature chr xl xr _) = {chr: chr, min: xl, max: xr}
 
 writeGlyph' :: ∀ a c r. Maybe (Feature c r) -> Glyph a -> Foreign

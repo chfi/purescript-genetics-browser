@@ -281,18 +281,16 @@ component =
 
 
 qtlRenderer :: RendererInfo
-qtlRenderer = { name: "qtlRenderer"
-              , renderer: qtlGlyphify { minScore: 4.0
+qtlRenderer = { renderer: qtlGlyphify { minScore: 4.0
                                       , maxScore: 6.0
                                       , color: "#ff0000"
                                       }
-              , canvasHeight: 200.0
+              , canvasHeight: 200
               }
 
 gwasRenderer :: RendererInfo
-gwasRenderer = { name: "gwasRenderer"
-               , renderer: gwasGlyphify
-               , canvasHeight: 300.0
+gwasRenderer = { renderer: gwasGlyphify
+               , canvasHeight: 300
                }
 
 

@@ -4,17 +4,18 @@ module Genetics.Browser.Renderer.Lineplot
        ) where
 
 import Prelude
+
 import Control.Alt ((<|>))
 import Data.Foreign (F, Foreign, readNumber, readString, toForeign)
 import Data.Foreign.Index (readProp)
 import Data.Maybe (Maybe(..))
 import Data.Nullable (toNullable)
 import Data.Traversable (sequence)
+import Genetics.Browser.Biodalliance.Types (Renderer(..))
 import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, path, stroke)
 import Genetics.Browser.GlyphF.Interpret (writeGlyph)
-import Genetics.Browser.Types (Renderer(..))
-import Genetics.Browser.Units (Bp(..))
+import Genetics.Browser.Units (Bp(..), Chr)
 import Global (readFloat)
 
 type LineData = { score :: Number }
@@ -23,7 +24,7 @@ type LineScreenFeature = ScreenFeature LineData
 
 
   -- TODO: refactor into separate module, handle both string encoded regular numbers as well as string encoded exponential numbers, _and_ regular numbers
-readLineFeature :: String -> Foreign -> F LineFeature
+readLineFeature :: Chr -> Foreign -> F LineFeature
 readLineFeature chr f = do
   fMin <- Bp <$> (readProp "min" f >>= readNumber)
   fMax <- Bp <$> (readProp "max" f >>= readNumber)
@@ -60,8 +61,7 @@ writeResult g q = toForeign { glyphs: [g]
 -- | Renderer for drawing lineplots in Biodalliance
 render :: LinePlotConfig -> Renderer
 render cfg = Renderer $ \v fs ->
-  let fs' :: _
-      fs' = sequence $ map (featureToScreen (Bp v.viewStart) (Bp v.scale)) <$>
+  let fs' = sequence $ map (featureToScreen (Bp v.viewStart) (Bp v.scale)) <$>
             (readLineFeature v.chr <$> fs)
       g = linePlot cfg v.height <$> fs'
   in writeResult

@@ -3,7 +3,7 @@ module Genetics.Browser.Renderer.GWAS
        ) where
 
 import Prelude
-import Math as Math
+
 import Control.Monad.Except (runExcept)
 import Data.Either (Either(..))
 import Data.Foldable (foldr)
@@ -12,12 +12,13 @@ import Data.Foreign.Index (readProp)
 import Data.Maybe (Maybe(..))
 import Data.Nullable (toNullable)
 import Data.Traversable (sequence)
+import Genetics.Browser.Biodalliance.Types (Renderer(..), View)
 import Genetics.Browser.Feature (Feature(Feature), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
 import Genetics.Browser.GlyphF.Interpret (writeGlyph)
-import Genetics.Browser.Types (Renderer(..), View)
-import Genetics.Browser.Units (Bp(Bp))
+import Genetics.Browser.Units (Bp(..), Chr)
 import Global (readFloat, infinity)
+import Math as Math
 
 type GWASData = {score :: Number}
 type GWASFeature = Feature Bp GWASData
@@ -26,7 +27,7 @@ type GWASScreenFeature = ScreenFeature GWASData
 
 -- TODO: convert pValue to negative log here?
 -- or at least add function to do it for us
-readGWASFeature :: String -> Foreign -> F GWASFeature
+readGWASFeature :: Chr -> Foreign -> F GWASFeature
 readGWASFeature chr f = do
   fMin <- Bp <$> (readProp "min" f >>= readNumber)
   fMax <- Bp <$> (readProp "max" f >>= readNumber)

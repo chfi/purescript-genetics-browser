@@ -8,14 +8,15 @@ module Genetics.Browser.Feature
        ) where
 
 import Prelude
+
 import Data.Bifunctor (class Bifunctor, lmap)
 import Data.Foreign (Foreign)
-import Genetics.Browser.Units (class HCoordinate, toScreen)
+import Genetics.Browser.Units (class HCoordinate, Chr(..), toScreen)
 
--- String = chromosome, c = coordinate, r = rest of feature data
-data Feature c r = Feature String c c r
+-- c = coordinate, r = rest of feature data
+data Feature c r = Feature Chr c c r
 
-feature :: ∀ c r. HCoordinate c => String -> c -> c -> r -> Feature c r
+feature :: ∀ c r. HCoordinate c => Chr -> c -> c -> r -> Feature c r
 feature = Feature
 
 -- don't want to export the Feature constructor,
