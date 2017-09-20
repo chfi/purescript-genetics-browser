@@ -35,10 +35,12 @@ import Data.Symbol (SProxy(..))
 import Data.Traversable (sequence, traverse, traverse_)
 import Data.Variant (Variant)
 import Debug.Trace (traceShow)
-import Genetics.Browser.Biodalliance (RendererInfo, initBD, renderers, setLocation, sources)
+import Genetics.Browser.Biodalliance (initBD, setLocation)
 import Genetics.Browser.Biodalliance as Biodalliance
+import Genetics.Browser.Biodalliance.Config (RendererInfo, renderers, sources)
 import Genetics.Browser.Biodalliance.Source (Source)
 import Genetics.Browser.Biodalliance.Source as Source
+import Genetics.Browser.Biodalliance.Types (BD, Biodalliance, Renderer)
 import Genetics.Browser.Config (BrowserConfig(..), parseBrowserConfig)
 import Genetics.Browser.Config.Track (validateConfigs)
 import Genetics.Browser.Cytoscape as Cytoscape
@@ -51,7 +53,6 @@ import Genetics.Browser.Events.Types (Event)
 import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
 import Genetics.Browser.Renderer.Lineplot as QTL
-import Genetics.Browser.Types (BD, Biodalliance, Renderer)
 import Genetics.Browser.UI.Biodalliance as UIBD
 import Genetics.Browser.UI.Cytoscape as UICy
 import Genetics.Browser.Units (Bp(Bp), Chr(..), _Bp, _BpMBp, _Chr, _MBp, bp)
@@ -294,9 +295,6 @@ gwasRenderer = { name: "gwasRenderer"
                , canvasHeight: 300.0
                }
 
-bdOpts :: Options Biodalliance
-bdOpts = renderers := [ qtlRenderer, gwasRenderer ]
-
 
 createSource :: forall eff a. (Chr -> Bp -> Bp -> Aff eff a) -> Source a
 createSource = Source.createSource
@@ -334,7 +332,8 @@ main fConfig = HA.runHalogenAff do
     Right (BrowserConfig config) -> do
       let {bdTracks, cyGraphs} = validateConfigs config.tracks
 
-          opts' = bdOpts <> sources := bdTracks.results
+          opts' =  sources := bdTracks.results
+                <> renderers := config.bdRenderers
 
       liftEff $ log $ "BDTrack errors: " <> foldMap ((<>) ", ") bdTracks.errors
       liftEff $ log $ "CyGraph errors: " <> foldMap ((<>) ", ") cyGraphs.errors

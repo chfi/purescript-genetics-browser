@@ -13,7 +13,7 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (CONSOLE)
 import DOM.HTML.Types (HTMLElement)
 import Data.Maybe (Maybe(..))
-import Genetics.Browser.Types (BD, Biodalliance)
+import Genetics.Browser.Biodalliance.Types (BD, Biodalliance)
 import Genetics.Browser.Units (Bp, Chr)
 
 

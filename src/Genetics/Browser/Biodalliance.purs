@@ -20,16 +20,14 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn4, runEffFn2, runEffFn4)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut (Json)
-import Data.Argonaut.Core (JObject)
 import Data.Foreign (Foreign)
 import Data.Function.Uncurried (Fn3, runFn3)
 import Data.Newtype (class Newtype)
 import Data.Options (Option, Options, opt, options)
-import Genetics.Browser.Config.Track (BDTrackConfig)
-import Genetics.Browser.Types (BD, Biodalliance) as Export
-import Genetics.Browser.Types (BD, Biodalliance, Renderer)
+import Genetics.Browser.Biodalliance.Types (BD, Biodalliance)
 import Genetics.Browser.Units (class HCoordinate, Bp, Chr, bp)
 
+import Genetics.Browser.Biodalliance.Types (BD, Biodalliance) as Exports
 
 foreign import data BrowserConstructor :: Type
 foreign import data RenderWrapper :: Type
@@ -41,11 +39,6 @@ foreign import initBDimpl :: ∀ eff.
                              RenderWrapper
                              BrowserConstructor
                              (HTMLElement -> Eff (bd :: BD | eff) Biodalliance)
--- foreign import initBDimpl :: ∀ eff.
---                              Foreign
---                           -> RenderWrapper
---                           -> BrowserConstructor
---                           -> (HTMLElement -> Eff (bd :: BD | eff) Biodalliance)
 
 
 -- | Helper function to create a Biodalliance browser instance.

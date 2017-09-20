@@ -8,7 +8,6 @@ exports.initBDimpl = function(opts, wrapRenderer, browser) {
                 renderers[r.name] = wrapRenderer(r.renderer, r.canvasHeight);
             });
 
-            // TODO: make sure to only add BD tracks when that becomes relevant
             var sources = opts.sources;
 
             var b = new browser({
