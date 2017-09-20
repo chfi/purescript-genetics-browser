@@ -2,16 +2,16 @@ module Genetics.Browser.Biodalliance
        ( initBD
        , BrowserConstructor
        , RenderWrapper
-       , sources
-       , RendererInfo
-       , renderers
+       -- , sources
+       -- , RendererInfo
+       -- , renderers
        -- , maxHeight
        , BDEvent(..)
        , addFeatureListener
        , addInitListener
        , setLocation
        , scrollView
-       , module Export
+       , module Exports
        ) where
 
 import Prelude
@@ -64,17 +64,6 @@ initBD :: ∀ eff.
 initBD opts = runFn3 initBDimpl $ options opts
 
 
-sources :: Option Biodalliance (Array BDTrackConfig)
-sources = opt "sources"
-
--- Renderers need some extra info for WrappedRenderer to be able to do its thing
-type RendererInfo = { name :: String, renderer :: Renderer, canvasHeight :: Number }
-
-renderers :: Option Biodalliance (Array RendererInfo)
-renderers = opt "renderers"
-
-maxHeight :: Option Biodalliance Int
-maxHeight = opt "maxHeight"
 
 
 newtype BDEvent = BDEvent Json
