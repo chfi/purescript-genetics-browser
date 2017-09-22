@@ -3,10 +3,11 @@
 exports.initBDimpl = function(opts, wrapRenderer, browser) {
     return function(el) {
         return function() {
+
             var renderers = {};
-            opts.renderers.forEach(function(r) {
-                renderers[r.name] = wrapRenderer(r.renderer, r.canvasHeight);
-            });
+            for (r in opts.renderers) {
+                renderers[r] = wrapRenderer(opts.renderers[r].renderer, opts.renderers[r].canvasHeight);
+            }
 
             var sources = opts.sources;
 
