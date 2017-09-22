@@ -4,6 +4,7 @@
   "description": "Genetics network browser written in Purescript",
   "dependencies": {
     "cytoscape": "^3.1.1",
+    "end-of-stream": "^1.4.0",
     "ipfs-api": "^14.1.2"
   },
   "devDependencies": {
