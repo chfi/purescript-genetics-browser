@@ -7,6 +7,7 @@ module Genetics.Browser.Config.Track
        , readTrackType
        , validateBDConfig
        , validateCyConfig
+       , readTracksMap
        )
        where
 
@@ -15,17 +16,21 @@ import Prelude
 import Data.Argonaut (Json, _Array, _Object, _String)
 import Data.Array ((:))
 import Data.Either (Either(..))
-import Data.Foldable (foldr)
+import Data.Foldable (all, foldr, null)
+import Data.Foreign (F, Foreign, ForeignError(..), fail)
+import Data.Foreign.Keys (keys)
 import Data.Generic.Rep (class Generic)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
-import Data.Maybe (Maybe(..), maybe)
+import Data.Maybe (Maybe(..), isJust, maybe)
 import Data.Newtype (class Newtype)
 import Data.StrMap (StrMap)
 import Data.Traversable (sequence)
+import Unsafe.Coerce (unsafeCoerce)
 
 -- | Contains arrays of track configurations, inedxed by track types (e.g. BD or Cy)
 newtype TracksMap = TracksMap (StrMap Json)
+
 
 getConfigs :: TracksMap -> TrackType -> Either String (Array Json)
 getConfigs (TracksMap ts) tt =
@@ -109,3 +114,11 @@ validateConfigs tm = { bdTracks
                      }
   where bdTracks = foldConfig tm BDTrack validateBDConfig
         cyGraphs = foldConfig tm CyGraph validateCyConfig
+
+
+readTracksMap :: Foreign -> F TracksMap
+readTracksMap f = do
+  tracksKeys <- (map readTrackType) <$> keys f
+  when (null tracksKeys) $ fail $ ForeignError "TracksMap is empty"
+  when (not $ all isJust tracksKeys) $ fail $ ForeignError "TracksMap keys are not all TrackType"
+  pure $ unsafeCoerce f
