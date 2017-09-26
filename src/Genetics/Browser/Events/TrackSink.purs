@@ -1,11 +1,11 @@
-module Genetics.Browser.Events.TrackSink
-       ( TrackSink
-       , emptyTrackSink
-       , mkTrackSink
-       , appendTrackSinks
-       , applyTrackSink
-       , forkTrackSink
-       ) where
+module Genetics.Browser.Events.TrackSink where
+       -- ( TrackSink
+       -- , emptyTrackSink
+       -- , mkTrackSink
+       -- , appendTrackSinks
+       -- , applyTrackSink
+       -- , forkTrackSink
+       -- ) where
 
 import Prelude
 
@@ -17,52 +17,64 @@ import Control.Monad.Eff (Eff, kind Effect)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
 import Control.Monad.Rec.Class (forever)
+import Control.MonadPlus (guard)
 import Data.Argonaut (Json)
+import Data.Foldable (foldMap, length)
+import Data.List (List)
 import Data.Maybe (Maybe(..))
+import Data.Monoid (class Monoid)
+import Data.Newtype (class Newtype, unwrap)
 import Data.StrMap (StrMap)
 import Data.StrMap as StrMap
 import Genetics.Browser.Events.Types (Event)
 
-newtype TrackSink env eff = TrackSink (StrMap (Json -> env -> Maybe (Eff eff Unit)))
 
-emptyTrackSink :: ∀ env eff. TrackSink env eff
-emptyTrackSink = TrackSink StrMap.empty
+type SinkConfig a = { eventName :: String
+                    , eventFun :: Json -> a
+                    }
 
+newtype TrackSink a = TrackSink (StrMap (Json -> a))
 
-mkTrackSink :: ∀ env eff.
-               String
-            -> (Json -> env -> Maybe (Eff eff Unit))
-            -> TrackSink env eff
-mkTrackSink l f = TrackSink $ StrMap.singleton l f
+derive instance functorTrackSink :: Functor TrackSink
+derive instance newtypeTrackSink :: Newtype (TrackSink a) _
 
+instance semigroupTrackSink :: Semigroup (TrackSink a) where
+  append (TrackSink s1) (TrackSink s2) = TrackSink (StrMap.union s1 s2)
 
--- TODO: StrMap.union might not be the best behavior;
--- indeed we might want this to return Maybe TrackSink
-appendTrackSinks :: ∀ env eff.
-                    TrackSink env eff
-                 -> TrackSink env eff
-                 -> TrackSink env eff
-appendTrackSinks (TrackSink s1) (TrackSink s2) =
-  TrackSink $ StrMap.union s1 s2
+instance monoidTrackSink :: Monoid (TrackSink a) where
+  mempty = TrackSink StrMap.empty
 
 
-applyTrackSink :: ∀ env eff.
-                  TrackSink env eff
-               -> env
-               -> Event
-               -> Eff eff Unit
-applyTrackSink (TrackSink hs) env ev = case StrMap.lookup ev.eventType hs of
-  Nothing -> pure unit
-  Just h  -> case h ev.event env of
-    Nothing -> pure unit
-    Just f  -> f
+makeTrackSink :: SinkConfig ~> TrackSink
+makeTrackSink sc = TrackSink $ StrMap.singleton sc.eventName sc.eventFun
+
+makeTrackSinks :: ∀ a.
+                  List (SinkConfig a)
+               -> Maybe (TrackSink a)
+makeTrackSinks scs = do
+  let sinks = foldMap makeTrackSink scs
+  -- basic check to make sure there are no overlapping configs,
+  -- since they'd be removed by StrMap.union
+  guard $ length scs == (StrMap.size $ unwrap sinks)
+  pure $ sinks
+
+
+runSink :: ∀ a. TrackSink a -> Event -> Maybe a
+runSink (TrackSink sink) event = do
+  f <- StrMap.lookup event.name sink
+  pure $ f event.evData
 
 
 forkTrackSink :: ∀ env eff.
-                 TrackSink env eff
+                 TrackSink (env -> Eff eff Unit)
               -> env
               -> BusRW Event
               -> Aff (avar :: AVAR | eff) (Canceler (avar :: AVAR | eff))
-forkTrackSink hs env bus = forkAff $ forever do
-  val <- Bus.read bus
-  liftEff $ unsafeCoerceEff $ applyTrackSink hs env val
+forkTrackSink sink env bus = forkAff $ forever do
+  event <- Bus.read bus
+  let effect :: Maybe (env -> Eff (avar :: AVAR | eff) Unit)
+      effect = (map unsafeCoerceEff) <$> runSink sink event
+
+  case effect of
+    Nothing -> pure unit
+    Just f  -> liftEff $ f env
