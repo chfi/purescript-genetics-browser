@@ -13,6 +13,7 @@ module Genetics.Browser.Config.Track
 
 import Prelude
 
+import Control.Monad.Except (throwError)
 import Data.Argonaut (Json, _Array, _Object, _String)
 import Data.Array ((:))
 import Data.Either (Either(..))
@@ -22,7 +23,7 @@ import Data.Foreign.Keys (keys)
 import Data.Generic.Rep (class Generic)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
-import Data.Maybe (Maybe(..), isJust, maybe)
+import Data.Maybe (Maybe(Just, Nothing), isJust, isNothing, maybe)
 import Data.Newtype (class Newtype)
 import Data.StrMap (StrMap)
 import Data.Traversable (sequence)
@@ -33,8 +34,9 @@ newtype TracksMap = TracksMap (StrMap Json)
 
 
 getConfigs :: TracksMap -> TrackType -> Either String (Array Json)
-getConfigs (TracksMap ts) tt =
-  maybe (Left "Incorrect trackType") Right $ ts ^? ix (show tt) <<< _Array
+getConfigs (TracksMap ts) tt = case ts ^? ix (show tt) <<< _Array of
+  Nothing -> throwError "Incorrect trackType"
+  Just ar -> pure ar
 
 -- | The different types of track configuration
 data TrackType = BDTrack | CyGraph
@@ -53,30 +55,45 @@ readTrackType "CyGraph" = Just CyGraph
 readTrackType _ = Nothing
 
 
--- TODO: combine validateBDConfig and validateCyConfig
--- validateTrackConfig :: Json -> Either String (Either BDTrackConfig CyGraphConfig)
--- validateTrackConfig :: Json -> Either String (Either3 BDTrackConfig PSTrackConfig CyGraphConfig)
-
 -- | Represents a Biodalliance track configuration
 newtype BDTrackConfig = BDTrackConfig Json
 
+
 -- | Validate a Biodalliance track configuration; currently only checks for the presence of a name
 validateBDConfig :: Json -> Either String BDTrackConfig
-validateBDConfig json = case json ^? _Object <<< ix "name" of
-  Nothing -> Left $ "BD track config does not have a name"
-  Just c  -> Right $ BDTrackConfig $ json
+validateBDConfig json = case json ^? _Object of
+  Nothing -> throwError "BD track config is not Object"
+  Just obj -> do
+    let name = obj ^? ix "name" <<< _String
+    when (isNothing name) do
+      throwError "BD track config does not have a name"
+
+    pure $ BDTrackConfig json
+
 
 
 -- | Represents a Cytoscape.js graph configuration
-newtype CyGraphConfig = CyGraphConfig { elementsUri :: String }
+newtype CyGraphConfig = CyGraphConfig { elementsUri :: String
+                                      , name :: String }
 derive instance newtypeCyGraphConfig :: Newtype CyGraphConfig _
 
 -- | Validate a Cytoscape.js graph configuration; currently only checks for the presence of a URI
 -- | to some JSON-formatted elements
 validateCyConfig :: Json -> Either String CyGraphConfig
-validateCyConfig json = case json ^? _Object <<< ix "elementsUri"  <<< _String of
-  Nothing  -> Left $ "cy graph config does not have an elementsUri"
-  Just uri -> Right $ CyGraphConfig { elementsUri: uri }
+validateCyConfig json = case json ^? _Object of
+  Nothing -> throwError "Cy graph config is not Object"
+  Just obj -> do
+
+    name <- case obj ^? ix "name" <<< _String of
+      Nothing -> throwError "Cy graph config does not have a name"
+      Just n -> pure n
+
+    uri <- case obj ^? ix "elementsUri"  <<< _String of
+      Nothing -> throwError "Cy graph config does not have an elementsUri"
+      Just u -> pure u
+
+    pure $ CyGraphConfig { elementsUri: uri, name }
+
 
 
 
