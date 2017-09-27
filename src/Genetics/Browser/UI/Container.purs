@@ -100,6 +100,8 @@ rangeInputBD = mkTrackSink "range" f
                 setLocation bd ran.chr ran.minPos ran.maxPos
 
 
+
+
 rangeInputCy :: ∀ eff. TrackSink Cytoscape (CyEventEff eff)
 rangeInputCy = mkTrackSink "range" f
   where f rangeJson cy = case decodeJson rangeJson of
