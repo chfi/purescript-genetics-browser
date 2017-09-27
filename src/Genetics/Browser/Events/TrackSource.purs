@@ -8,11 +8,11 @@ module Genetics.Browser.Events.TrackSource where
 
 import Prelude
 
-
 import Data.Argonaut (JCursor(JField), Json, JsonPrim, cursorGet, cursorSet, jsonEmptyObject, primToJson)
 import Data.Argonaut as Json
+import Data.Array (catMaybes, singleton)
+import Data.Array as Array
 import Data.Foldable (foldMap, foldr)
-import Data.List (List, singleton)
 import Data.Maybe (Maybe(..))
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (class Newtype)
@@ -33,7 +33,7 @@ and how to map it to the produced event.
 -}
 
 -- TODO keep track of which event names have been used
-newtype TrackSource a = TrackSource (List (Json -> Maybe a))
+newtype TrackSource a = TrackSource (Array (Json -> Maybe a))
 
 derive instance functorTrackSource :: Functor TrackSource
 derive instance newtypeTrackSource :: Newtype (TrackSource a) _
@@ -71,8 +71,8 @@ parseTemplatePath (Tuple cursor t) = do
     _          -> Nothing
   pure { cursor, name, vType }
 
-parseTemplateConfig :: Json -> Maybe (List ValueCursor)
-parseTemplateConfig = traverse parseTemplatePath <<< Json.toPrims
+parseTemplateConfig :: Json -> Maybe (Array ValueCursor)
+parseTemplateConfig = traverse parseTemplatePath <<< Array.fromFoldable <<< Json.toPrims
 
 
 parseRawTemplatePath :: Tuple JCursor JsonPrim
@@ -82,11 +82,11 @@ parseRawTemplatePath (Tuple cursor t) = do
   pure { cursor, name }
 
 parseRawTemplateConfig :: Json
-                       -> Maybe (List RawCursor)
-parseRawTemplateConfig = traverse parseRawTemplatePath <<< Json.toPrims
+                       -> Maybe (Array RawCursor)
+parseRawTemplateConfig = traverse parseRawTemplatePath <<< Array.fromFoldable <<< Json.toPrims
 
 
-fillTemplate :: List ValueCursor -> StrMap Json -> Maybe Json
+fillTemplate :: Array ValueCursor -> StrMap Json -> Maybe Json
 fillTemplate t vs = foldr f (Just jsonEmptyObject) t
   where f :: ValueCursor -> Maybe Json -> Maybe Json
         f _ Nothing  = Nothing
@@ -94,7 +94,7 @@ fillTemplate t vs = foldr f (Just jsonEmptyObject) t
           val <- StrMap.lookup ec.name vs
           cursorSet ec.cursor val j
 
-parseRawEvent :: List RawCursor -> Json -> Maybe (StrMap Json)
+parseRawEvent :: Array RawCursor -> Json -> Maybe (StrMap Json)
 parseRawEvent paths json = do
   vals <- traverse (\path -> map (Tuple path.name) (cursorGet path.cursor json)) paths
   pure $ StrMap.fromFoldable vals
@@ -114,5 +114,9 @@ makeTrackSource sc = do
     pure $ { name: sc.eventName, evData }
 
 
-makeTrackSources :: List SourceConfig -> Maybe (TrackSource Event)
+runTrackSource :: TrackSource Event -> Json -> Array Event
+runTrackSource (TrackSource ts) raw = catMaybes $ map (\f -> f raw) ts
+
+
+makeTrackSources :: Array SourceConfig -> Maybe (TrackSource Event)
 makeTrackSources scs = foldMap makeTrackSource scs
