@@ -73,11 +73,11 @@ exGlyph = do
 
 
 exFeature1 :: Feature MBp Unit
-exFeature1 = Feature "1" (MBp (-5.0)) (MBp 5.0) unit
+exFeature1 = Feature ("1") (MBp (-5.0)) (MBp 5.0) unit
 exFeature2 :: Feature MBp Unit
-exFeature2 = Feature "1" (MBp 10.0) (MBp 20.0) unit
+exFeature2 = Feature ("1") (MBp 10.0) (MBp 20.0) unit
 exFeature3 :: Feature Bp Unit
-exFeature3 = Feature "1" (Bp 60000.0) (Bp 61000.0) unit
+exFeature3 = Feature ("1") (Bp 60000.0) (Bp 61000.0) unit
 
 
 glyph1 :: Glyph Unit
