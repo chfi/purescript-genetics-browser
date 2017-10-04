@@ -33,7 +33,7 @@ maxHeight = opt "maxHeight"
 
 parseRendererInfo :: Foreign -> String -> F (Tuple String RendererInfo)
 parseRendererInfo f name = do
-  obj <- f ! "name"
+  obj <- f ! name
   renderer <- unsafeCoerce <$> obj ! "renderer"
   canvasHeight <- obj ! "canvasHeight" >>= readInt
   pure $ Tuple name { renderer, canvasHeight }

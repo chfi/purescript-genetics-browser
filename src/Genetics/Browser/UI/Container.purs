@@ -29,10 +29,14 @@ import Data.Int (round)
 import Data.Lens (re, (^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (Maybe(..), maybe)
+import Data.Monoid (mempty)
 import Data.Newtype (unwrap, wrap)
 import Data.Options (Options, (:=))
+import Data.StrMap (StrMap)
+import Data.StrMap as StrMap
 import Data.Symbol (SProxy(..))
 import Data.Traversable (sequence, traverse, traverse_)
+import Data.Tuple (Tuple(..))
 import Data.Variant (Variant)
 import Debug.Trace (traceShow)
 import Genetics.Browser.Biodalliance (initBD, setLocation)
@@ -47,8 +51,8 @@ import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Cytoscape.Collection (filter, isEdge, targetNodes)
 import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
 import Genetics.Browser.Events (Location(..), Range(..))
-import Genetics.Browser.Events.TrackSink (TrackSink, appendTrackSinks, emptyTrackSink, forkTrackSink, mkTrackSink)
-import Genetics.Browser.Events.TrackSource (TrackSource, appendTrackSources, applyTrackSource, emptyTrackSource, mkTrackSource)
+import Genetics.Browser.Events.TrackSink (SinkConfig, TrackSink, forkTrackSink, makeTrackSink, makeTrackSinks)
+import Genetics.Browser.Events.TrackSource (SourceConfig, TrackSource, emptyTrackSource, makeTrackSource, makeTrackSources, runTrackSource)
 import Genetics.Browser.Events.Types (Event)
 import Genetics.Browser.Renderer.GWAS as GWAS
 import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
@@ -75,103 +79,26 @@ import Unsafe.Coerce (unsafeCoerce)
 type BDEventEff eff = (console :: CONSOLE, bd :: BD, avar :: AVAR | eff)
 type CyEventEff eff = (console :: CONSOLE, cy :: CY, avar :: AVAR | eff)
 
-type BDHandlerOutput eff = Biodalliance -> Maybe (Eff (BDEventEff eff) Unit)
-type CyHandlerOutput eff = Cytoscape -> Maybe (Eff (CyEventEff eff) Unit)
-
-
-locationInputBD :: ∀ eff. TrackSink Biodalliance (BDEventEff eff)
-locationInputBD = mkTrackSink "location" f
-  where f locJson bd = case decodeJson locJson of
-          Left _ -> Nothing
-          Right (Location loc) -> Just do
-            log "bd got location"
-            setLocation bd loc.chr (bp loc.pos - Bp 1000000.0) (bp loc.pos + Bp 1000000.0)
-
-
-rangeInputBD :: ∀ eff. TrackSink Biodalliance (BDEventEff eff)
-rangeInputBD = mkTrackSink "range" f
-  -- where f :: Json -> BDHandlerOutput _
-  where f :: Json -> Biodalliance -> Maybe (Eff _ Unit)
-        f rangeJson bd =
-            case decodeJson rangeJson of
-              Left _ -> Nothing
-              Right (Range ran) -> Just do
-                log "bd got range"
-                setLocation bd ran.chr ran.minPos ran.maxPos
-
-
-
-
-rangeInputCy :: ∀ eff. TrackSink Cytoscape (CyEventEff eff)
-rangeInputCy = mkTrackSink "range" f
-  where f rangeJson cy = case decodeJson rangeJson of
-          Left _ -> Nothing
-          Right (Range ran) -> Just do
-            log "cy got range"
-            log $ "chr: " <> show ran.chr
-            let pred el = case parseLocationElementCy el of
-                  Nothing -> false
-                  Just (Location loc) -> loc.chr == ran.chr
-
-            graphColl <- liftEff $ Cytoscape.graphGetCollection cy
-            let edges = filter ((not $ wrap pred) && isEdge) graphColl
-
-            _ <- liftEff $ Cytoscape.graphRemoveCollection $ targetNodes edges
-            pure unit
-
-
-rangeEventOutputBD :: TrackSource
-rangeEventOutputBD = mkTrackSource "range" f
-  where f :: Json -> Maybe Json
-        f json = do
-            obj <- json ^? _Object
-            chr <- obj ^? ix "chr" <<< _String <<< re _Chr
-            minPos <- obj ^? ix "min" <<< _Number <<< re _Bp
-            maxPos <- obj ^? ix "max" <<< _Number <<< re _Bp
-            pure $ encodeJson $ Range {chr, minPos, maxPos}
-
-
-parseLocationElementCy :: Element -> Maybe Location
-parseLocationElementCy el = do
-    loc <- elementJObject el ^? ix "data" <<< _Object <<< ix "lrsLoc"
-    chr <- loc ^? _Object <<< ix "chr" <<< _String <<< re _Chr
-            -- ridiculous.
-    pos <- loc ^? _Object <<< ix "pos" <<< _Number
-                    <<< re _MBp <<< re _BpMBp
-    pure $ Location { chr, pos }
-
-
-locationEventOutputCy :: TrackSource
-locationEventOutputCy = mkTrackSource "location" f
-  where f :: Json -> Maybe Json
-        f ev = do
-            loc <- ev ^? _Object <<< ix "data" <<< _Object <<< ix "lrsLoc"
-            chr <- loc ^? _Object <<< ix "chr" <<< _String <<< re _Chr
-                    -- ridiculous.
-            pos <- loc ^? _Object <<< ix "pos" <<< _Number
-                            <<< re _MBp <<< re _BpMBp
-            pure $ encodeJson $ Location { chr, pos }
-
 
 subscribeBDEvents :: ∀ r.
-                     TrackSource
+                     (TrackSource Event)
                   -> Biodalliance
                   -> BusRW Event
                   -> Eff _ Unit
 subscribeBDEvents h bd bus =
   Biodalliance.addFeatureListener bd $ \obj -> do
-    let evs = applyTrackSource h (unwrap obj)
+    let evs = runTrackSource h (unwrap obj)
     traverse_ (\x -> Aff.launchAff $ Bus.write x bus) evs
 
 
 subscribeCyEvents :: ∀ r.
-                     TrackSource
+                     (TrackSource Event)
                   -> Cytoscape
                   -> BusRW Event
                   -> Eff _ Unit
 subscribeCyEvents h cy bus =
   Cytoscape.onClick cy $ \obj -> do
-    let evs = applyTrackSource h (unwrap obj)
+    let evs = runTrackSource h (unwrap obj)
     traverse_ (\x -> Aff.launchAff $ Bus.write x bus) evs
 
 
@@ -282,18 +209,18 @@ component =
 
 
 
-qtlRenderer :: RendererInfo
-qtlRenderer = { renderer: qtlGlyphify { minScore: 4.0
-                                      , maxScore: 6.0
-                                      , color: "#ff0000"
-                                      }
-              , canvasHeight: 200
-              }
+qtlRenderer :: Int -> RendererInfo
+qtlRenderer h = { renderer: qtlGlyphify { minScore: 4.0
+                                        , maxScore: 6.0
+                                        , color: "#ff0000"
+                                        }
+                , canvasHeight: h
+                }
 
-gwasRenderer :: RendererInfo
-gwasRenderer = { renderer: gwasGlyphify
-               , canvasHeight: 300
-               }
+gwasRenderer :: Int -> RendererInfo
+gwasRenderer h = { renderer: gwasGlyphify
+                 , canvasHeight: h
+                 }
 
 
 createSource :: forall eff a. (Chr -> Bp -> Bp -> Aff eff a) -> Source a
@@ -320,6 +247,16 @@ parseScoreFeature j = do
 
 
 foreign import setBDRef :: ∀ eff. Biodalliance -> Eff eff Unit
+
+
+foreign import bdTrackSinkConfig :: forall eff.
+                                    Array (SinkConfig (Biodalliance -> Eff (BDEventEff eff) Unit))
+
+foreign import bdTrackSourceConfig :: Array SourceConfig
+
+-- foreign import cyGraphSinkConfig :: forall
+
+foreign import cyGraphSourceConfig :: Array SourceConfig
 
 
 main :: Foreign -> Eff _ Unit
@@ -356,12 +293,22 @@ main fConfig = HA.runHalogenAff do
           busFromBD <- Bus.make
           busFromCy <- Bus.make
 
+          let bdTrackSink = makeTrackSinks bdTrackSinkConfig
+              bdTrackSource = makeTrackSources bdTrackSourceConfig
+
           when (not null bdTracks.results) do
             io.subscribe $ CR.consumer $ case _ of
               BDInstance bd -> do
                 liftEff $ log "attaching BD event handlers"
-                _ <- forkTrackSink rangeInputBD bd busFromCy
-                _ <- liftEff $ subscribeBDEvents rangeEventOutputBD bd busFromBD
+
+                case bdTrackSink of
+                  Nothing -> liftEff $ log "No BD TrackSink!"
+                  Just ts -> forkTrackSink ts bd busFromCy *> pure unit
+
+                case bdTrackSource of
+                  Nothing -> liftEff $ log "No BD TrackSource!"
+                  Just ts -> liftEff $ subscribeBDEvents ts bd busFromBD
+
                 liftEff $ setBDRef bd
                 pure Nothing
               _ -> pure $ Just unit
@@ -371,14 +318,21 @@ main fConfig = HA.runHalogenAff do
 
 
           liftEff $ log $ "cytoscape enabled: " <> show (not null cyGraphs.results)
+
+          -- let cyGraphSink = makeTrackSinks cyGraphSinkConfig
+          let cyGraphSource = makeTrackSources cyGraphSourceConfig
+
           case uncons cyGraphs.results of
             Nothing -> pure unit
             Just {head, tail} -> do
               io.subscribe $ CR.consumer $ case _ of
                 CyInstance cy -> do
                   liftEff $ log "attaching Cy event handlers"
-                  _ <- forkTrackSink rangeInputCy cy busFromBD
-                  _ <- liftEff $ subscribeCyEvents locationEventOutputCy cy busFromCy
+
+                  case cyGraphSource of
+                    Nothing -> liftEff $ log "No Cy graph source!"
+                    Just gs -> liftEff $ subscribeCyEvents gs cy busFromCy
+
                   pure Nothing
                 _ -> pure $ Just unit
 

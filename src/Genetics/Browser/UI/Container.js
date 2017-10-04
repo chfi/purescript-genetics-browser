@@ -9,15 +9,15 @@ exports.setBDRef = function(bd) {
 
 // bd can produce ranges
 exports.bdTrackSourceConfig = [{ eventName: "range",
-                                eventTemplate: { "chr": "Chr",
-                                                 "minPos": "Bp",
-                                                 "maxPos": "Bp"
-                                               },
-                                rawTemplate: { "chr": "chr",
-                                               "minPos": "min",
-                                               "maxPos": "max"
-                                             }
-                              }];
+                                 eventTemplate: { "chr": "Chr",
+                                                  "minPos": "Bp",
+                                                  "maxPos": "Bp"
+                                                },
+                                 rawTemplate: { "chr": "chr",
+                                                "minPos": "min",
+                                                "maxPos": "max"
+                                              }
+                               }];
 
 
 // bd can consume range and location events

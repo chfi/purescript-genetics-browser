@@ -5,7 +5,8 @@ exports.initBDimpl = function(opts, wrapRenderer, browser) {
         return function() {
 
             var renderers = {};
-            for (r in opts.renderers) {
+
+            for (var r in opts.renderers) {
                 renderers[r] = wrapRenderer(opts.renderers[r].renderer, opts.renderers[r].canvasHeight);
             }
 

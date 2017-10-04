@@ -49,7 +49,7 @@ makeTrackSink :: SinkConfig ~> TrackSink
 makeTrackSink sc = TrackSink $ StrMap.singleton sc.eventName sc.eventFun
 
 makeTrackSinks :: ∀ a.
-                  List (SinkConfig a)
+                  Array (SinkConfig a)
                -> Maybe (TrackSink a)
 makeTrackSinks scs = do
   let sinks = foldMap makeTrackSink scs

@@ -23,7 +23,7 @@ import Genetics.Browser.Cytoscape (runLayout, resizeContainer)
 import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Cytoscape.Collection (filter)
 import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
-import Genetics.Browser.Events (Location)
+import Genetics.Browser.Events (Location(..))
 import Genetics.Browser.Units (_BpMBp, _Chr, _MBp)
 import Halogen as H
 import Halogen.HTML as HH
@@ -160,4 +160,4 @@ cyParseEventLocation el = do
            -- ridiculous.
   pos <- loc ^? _Object <<< ix "pos" <<< _Number
                   <<< re _MBp <<< re _BpMBp
-  pure $ { chr, pos }
+  pure $ Location { chr, pos }

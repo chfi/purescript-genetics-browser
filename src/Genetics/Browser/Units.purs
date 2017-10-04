@@ -1,8 +1,9 @@
 module Genetics.Browser.Units
-       ( class HCoordinate
-       , bp, mbp
-       , Bp(..)
+       ( Bp(..)
        , MBp(..)
+       , class HCoordinate
+       , bp
+       , mbp
        , _Bp
        , _MBp
        , _BpMBp
@@ -37,6 +38,7 @@ derive newtype instance decodeBp :: Decode Bp
 
 instance showBp :: Show Bp where
   show (Bp n) = show n <> "Bp"
+
 
 _Bp :: Iso' Bp Number
 _Bp = _Newtype
