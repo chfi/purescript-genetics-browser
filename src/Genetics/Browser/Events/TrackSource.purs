@@ -8,11 +8,14 @@ module Genetics.Browser.Events.TrackSource where
 
 import Prelude
 
+import Control.Monad.Except (throwError)
+import Control.MonadPlus (guard)
 import Data.Argonaut (JCursor(JField), Json, JsonPrim, cursorGet, cursorSet, jsonEmptyObject, primToJson)
 import Data.Argonaut as Json
 import Data.Array (catMaybes, singleton)
 import Data.Array as Array
-import Data.Foldable (foldMap, foldr)
+import Data.Either (Either)
+import Data.Foldable (all, any, foldMap, foldr)
 import Data.Maybe (Maybe(..))
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (class Newtype)
@@ -100,6 +103,12 @@ parseRawEvent paths json = do
   pure $ StrMap.fromFoldable vals
 
 
+-- templates match if each name of the event values
+-- occur among the raw template cursors at least once
+-- (really it's should be only once but TODO)
+matchTemplates :: Array RawCursor -> Array ValueCursor -> Boolean
+matchTemplates rcs vcs =
+  all (\vc -> any (\rc -> vc.name == rc.name) rcs) vcs
 makeTrackSource :: SourceConfig -> Maybe (TrackSource Event)
 makeTrackSource sc = do
   -- parse the templates
@@ -108,10 +117,14 @@ makeTrackSource sc = do
   let parseRaw = parseRawEvent rawTemplate
       fillEvent = fillTemplate eventTemplate
 
+  guard $ matchTemplates rawTemplate eventTemplate
+
   pure $ TrackSource $ singleton $ \rawEvent -> do
     vals <- parseRaw rawEvent
     evData <- fillEvent vals
     pure $ { name: sc.eventName, evData }
+
+
 
 
 runTrackSource :: TrackSource Event -> Json -> Array Event
