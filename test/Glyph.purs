@@ -19,7 +19,7 @@ import Genetics.Browser.Glyph (Glyph, circle, fill, rect, stroke)
 import Genetics.Browser.GlyphF.Canvas as Canvas
 import Genetics.Browser.GlyphF.SVG as SVG
 import Genetics.Browser.GlyphPosition (GlyphPosition(..))
-import Genetics.Browser.Units (Bp(..), MBp(..))
+import Genetics.Browser.Units (Bp(..), Chr(..), MBp(..))
 import Graphics.Canvas (getCanvasElementById, getContext2D, translate)
 import Jack (Gen, Property, chooseInt, forAll, forAllRender, property)
 
@@ -73,11 +73,11 @@ exGlyph = do
 
 
 exFeature1 :: Feature MBp Unit
-exFeature1 = Feature ("1") (MBp (-5.0)) (MBp 5.0) unit
+exFeature1 = Feature (Chr "1") (MBp (-5.0)) (MBp 5.0) unit
 exFeature2 :: Feature MBp Unit
-exFeature2 = Feature ("1") (MBp 10.0) (MBp 20.0) unit
+exFeature2 = Feature (Chr "1") (MBp 10.0) (MBp 20.0) unit
 exFeature3 :: Feature Bp Unit
-exFeature3 = Feature ("1") (Bp 60000.0) (Bp 61000.0) unit
+exFeature3 = Feature (Chr "1") (Bp 60000.0) (Bp 61000.0) unit
 
 
 glyph1 :: Glyph Unit
