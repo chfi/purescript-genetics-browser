@@ -7,19 +7,6 @@ exports.setBDRef = function(bd) {
 };
 
 
-// bd can produce ranges
-exports.bdTrackSourceConfig = [{ eventName: "range",
-                                 eventTemplate: { "chr": "Chr",
-                                                  "minPos": "Bp",
-                                                  "maxPos": "Bp"
-                                                },
-                                 rawTemplate: { "chr": "chr",
-                                                "minPos": "min",
-                                                "maxPos": "max"
-                                              }
-                               }];
-
-
 // bd can consume range and location events
 var bdConsumeRange = function(json) {
     return function(bd) {
@@ -49,17 +36,3 @@ exports.bdTrackSinkConfig = [ { eventName: "range",
                                 eventFun: bdConsumeLoc
                               }
                             ];
-
-
-// cy.js can produce locations
-exports.cyGraphSourceConfig = [{ eventName: "location",
-                                 eventTemplate: { "chr": "Chr",
-                                                  "minPos": "Bp",
-                                                  "maxPos": "Bp"
-                                                },
-                                 rawTemplate: { "data": { "lrsLoc": { "chr": "Chr",
-                                                                      "pos": "Bp"
-                                                                    }
-                                                        }
-                                              }
-                               }];

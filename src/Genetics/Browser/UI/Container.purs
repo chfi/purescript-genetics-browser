@@ -4,6 +4,7 @@ module Genetics.Browser.UI.Container
 import Prelude
 
 import Control.Coroutine as CR
+import Control.Error.Util (note)
 import Control.Monad.Aff (Aff, makeAff)
 import Control.Monad.Aff as Aff
 import Control.Monad.Aff.AVar (AVAR)
@@ -22,8 +23,9 @@ import Data.Array (mapMaybe, null, uncons)
 import Data.Const (Const)
 import Data.Either (Either(..))
 import Data.Either.Nested (Either2)
-import Data.Foldable (foldMap, sequence_)
+import Data.Foldable (foldMap, length, sequence_)
 import Data.Foreign (Foreign, renderForeignError)
+import Data.Functor.Contravariant ((>$<))
 import Data.Functor.Coproduct.Nested (type (<\/>))
 import Data.Int (round)
 import Data.Lens (re, (^?))
@@ -32,6 +34,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (mempty)
 import Data.Newtype (unwrap, wrap)
 import Data.Options (Options, (:=))
+import Data.Predicate (Predicate(..))
 import Data.StrMap (StrMap)
 import Data.StrMap as StrMap
 import Data.Symbol (SProxy(..))
@@ -49,7 +52,8 @@ import Genetics.Browser.Config (BrowserConfig(..), parseBrowserConfig)
 import Genetics.Browser.Config.Track (validateConfigs)
 import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Cytoscape.Collection (filter, isEdge, targetNodes)
-import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
+import Genetics.Browser.Cytoscape.Collection as CyCollection
+import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject, elementJson)
 import Genetics.Browser.Events (Location(..), Range(..))
 import Genetics.Browser.Events.TrackSink (SinkConfig, TrackSink, forkTrackSink, makeTrackSink, makeTrackSinks)
 import Genetics.Browser.Events.TrackSource (SourceConfig, TrackSource, emptyTrackSource, makeTrackSource, makeTrackSources, runTrackSource)
@@ -252,11 +256,19 @@ foreign import setBDRef :: ∀ eff. Biodalliance -> Eff eff Unit
 foreign import bdTrackSinkConfig :: forall eff.
                                     Array (SinkConfig (Biodalliance -> Eff (BDEventEff eff) Unit))
 
-foreign import bdTrackSourceConfig :: Array SourceConfig
+-- foreign import bdTrackSourceConfig :: Array SourceConfig
 
 -- foreign import cyGraphSinkConfig :: forall
 
 foreign import cyGraphSourceConfig :: Array SourceConfig
+
+foreign import testRange :: Json
+
+filterCytoscape :: Cytoscape -> Predicate Json -> Eff _ Unit
+filterCytoscape cy p = do
+  g <- Cytoscape.graphGetCollection cy
+  let g' = CyCollection.filter (elementJson >$< p) g
+  Cytoscape.graphRemoveCollection g' *> pure unit
 
 
 main :: Foreign -> Eff _ Unit
@@ -294,7 +306,8 @@ main fConfig = HA.runHalogenAff do
           busFromCy <- Bus.make
 
           let bdTrackSink = makeTrackSinks bdTrackSinkConfig
-              bdTrackSource = makeTrackSources bdTrackSourceConfig
+              bdTrackSource = (makeTrackSources <<< _.bdEventSources)
+                              =<< note "No events configured" (config.events)
 
           when (not null bdTracks.results) do
             io.subscribe $ CR.consumer $ case _ of
@@ -306,8 +319,11 @@ main fConfig = HA.runHalogenAff do
                   Just ts -> forkTrackSink ts bd busFromCy *> pure unit
 
                 case bdTrackSource of
-                  Nothing -> liftEff $ log "No BD TrackSource!"
-                  Just ts -> liftEff $ subscribeBDEvents ts bd busFromBD
+                  Left err -> liftEff do
+                    log "No BD TrackSource! Error:"
+                    log err
+                  Right ts -> liftEff do
+                    subscribeBDEvents ts bd busFromBD
 
                 liftEff $ setBDRef bd
                 pure Nothing
@@ -330,8 +346,10 @@ main fConfig = HA.runHalogenAff do
                   liftEff $ log "attaching Cy event handlers"
 
                   case cyGraphSource of
-                    Nothing -> liftEff $ log "No Cy graph source!"
-                    Just gs -> liftEff $ subscribeCyEvents gs cy busFromCy
+                    Left err -> liftEff do
+                      log "No Cy graph source!"
+                      log err
+                    Right gs -> liftEff $ subscribeCyEvents gs cy busFromCy
 
                   pure Nothing
                 _ -> pure $ Just unit
