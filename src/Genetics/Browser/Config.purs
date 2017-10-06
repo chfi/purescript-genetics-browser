@@ -29,7 +29,9 @@ newtype BrowserConfig = BrowserConfig { wrapRenderer :: RenderWrapper
                                       , bdRenderers :: StrMap RendererInfo
                                       , browser :: BrowserConstructor
                                       , tracks :: TracksMap
-                                      , events :: Maybe { bdEventSources :: Array SourceConfig }
+                                      , events :: Maybe { bdEventSources :: Array SourceConfig
+                                                        , cyEventSources :: Array SourceConfig
+                                                        }
                                       }
 
 readJson :: Foreign -> F Json
@@ -57,8 +59,14 @@ parseBrowserConfig f = do
   events <- do
     evs <- f ! "eventSources"
     bd <- evs ! "bd" >>= readArray >>= traverse parseSourceConfig
+    cy <- evs ! "cy" >>= readArray >>= traverse parseSourceConfig
+
     _ <- except $ traverse (\sc -> lmap (pure <<< ForeignError) $ validateSourceConfig sc) bd
-    pure $ Just $ { bdEventSources: bd }
+    _ <- except $ traverse (\sc -> lmap (pure <<< ForeignError) $ validateSourceConfig sc) cy
+
+    pure $ Just $ { bdEventSources: bd
+                  , cyEventSources: cy
+                  }
 
   bdRenderers <- f ! "renderers" >>= parseRenderers
   pure $ BrowserConfig { wrapRenderer, bdRenderers, browser, tracks, events }

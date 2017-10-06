@@ -256,13 +256,6 @@ foreign import setBDRef :: ∀ eff. Biodalliance -> Eff eff Unit
 foreign import bdTrackSinkConfig :: forall eff.
                                     Array (SinkConfig (Biodalliance -> Eff (BDEventEff eff) Unit))
 
--- foreign import bdTrackSourceConfig :: Array SourceConfig
-
--- foreign import cyGraphSinkConfig :: forall
-
-foreign import cyGraphSourceConfig :: Array SourceConfig
-
-foreign import testRange :: Json
 
 filterCytoscape :: Cytoscape -> Predicate Json -> Eff _ Unit
 filterCytoscape cy p = do
@@ -281,8 +274,8 @@ main fConfig = HA.runHalogenAff do
     Right (BrowserConfig config) -> do
       let {bdTracks, cyGraphs} = validateConfigs config.tracks
 
-          opts' =  sources := bdTracks.results
-                <> renderers := config.bdRenderers
+          opts' = sources := bdTracks.results <>
+                  renderers := config.bdRenderers
 
       liftEff $ log $ "BDTrack errors: " <> foldMap ((<>) ", ") bdTracks.errors
       liftEff $ log $ "CyGraph errors: " <> foldMap ((<>) ", ") cyGraphs.errors
@@ -306,7 +299,7 @@ main fConfig = HA.runHalogenAff do
           busFromCy <- Bus.make
 
           let bdTrackSink = makeTrackSinks bdTrackSinkConfig
-              bdTrackSource = (makeTrackSources <<< _.bdEventSources)
+              bdTrackSource = makeTrackSources <<< _.bdEventSources
                               =<< note "No events configured" (config.events)
 
           when (not null bdTracks.results) do
@@ -315,8 +308,8 @@ main fConfig = HA.runHalogenAff do
                 liftEff $ log "attaching BD event handlers"
 
                 case bdTrackSink of
-                  Nothing -> liftEff $ log "No BD TrackSink!"
-                  Just ts -> forkTrackSink ts bd busFromCy *> pure unit
+                  Left err -> liftEff $ log "No BD TrackSink!"
+                  Right ts -> forkTrackSink ts bd busFromCy *> pure unit
 
                 case bdTrackSource of
                   Left err -> liftEff do
@@ -335,8 +328,8 @@ main fConfig = HA.runHalogenAff do
 
           liftEff $ log $ "cytoscape enabled: " <> show (not null cyGraphs.results)
 
-          -- let cyGraphSink = makeTrackSinks cyGraphSinkConfig
-          let cyGraphSource = makeTrackSources cyGraphSourceConfig
+          let cyGraphSource = makeTrackSources <<< _.cyEventSources
+                              =<< note "No events configured" (config.events)
 
           case uncons cyGraphs.results of
             Nothing -> pure unit
