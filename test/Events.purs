@@ -4,8 +4,11 @@ module Test.Events where
 import Prelude
 
 import Data.Argonaut (Json)
+import Data.Argonaut as Json
 import Data.Either (Either(..))
-import Genetics.Browser.Events.TrackSink (SinkConfig, TrackSink, makeTrackSink)
+import Data.Maybe (Maybe(..))
+import Genetics.Browser.Events.TrackManager (sourceToSink)
+import Genetics.Browser.Events.TrackSink (SinkConfig, TrackSink, makeTrackSink, runTrackSink)
 import Genetics.Browser.Events.TrackSource (SourceConfig, TrackSource, makeTrackSource, runTrackSource)
 import Genetics.Browser.Events.Types (Event)
 import Test.Spec (Spec, describe, it)
@@ -37,6 +40,23 @@ event1 :: Either String (Array Event)
 event1 = do
   source <- rangeSource
   pure $ runTrackSource source rawRange1
+
+
+foreign import rangeSinkStringConfig :: SinkConfig String
+
+foreign import sinkGetPropConfig :: forall a.
+                                    Maybe a
+                                 -> (a -> Maybe a)
+                                 -> String
+                                 -> String
+                                 -> SinkConfig (Maybe Json)
+
+
+rangeSinkString :: TrackSink String
+rangeSinkString = makeTrackSink rangeSinkStringConfig
+
+sinkPropChr :: TrackSink (Maybe Json)
+sinkPropChr = makeTrackSink $ sinkGetPropConfig Nothing Just "range" "chr"
 
 
 spec :: Spec _ Unit
@@ -72,3 +92,40 @@ spec = do
       case badRangeSource of
         Left  _ -> pure unit
         Right _ -> fail "Accepted config with event values as superset of raw keys!"
+
+
+  describe "Event sinks" do
+
+    it "can consume correctly typed events" do
+
+      runTrackSink rangeSinkString parsedRange1
+        `shouldEqual` Just "chr,minPos,maxPos"
+
+      join (runTrackSink sinkPropChr parsedRange2)
+        `shouldEqual` Just (Json.fromString "3")
+
+
+  describe "Track Managers" do
+    it "can connect a source to a sink" do
+      case rangeSource of
+        Left err -> fail "failed to parse rangeSource!"
+        Right rs -> do
+
+          let pipe :: Json -> Array String
+              pipe = sourceToSink rs rangeSinkString
+
+
+          let pipe2 :: Json -> Array (Maybe Json)
+              pipe2 = sourceToSink rs sinkPropChr
+
+          pipe rawRange1 `shouldEqual` ["maxPos,minPos,chr"]
+          pipe2 rawRange2 `shouldEqual` [Just (Json.fromString "3")]
+
+    it "errors when source and sink are incompatible" do
+      fail "not implemented"
+
+    it "can combine sources" do
+      fail "not implemented"
+
+    it "can combine sinks" do
+      fail "not implemented"

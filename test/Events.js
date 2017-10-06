@@ -42,3 +42,37 @@ var sink1Fun = function(json) {
 
 exports.sinkConfig1 = { eventName: "event1",
                         eventFun: sink1Fun };
+
+
+var rangeSinkStringFun = function(json) {
+    return Object.keys(json).toString();
+};
+
+exports.rangeSinkStringConfig = { eventName: "range",
+                                  eventFun: rangeSinkStringFun };
+
+
+var sinkGetPropFun = function(Nothing) {
+    return function(Just) {
+        return function(key) {
+            return function(json) {
+                if (json[key]) {
+                    return Just(json[key]);
+                } else {
+                    return Nothing;
+                }
+            };
+        };
+    };
+};
+
+exports.sinkGetPropConfig = function(Nothing) {
+    return function(Just) {
+        return function(eventName) {
+            return function(key) {
+                return { eventName: eventName,
+                         eventFun: sinkGetPropFun(Nothing)(Just)(key) };
+            };
+        };
+    };
+};
