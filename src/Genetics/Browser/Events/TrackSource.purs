@@ -11,19 +11,20 @@ import Prelude
 import Control.Monad.Except (Except, throwError)
 import Control.Monad.Except.Trans (catchError, throwError)
 import Control.MonadPlus (guard)
-import Data.Argonaut (JCursor(JField), Json, JsonPrim, cursorGet, cursorSet, jsonEmptyObject, primToJson)
+import Data.Argonaut (JCursor(JField), Json, JsonPrim, cursorGet, cursorSet, foldJsonString, jsonEmptyObject, primToJson)
 import Data.Argonaut as Json
 import Data.Array (catMaybes, singleton)
 import Data.Array as Array
 import Data.Bifunctor (lmap)
-import Data.Either (Either, note)
+import Data.Either (Either(..), note)
+import Data.Filterable (filterMap)
 import Data.Foldable (all, any, fold, foldMap, foldr)
 import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (class Newtype)
 import Data.StrMap (StrMap)
 import Data.StrMap as StrMap
-import Data.Traversable (traverse)
+import Data.Traversable (for, traverse)
 import Data.Tuple (Tuple(..))
 import Genetics.Browser.Events.Types (Event)
 import Global.Unsafe (unsafeStringify)
@@ -75,14 +76,16 @@ parseTemplatePath :: Tuple JCursor JsonPrim
 parseTemplatePath (Tuple cursor t) =
   lmap (append $ "Error when parsing template path " <> unsafeStringify t) do
 
-    vType <- note "Template value type is not a JSON String"
-             $ Json.toString $ primToJson t
+    vType <- foldJsonString (Left "Template value type is not a JSON String") pure
+             $ primToJson t
 
     name <- note "A piece of the template path is not a string"
             $ case Json.insideOut cursor of
               JField s _ -> Just s
               _          -> Nothing
+
     pure { cursor, name, vType }
+
 
 parseTemplateConfig :: Json -> Either String (Array ValueCursor)
 parseTemplateConfig = traverse parseTemplatePath <<< Array.fromFoldable <<< Json.toPrims
@@ -94,6 +97,7 @@ parseRawTemplatePath (Tuple cursor t) =
   note ("Error when parsing raw template path for value: " <> unsafeStringify t) do
     name <- Json.toString $ primToJson t
     pure { cursor, name }
+
 
 parseRawTemplateConfig :: Json
                        -> Either String (Array RawCursor)
@@ -108,10 +112,11 @@ fillTemplate t vs = foldr f (Just jsonEmptyObject) t
           val <- StrMap.lookup ec.name vs
           cursorSet ec.cursor val j
 
+
 parseRawEvent :: Array RawCursor -> Json -> Maybe (StrMap Json)
-parseRawEvent paths json = do
-  vals <- traverse (\path -> map (Tuple path.name) (cursorGet path.cursor json)) paths
-  pure $ StrMap.fromFoldable vals
+parseRawEvent paths json =
+  StrMap.fromFoldable <$>
+    for paths (\p -> Tuple p.name <$> cursorGet p.cursor json)
 
 
 -- templates are valid if each name of the event values
@@ -126,8 +131,14 @@ validateTemplate rcs vc =
 
 
 validateTemplates :: Array RawCursor -> Array ValueCursor -> Either String (Array ValueCursor)
-validateTemplates rcs vcs = traverse (validateTemplate rcs) vcs
+validateTemplates rcs = traverse (validateTemplate rcs)
 
+
+-- validateSourceConfig' :: SourceConfig -> Either String Unit
+-- validateSourceConfig' sc = validateTemplates
+--                            <$> parseRawTemplateConfig sc.rawTemplate
+--                            <*> parseTemplateConfig sc.eventTemplate
+--                             *> pure unit
 
 validateSourceConfig :: SourceConfig -> Either String Unit
 validateSourceConfig sc = do
@@ -135,26 +146,24 @@ validateSourceConfig sc = do
   et <- parseTemplateConfig sc.eventTemplate
   validateTemplates rt et *> pure unit
 
+-- TODO:
+-- instance decodeJsonTrackSource :: DecodeJson (TrackSource Event) where
 
 makeTrackSource :: SourceConfig -> Either String (TrackSource Event)
 makeTrackSource sc = do
-  -- parse the templates
   rawTemplates <- parseRawTemplateConfig sc.rawTemplate
   eventTemplates <- validateTemplates rawTemplates
                     =<< parseTemplateConfig sc.eventTemplate
-  let parseRaw = parseRawEvent rawTemplates
-      fillEvent = fillTemplate eventTemplates
-
 
   pure $ TrackSource $ singleton $ \rawEvent -> do
-    vals <- parseRaw rawEvent
-    evData <- fillEvent vals
+    vals <- parseRawEvent rawTemplates rawEvent
+    evData <- fillTemplate eventTemplates vals
     pure $ { name: sc.eventName, evData }
 
 
 runTrackSource :: TrackSource Event -> Json -> Array Event
-runTrackSource (TrackSource ts) raw = catMaybes $ map (\f -> f raw) ts
+runTrackSource (TrackSource ts) raw = filterMap (_ $ raw) ts
 
 
 makeTrackSources :: Array SourceConfig -> Either String (TrackSource Event)
-makeTrackSources scs = fold <$> traverse makeTrackSource scs
+makeTrackSources = map fold <<< traverse makeTrackSource
