@@ -8,7 +8,7 @@ import Prelude
 import Control.Monad.Except (except, throwError, withExcept)
 import Data.Argonaut (Json)
 import Data.Bifunctor (lmap)
-import Data.Either (isLeft)
+import Data.Either (isLeft, Either(..))
 import Data.Foldable (any)
 import Data.Foreign (F, Foreign, ForeignError(..), readArray, readString, unsafeReadTagged)
 import Data.Foreign.Index ((!))
@@ -50,6 +50,9 @@ parseSourceConfig f = do
 readTaggedWithError :: forall a. String -> String -> Foreign -> F a
 readTaggedWithError s e f = withExcept (append (pure $ ForeignError e)) $ unsafeReadTagged s f
 
+eitherToF :: Either String ~> F
+eitherToF = except <<< lmap (pure <<< ForeignError)
+
 parseBrowserConfig :: Foreign -> F BrowserConfig
 parseBrowserConfig f = do
   wrapRenderer <- f ! "wrapRenderer" >>= readTaggedWithError "Function" "Error on 'wrapRenderer':"
@@ -61,8 +64,8 @@ parseBrowserConfig f = do
     bd <- evs ! "bd" >>= readArray >>= traverse parseSourceConfig
     cy <- evs ! "cy" >>= readArray >>= traverse parseSourceConfig
 
-    _ <- except $ traverse (\sc -> lmap (pure <<< ForeignError) $ validateSourceConfig sc) bd
-    _ <- except $ traverse (\sc -> lmap (pure <<< ForeignError) $ validateSourceConfig sc) cy
+    _ <- eitherToF $ traverse validateSourceConfig bd
+    _ <- eitherToF $ traverse validateSourceConfig cy
 
     pure $ Just $ { bdEventSources: bd
                   , cyEventSources: cy
