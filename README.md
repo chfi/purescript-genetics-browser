@@ -16,7 +16,7 @@ npm run deps
 Build a bundle for the renderer you want, like this:
 
 ```shell
-npm build pgb.js
+npm build-to pgb.js
 ```
 
 This compiles a bundle to the file "pgb.js", which can be used by including it in a HTML page,
@@ -62,9 +62,26 @@ This is a basic configuration example, with two BD tracks. The last line runs th
       }
   ];
 
+  var bdTrackSourceConfigs = [{ eventName: "range",
+                                eventTemplate: { "chr": "Chr",
+                                                 "minPos": "Bp",
+                                                 "maxPos": "Bp"
+                                },
+                                rawTemplate: { "segment": "chr",
+                                               "min": "minPos",
+                                               "max": "maxPos"
+                                }
+  }];
+
+  
+  var renderers = { "qtlRenderer": PS.qtlRenderer(250) };
+
   var config = { wrapRenderer: WrappedRenderer.wrapRenderer,
-                browser: Browser,
-                tracks: {BDTrack: sources}
+                 browser: Browser,
+                 tracks: { BDTrack: sources, CyGraph: [] },
+		 eventSources: { bd: [], cy: [] },
+		 eventSinks: { bd: [], cy: [] }
+		 
   };
 
   PS.main(config)();
