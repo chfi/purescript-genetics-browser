@@ -51,7 +51,7 @@ import Genetics.Browser.Biodalliance.Types (BD, Biodalliance, Renderer)
 import Genetics.Browser.Config (BrowserConfig(..), parseBrowserConfig)
 import Genetics.Browser.Config.Track (validateConfigs)
 import Genetics.Browser.Cytoscape as Cytoscape
-import Genetics.Browser.Cytoscape.Collection (filter, isEdge, targetNodes)
+import Genetics.Browser.Cytoscape.Collection (connectedEdges, connectedNodes, filter, isEdge, targetNodes)
 import Genetics.Browser.Cytoscape.Collection as CyCollection
 import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject, elementJson)
 import Genetics.Browser.Events (Location(..), Range(..))
@@ -92,6 +92,7 @@ subscribeBDEvents :: ∀ r.
 subscribeBDEvents h bd bus =
   Biodalliance.addFeatureListener bd $ \obj -> do
     let evs = runTrackSource h (unwrap obj)
+
     traverse_ (\x -> Aff.launchAff $ Bus.write x bus) evs
 
 
@@ -253,14 +254,12 @@ parseScoreFeature j = do
 foreign import setBDRef :: ∀ eff. Biodalliance -> Eff eff Unit
 
 
-foreign import bdTrackSinkConfig :: forall eff.
-                                    Array (SinkConfig (Biodalliance -> Eff (BDEventEff eff) Unit))
-
 
 filterCytoscape :: Cytoscape -> Predicate Json -> Eff _ Unit
 filterCytoscape cy p = do
   g <- Cytoscape.graphGetCollection cy
   let g' = CyCollection.filter (elementJson >$< p) g
+      gAll = g' <> (connectedEdges g') <> (connectedNodes g')
   Cytoscape.graphRemoveCollection g' *> pure unit
 
 
@@ -298,9 +297,10 @@ main fConfig = HA.runHalogenAff do
           busFromBD <- Bus.make
           busFromCy <- Bus.make
 
-          let bdTrackSink = makeTrackSinks bdTrackSinkConfig
+          let bdTrackSink = makeTrackSinks <<< _.bdEventSinks
+                              =<< note "No BD event sinks configured" (config.events)
               bdTrackSource = makeTrackSources <<< _.bdEventSources
-                              =<< note "No events configured" (config.events)
+                              =<< note "No BD event sources configured" (config.events)
 
           when (not null bdTracks.results) do
             io.subscribe $ CR.consumer $ case _ of
@@ -328,8 +328,11 @@ main fConfig = HA.runHalogenAff do
 
           liftEff $ log $ "cytoscape enabled: " <> show (not null cyGraphs.results)
 
-          let cyGraphSource = makeTrackSources <<< _.cyEventSources
-                              =<< note "No events configured" (config.events)
+          let cyGraphSink = makeTrackSinks <<< _.cyEventSinks
+                              =<< note "No Cy.js event sinks configured" (config.events)
+              cyGraphSource = makeTrackSources <<< _.cyEventSources
+                              =<< note "No Cy.js event sources configured" (config.events)
+
 
           case uncons cyGraphs.results of
             Nothing -> pure unit
@@ -342,7 +345,14 @@ main fConfig = HA.runHalogenAff do
                     Left err -> liftEff do
                       log "No Cy graph source!"
                       log err
-                    Right gs -> liftEff $ subscribeCyEvents gs cy busFromCy
+                    Right gs -> liftEff do
+                      log $ unsafeStringify gs
+                      subscribeCyEvents gs cy busFromCy
+
+                  case cyGraphSink of
+                      Left err -> liftEff $ log "No Cy.js TrackSink!"
+                      Right ts -> forkTrackSink ts cy busFromBD *> pure unit
+                   
 
                   pure Nothing
                 _ -> pure $ Just unit
