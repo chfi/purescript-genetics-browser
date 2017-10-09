@@ -19,7 +19,7 @@
   },
   "scripts": {
     "bower": "bower",
-    "dep": "bower install",
+    "deps": "bower install",
     "build": "pulp build",
     "build-to": "pulp browserify --main Genetics.Browser.UI.Container --skip-entry-point --standalone PS --to",
     "watch-to": "pulp --watch browserify --main Genetics.Browser.UI.Container --skip-entry-point --standalone PS --to",
