@@ -26,7 +26,9 @@
 
         <script language="javascript" src="./pgb.js"></script>
 
+
         <script language="javascript">
+
          var sources = [
              {
                  name: 'Genome',
@@ -43,11 +45,54 @@
              }
          ];
 
-         var config = {tracks: {BDTrack: sources},
-                       browser: Browser,
-                       wrapRenderer: WrappedRenderer.wrapRenderer
+         var bdTrackSourceConfigs = [{ eventName: "range",
+                                       eventTemplate: { "chr": "Chr",
+                                                        "minPos": "Bp",
+                                                        "maxPos": "Bp"
+                                       },
+                                       rawTemplate: { "segment": "chr",
+                                                      "min": "minPos",
+                                                      "max": "maxPos"
+                                       }
+         }];
+
+         var bdConsumeRange = function(json) {
+             return function(bd) {
+                 return function() {
+                     bd.setLocation(json.chr,
+                                    json.minPos,
+                                    json.maxPos);
+                 };
+             };
          };
 
+	       var bdConsumeLoc = function(json) {
+	           return function(bd) {
+		             return function() {
+		                 bd.setLocation(json.chr,
+				                            json.pos - 1000000.0,
+				                            json.pos + 1000000.0);
+		             };
+	           };
+	       };
+
+	       var bdTrackSinkConfigs = [ { eventName: "range",
+	                                    eventFun: bdConsumeRange },
+	                                  { eventName: "location",
+	                                    eventFun: bdConsumeLoc }
+	       ];
+
+         var renderers = { "qtlRenderer": PS.qtlRenderer(250) };
+
+         var config = { tracks: { BDTrack: sources },
+                        browser: Browser,
+                        wrapRenderer: WrappedRenderer.wrapRenderer,
+                        renderers: renderers,
+                        eventSources: { bd: bdTrackSourceConfigs,
+                                        cy: [] },
+	                      eventSinks: { bd: bdTrackSinkConfigs,
+	                                    cy: [] }
+         };
 
          PS.main(config)();
 
