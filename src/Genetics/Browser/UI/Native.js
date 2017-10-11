@@ -70,3 +70,27 @@ exports.newCanvas = function(size) {
         return c;
     };
 };
+
+
+exports.canvasOnDrag = function(fun) {
+    return function(canvas) {
+        return function() {
+            canvas.addEventListener('mousedown', function(e) {
+                var lastX = e.clientX;
+                var lastY = e.clientY;
+
+                var f = function(e2) {
+                    fun({x: lastX - e2.clientX, y: lastY - e2.clientY})();
+                    lastX = e2.clientX;
+                    lastY = e2.clientY;
+                };
+
+                document.addEventListener('mousemove', f);
+
+                document.addEventListener('mouseup', function(e2) {
+                    document.removeEventListener('mousemove', f);
+                }, { once: true });
+            });
+        };
+    };
+};

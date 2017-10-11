@@ -151,7 +151,10 @@ foreign import newCanvas :: forall eff.
                             { w :: Number, h :: Number }
                          -> Eff eff CanvasElement
 
-
+foreign import canvasOnDrag :: forall eff.
+                               ({ x :: Number, y :: Number} -> Eff eff Unit)
+                            -> CanvasElement
+                            -> Eff eff Unit
 
 
 main :: Eff _ Unit
@@ -179,6 +182,8 @@ main = do
       f = fetchWithView 100
 
   vRef <- newRef { cur: v, prev: v }
+
+  canvasOnDrag (\ {x,y} -> scrollCanvas backCanvas canvas x ) canvas
 
   setButtonEvent "scrollLeft" do
     scrollCanvas backCanvas canvas (-100.0)
