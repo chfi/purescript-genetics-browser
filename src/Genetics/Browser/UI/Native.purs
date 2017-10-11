@@ -121,10 +121,12 @@ foreign import getScreenSize :: forall eff. Eff eff { w :: Number, h :: Number }
 animate :: Number
         -> Number
         -> (View -> Fetch _)
-        -> Context2D
+        -> CanvasElement
         -> Ref { prev :: View, cur :: View }
         -> Eff _ Unit
-animate w h f ctx vRef = animationFrameLoop do
+animate w h f canvas vRef = do
+  ctx <- getContext2D canvas
+  animationFrameLoop do
     v <- readRef vRef
     when (v.cur.min /= v.prev.min ||
           v.cur.max /= v.prev.max) do
@@ -135,6 +137,21 @@ animate w h f ctx vRef = animationFrameLoop do
 
 scrollView :: Bp -> View -> View
 scrollView bp v = v { min = v.min + bp, max = v.max + bp }
+
+
+-- 1st element is a backbuffer, 2nd the one shown on screen
+foreign import scrollCanvas :: forall eff.
+                               CanvasElement
+                            -> CanvasElement
+                            -> Number
+                            -> Eff eff Unit
+
+-- creates a new CanvasElement, not attached to the DOM and thus not visible
+foreign import newCanvas :: forall eff.
+                            { w :: Number, h :: Number }
+                         -> Eff eff CanvasElement
+
+
 
 
 main :: Eff _ Unit
@@ -150,6 +167,8 @@ main = do
 
   offset <- getBoundingClientRect $ canvasElementToHTML canvas
 
+  backCanvas <- newCanvas {w,h}
+
   log $ unsafeCoerce offset
 
   let minView = Bp 0.0
@@ -162,18 +181,20 @@ main = do
   vRef <- newRef { cur: v, prev: v }
 
   setButtonEvent "scrollLeft" do
-    v <- readRef vRef
-    let newView = scrollView (Bp (-100.0)) v.cur
-    log $ "scrolling left, to " <> show newView.min
-    writeRef vRef { cur: newView, prev: v.cur }
+    scrollCanvas backCanvas canvas (-100.0)
+    -- v <- readRef vRef
+    -- let newView = scrollView (Bp (-100.0)) v.cur
+    -- log $ "scrolling left, to " <> show newView.min
+    -- writeRef vRef { cur: newView, prev: v.cur }
 
   setButtonEvent "scrollRight" do
-    v <- readRef vRef
-    let newView = scrollView (Bp 100.0) v.cur
-    log $ "scrolling right, to " <> show newView.min
-    writeRef vRef { cur: newView, prev: v.cur }
+    scrollCanvas backCanvas canvas 100.0
+    -- v <- readRef vRef
+    -- let newView = scrollView (Bp 100.0) v.cur
+    -- log $ "scrolling right, to " <> show newView.min
+    -- writeRef vRef { cur: newView, prev: v.cur }
 
   -- render first frame
   fetchToCanvas f v ctx
 
-  animate w h f ctx vRef
+  animate w h f canvas vRef
