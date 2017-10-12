@@ -87,11 +87,6 @@ glyphifyWithView v (Feature chr min' max' score) = do
 canvasElementToHTML :: CanvasElement -> HTMLElement
 canvasElementToHTML = unsafeCoerce
 
-type View = { min :: Bp
-            , max :: Bp
-            , cWidth :: Number
-            , cHeight :: Number
-            } 
 
 fetchWithView :: Int -> View -> Fetch _
 fetchWithView n v = randomFetch n (Chr "chr11") (unwrap v.min) (unwrap v.max)
@@ -155,6 +150,10 @@ foreign import newCanvas :: forall eff.
                             { w :: Number, h :: Number }
                          -> Eff eff CanvasElement
 
+-- set an event to fire on the given button id
+foreign import buttonEvent :: String
+                           -> Event Unit
+
 foreign import canvasDragImpl :: CanvasElement -> Event (Nullable Point)
 
 foreign import canvasEvent :: String -> CanvasElement -> Event Point
@@ -175,7 +174,55 @@ canvasEvents el = { click: canvasEvent "click" el
                   , mousedown: canvasEvent "mousedown" el
                   , drag: canvasDrag el
                   }
+-- Given an event of dragging a canvas ending with Nothing,
+-- produces an event of the total horizontal dragged distance when mouse is let go
+horDragEv :: Event (Maybe Point) -> Event Number
+horDragEv ev = ptSum `sampleOn_` doneEv
+  where doneEv = filter isNothing ev
+        ptSum = FRP.fold (+) (filterMap (map _.x) ev) 0.0
 
+
+type View = { min :: Bp
+            , max :: Bp
+            , scale :: BpPerPixel
+            }
+
+data UpdateView = ScrollBp Bp
+                | ScrollPixels Number
+                | SetRange Bp Bp
+                | ModScale (BpPerPixel -> BpPerPixel)
+                | SetScale BpPerPixel
+
+viewBehavior :: Event UpdateView
+             -> View
+             -> Event View
+viewBehavior ev v = FRP.fold f ev v
+  where f :: UpdateView -> View -> View
+        f (ScrollBp x) v' = v' { min = v'.min + x
+                               , max = v'.max + x }
+
+        f (ScrollPixels x) v' = v' { min = v'.min + (pixelsToBp v'.scale x)
+                                   , max = v'.max + (pixelsToBp v'.scale x) }
+
+        f (SetRange min' max') v' = v' { min = min'
+                                       , max = max' }
+
+        f (ModScale g) v' = v' { scale = g v'.scale }
+
+        f (SetScale s) v' = v' { scale = s }
+
+
+-- how far to scroll when clicking a button
+btnScroll :: Bp -> Event UpdateView
+btnScroll x = f' (-x) <$> buttonEvent "scrollLeft" <|>
+              f'   x  <$> buttonEvent "scrollRight"
+  where f' = const <<< ScrollBp
+
+
+-- TODO: set a range to jump the view to
+-- TODO: zoom in and out
+-- TODO: set zoom/scale
+-- TODO: set just one side of the view?
 
 xB :: Behavior Point -> Behavior Number
 xB = map (\{x,y} -> x)
@@ -207,17 +254,22 @@ main = do
   vRef <- newRef { cur: v, prev: v }
 
   let events = canvasEvents canvas
+  let cDrag = canvasDrag canvas
+      -- the alt operator <|> combines the two event streams,
+      -- resulting in an event of both button-click scrolls
+      -- and canvas-drag scrolls
+      updateViews = btnScroll (Bp 500.0) <|>
+                    (map ScrollPixels <<< horDragEv) cDrag
+      viewB = viewBehavior updateViews v
 
-  _ <- subscribe events.drag $ case _ of
+  _ <- FRP.subscribe cDrag $ case _ of
     Nothing -> pure unit
     Just {x,y} -> do
-      scrollCanvas backCanvas canvas {x: -x, y: 0.0}
-      log $ "x: " <> show x <> "\t\ty: " <> show y
+    Just {x,y}  -> scrollCanvas backCanvas canvas {x: -x, y: 0.0}
 
-  _ <- subscribe events.mouseup \{x,y} -> do
-    v' <- readRef vRef
-    writeRef vRef (v' { prev = v'.cur })
-    fetchToCanvas f v'.cur ctx
+  _ <- FRP.subscribe viewB \v' -> do
+    clearCanvas canvas
+    fetchToCanvas f v' ctx
 
 
 
@@ -237,5 +289,3 @@ main = do
 
   -- render first frame
   fetchToCanvas f v ctx
-
-  animate w h f canvas vRef

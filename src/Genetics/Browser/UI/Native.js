@@ -20,14 +20,12 @@ exports.clearCanvas = function(w) {
     };
 };
 
-exports.setButtonEvent = function(id) {
+exports.buttonEvent = function(id) {
     return function(sub) {
-        return function() {
-            var el = document.getElementById(id);
-            el.addEventListener('click', function(ev) {
-                sub();
-            });
-        };
+        var el = document.getElementById(id);
+        el.addEventListener('click', function(ev) {
+            sub();
+        });
     };
 };
 

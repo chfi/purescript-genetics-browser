@@ -10,6 +10,9 @@ module Genetics.Browser.Units
        , Chr(..)
        , _Chr
        , toScreen
+       , BpPerPixel(..)
+       , bpToPixels
+       , pixelsToBp
        )where
 
 -- TODO: feels like there are better ways of dealing with this (units/dimensions);
@@ -95,3 +98,13 @@ derive newtype instance showChr :: Show Chr
 
 _Chr :: Iso' Chr String
 _Chr = _Newtype
+
+
+newtype BpPerPixel = BpPerPixel Number
+derive instance newtypeBpPerPixel :: Newtype BpPerPixel _
+
+bpToPixels :: BpPerPixel -> Bp -> Number
+bpToPixels (BpPerPixel s) (Bp p) = p * s
+
+pixelsToBp :: BpPerPixel -> Number -> Bp
+pixelsToBp (BpPerPixel s) p = Bp (p / s)
