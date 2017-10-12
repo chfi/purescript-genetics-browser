@@ -147,7 +147,7 @@ scrollView bp v = v { min = v.min + bp, max = v.max + bp }
 foreign import scrollCanvas :: forall eff.
                                CanvasElement
                             -> CanvasElement
-                            -> Number
+                            -> Point
                             -> Eff eff Unit
 
 -- creates a new CanvasElement, not attached to the DOM and thus not visible
@@ -203,7 +203,7 @@ main = do
   let events = canvasEvents canvas
 
   _ <- subscribe events.drag \{x,y} -> do
-    scrollCanvas backCanvas canvas (-x)
+    scrollCanvas backCanvas canvas {x: -x, y: 0.0}
     log $ "x: " <> show x <> "\t\ty: " <> show y
 
   _ <- subscribe events.mouseup \{x,y} -> do
@@ -214,14 +214,14 @@ main = do
 
 
   setButtonEvent "scrollLeft" do
-    scrollCanvas backCanvas canvas (-100.0)
+    scrollCanvas backCanvas canvas { x: -100.0, y: 0.0 }
     -- v <- readRef vRef
     -- let newView = scrollView (Bp (-100.0)) v.cur
     -- log $ "scrolling left, to " <> show newView.min
     -- writeRef vRef { cur: newView, prev: v.cur }
 
   setButtonEvent "scrollRight" do
-    scrollCanvas backCanvas canvas 100.0
+    scrollCanvas backCanvas canvas { x: -100.0, y: 0.0 }
     -- v <- readRef vRef
     -- let newView = scrollView (Bp 100.0) v.cur
     -- log $ "scrolling right, to " <> show newView.min

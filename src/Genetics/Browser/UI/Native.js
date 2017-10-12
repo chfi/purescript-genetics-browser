@@ -42,12 +42,12 @@ exports.getScreenSize = function() {
 // TODO: later, do all heavy lifting on the backcanvas and just draw that to the screen
 exports.scrollCanvas = function(backCanvas) {
     return function(canvas) {
-        return function(x) {
+        return function(p) {
             return function() {
                 // for some reason, doing this in newCanvas() below doesn't stick
                 backCanvas.width = canvas.width;
                 backCanvas.height = canvas.height;
-                
+
                 var bCtx = backCanvas.getContext('2d');
                 var ctx = canvas.getContext('2d');
 
@@ -56,7 +56,7 @@ exports.scrollCanvas = function(backCanvas) {
                 // clears the canvas...
                 // no idea of performance vs. drawRect
                 canvas.width = canvas.width;
-                ctx.drawImage(backCanvas, x, 0);
+                ctx.drawImage(backCanvas, p.x, p.y);
             };
 
         };
