@@ -155,21 +155,27 @@ foreign import newCanvas :: forall eff.
                             { w :: Number, h :: Number }
                          -> Eff eff CanvasElement
 
+foreign import canvasDragImpl :: CanvasElement -> Event (Nullable Point)
 
-foreign import canvasDrag :: CanvasElement -> Event Point
-
-foreign import canvasEvents :: CanvasElement
-                            -> { click :: Event Point
-                               , mouseup :: Event Point
-                               , mousedown :: Event Point
-                               , drag  :: Event Point
-                               }
+foreign import canvasEvent :: String -> CanvasElement -> Event Point
 
 
+canvasDrag :: CanvasElement -> Event (Maybe Point)
+canvasDrag el = toMaybe <$> canvasDragImpl el
 
 
-scrollDeriv :: CanvasElement -> Behavior Point
-scrollDeriv c = step {x: 0.0, y: 0.0} (canvasDrag c)
+canvasEvents :: CanvasElement
+             -> { click :: Event Point
+                , mouseup :: Event Point
+                , mousedown :: Event Point
+                , drag  :: Event (Maybe Point)
+                }
+canvasEvents el = { click: canvasEvent "click" el
+                  , mouseup: canvasEvent "mouseup" el
+                  , mousedown: canvasEvent "mousedown" el
+                  , drag: canvasDrag el
+                  }
+
 
 xB :: Behavior Point -> Behavior Number
 xB = map (\{x,y} -> x)
@@ -202,9 +208,11 @@ main = do
 
   let events = canvasEvents canvas
 
-  _ <- subscribe events.drag \{x,y} -> do
-    scrollCanvas backCanvas canvas {x: -x, y: 0.0}
-    log $ "x: " <> show x <> "\t\ty: " <> show y
+  _ <- subscribe events.drag $ case _ of
+    Nothing -> pure unit
+    Just {x,y} -> do
+      scrollCanvas backCanvas canvas {x: -x, y: 0.0}
+      log $ "x: " <> show x <> "\t\ty: " <> show y
 
   _ <- subscribe events.mouseup \{x,y} -> do
     v' <- readRef vRef

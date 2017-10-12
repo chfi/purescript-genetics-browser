@@ -77,7 +77,7 @@ var evToPoint = function(e) {
            };
 }
 
-var canvasEvent = function(type) {
+exports.canvasEvent = function(type) {
     return function(canvas) {
         return function(sub) {
             var cb = function(e) {
@@ -93,14 +93,8 @@ var canvasEvent = function(type) {
 };
 
 
-var canvasClick = canvasEvent("click");
-
-var canvasMouseup = canvasEvent("mouseup");
-
-var canvasMousedown = canvasEvent("mousedown");
-
-var canvasDrag = function(canvas) {
-    var during = function(sub) {
+exports.canvasDragImpl = function(canvas) {
+    return function(sub) {
         var cb = function(e) {
             var lastX = e.clientX;
             var lastY = e.clientY;
@@ -115,6 +109,7 @@ var canvasDrag = function(canvas) {
 
             document.addEventListener('mouseup', function(e2) {
                 document.removeEventListener('mousemove', f);
+                sub(null);
             }, { once: true });
         };
 
@@ -125,13 +120,3 @@ var canvasDrag = function(canvas) {
     };
 };
 
-exports.canvasDrag = canvasDrag;
-
-
-exports.canvasEvents = function(canvas) {
-    return { click: canvasClick(canvas),
-             mouseup: canvasMouseup(canvas),
-             mousedown: canvasMousedown(canvas),
-             drag: exports.canvasDrag(canvas)
-           };
-};
