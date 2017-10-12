@@ -71,13 +71,36 @@ exports.newCanvas = function(size) {
     };
 };
 
+var evToPoint = function(e) {
+    return { x: e.clientX,
+             y: e.clientY
+           };
+}
 
+var canvasEvent = function(type) {
     return function(canvas) {
+        return function(sub) {
+            var cb = function(e) {
+                sub(evToPoint(e));
+            };
+
+            canvas.addEventListener(type, cb);
+            return function() {
+                removeEventListener(type, cb);
+            }
+        };
+    };
+};
 
 
+var canvasClick = canvasEvent("click");
 
-exports.canvasDrag = function(canvas) {
-    return function(sub) {
+var canvasMouseup = canvasEvent("mouseup");
+
+var canvasMousedown = canvasEvent("mousedown");
+
+var canvasDrag = function(canvas) {
+    var during = function(sub) {
         var cb = function(e) {
             var lastX = e.clientX;
             var lastY = e.clientY;
@@ -100,4 +123,15 @@ exports.canvasDrag = function(canvas) {
             canvas.removeEventListener('mousedown', cb);
         }
     };
+};
+
+exports.canvasDrag = canvasDrag;
+
+
+exports.canvasEvents = function(canvas) {
+    return { click: canvasClick(canvas),
+             mouseup: canvasMouseup(canvas),
+             mousedown: canvasMousedown(canvas),
+             drag: exports.canvasDrag(canvas)
+           };
 };

@@ -29,7 +29,7 @@ import Unsafe.Coerce (unsafeCoerce)
 
 
 type Point = { x :: Number
-             , y :: Number } 
+             , y :: Number }
 
 type Fetch eff = Eff eff (Array (Feature Bp Number))
 
@@ -158,8 +158,24 @@ foreign import newCanvas :: forall eff.
 
 foreign import canvasDrag :: CanvasElement -> Event Point
 
+foreign import canvasEvents :: CanvasElement
+                            -> { click :: Event Point
+                               , mouseup :: Event Point
+                               , mousedown :: Event Point
+                               , drag  :: Event Point
+                               }
 
 
+
+
+scrollDeriv :: CanvasElement -> Behavior Point
+scrollDeriv c = step {x: 0.0, y: 0.0} (canvasDrag c)
+
+xB :: Behavior Point -> Behavior Number
+xB = map (\{x,y} -> x)
+
+scaleViewBehavior :: Number -> Behavior Bp -> Behavior Bp
+scaleViewBehavior s b = (wrap <<< (_ * s) <<< unwrap) <$> b
 main :: Eff _ Unit
 main = do
   mcanvas <- getCanvasElementById "canvas"
@@ -175,18 +191,26 @@ main = do
 
   backCanvas <- newCanvas {w,h}
 
-  _ <- subscribe (canvasDrag canvas) \{x,y} -> do
-    scrollCanvas backCanvas canvas (-x)
-    log $ "x: " <> show x <> "\t\ty: " <> show y
-
   let minView = Bp 0.0
       maxView = Bp w
       v :: View
-      v = { min: minView, max: maxView, cWidth: w, cHeight: h }
+      v = { min: minView, max: maxView, scale: BpPerPixel 1.0 }
       f :: View -> Fetch _
       f = fetchWithView 100
 
   vRef <- newRef { cur: v, prev: v }
+
+  let events = canvasEvents canvas
+
+  _ <- subscribe events.drag \{x,y} -> do
+    scrollCanvas backCanvas canvas (-x)
+    log $ "x: " <> show x <> "\t\ty: " <> show y
+
+  _ <- subscribe events.mouseup \{x,y} -> do
+    v' <- readRef vRef
+    writeRef vRef (v' { prev = v'.cur })
+    fetchToCanvas f v'.cur ctx
+
 
 
   setButtonEvent "scrollLeft" do
