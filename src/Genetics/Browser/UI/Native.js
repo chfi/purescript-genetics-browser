@@ -1,22 +1,8 @@
 "use strict";
 
-exports.animationFrameLoop = function(cb) {
+exports.clearCanvas = function(canvas) {
     return function() {
-        var step = function() {
-            cb();
-            window.requestAnimationFrame(step)
-        };
-        window.requestAnimationFrame(step);
-    };
-};
-
-exports.clearCanvas = function(w) {
-    return function(h) {
-        return function(ctx) {
-            return function() {
-                ctx.clearRect(0, 0, w, h);
-            };
-        };
+        canvas.width = canvas.width;
     };
 };
 
@@ -118,3 +104,4 @@ exports.canvasDragImpl = function(canvas) {
     };
 };
 
+// exports.viewChanged = function
