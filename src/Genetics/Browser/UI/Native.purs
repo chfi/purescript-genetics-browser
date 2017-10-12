@@ -13,9 +13,12 @@ import DOM.HTML.Types (HTMLButtonElement, HTMLCanvasElement, HTMLElement)
 import Data.Array (range, zip, zipWith, (..))
 import Data.Int (round, toNumber)
 import Data.Maybe (fromJust)
-import Data.Newtype (unwrap)
+import Data.Newtype (unwrap, wrap)
 import Data.Traversable (sequence, traverse, traverse_)
 import Data.Tuple (Tuple(..))
+import FRP.Behavior (Behavior, behavior, step)
+import FRP.Behavior as FRP
+import FRP.Event (Event, subscribe)
 import Genetics.Browser.Feature (Feature(..))
 import Genetics.Browser.Glyph (Glyph, line, path, stroke)
 import Genetics.Browser.GlyphF.Canvas (renderGlyph)
@@ -25,7 +28,8 @@ import Partial.Unsafe (unsafePartial)
 import Unsafe.Coerce (unsafeCoerce)
 
 
-
+type Point = { x :: Number
+             , y :: Number } 
 
 type Fetch eff = Eff eff (Array (Feature Bp Number))
 
@@ -151,10 +155,9 @@ foreign import newCanvas :: forall eff.
                             { w :: Number, h :: Number }
                          -> Eff eff CanvasElement
 
-foreign import canvasOnDrag :: forall eff.
-                               ({ x :: Number, y :: Number} -> Eff eff Unit)
-                            -> CanvasElement
-                            -> Eff eff Unit
+
+foreign import canvasDrag :: CanvasElement -> Event Point
+
 
 
 main :: Eff _ Unit
@@ -172,7 +175,9 @@ main = do
 
   backCanvas <- newCanvas {w,h}
 
-  log $ unsafeCoerce offset
+  _ <- subscribe (canvasDrag canvas) \{x,y} -> do
+    scrollCanvas backCanvas canvas (-x)
+    log $ "x: " <> show x <> "\t\ty: " <> show y
 
   let minView = Bp 0.0
       maxView = Bp w
@@ -183,7 +188,6 @@ main = do
 
   vRef <- newRef { cur: v, prev: v }
 
-  canvasOnDrag (\ {x,y} -> scrollCanvas backCanvas canvas x ) canvas
 
   setButtonEvent "scrollLeft" do
     scrollCanvas backCanvas canvas (-100.0)

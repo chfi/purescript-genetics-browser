@@ -32,7 +32,8 @@
     "purescript-aff-promise": "^0.7.0",
     "purescript-ipfs-api": "^0.0.2",
     "purescript-errors": "^3.0.0",
-    "purescript-filterable": "^2.4.1"
+    "purescript-filterable": "^2.4.1",
+    "purescript-behaviors": "^6.0.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0",
