@@ -104,7 +104,7 @@ newtype BpPerPixel = BpPerPixel Number
 derive instance newtypeBpPerPixel :: Newtype BpPerPixel _
 
 bpToPixels :: BpPerPixel -> Bp -> Number
-bpToPixels (BpPerPixel s) (Bp p) = p * s
+bpToPixels (BpPerPixel s) (Bp p) = p / s
 
 pixelsToBp :: BpPerPixel -> Number -> Bp
-pixelsToBp (BpPerPixel s) p = Bp (p / s)
+pixelsToBp (BpPerPixel s) p = Bp $ p * s

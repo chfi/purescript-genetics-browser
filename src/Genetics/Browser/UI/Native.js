@@ -80,11 +80,13 @@ exports.canvasEvent = function(type) {
 exports.canvasDragImpl = function(canvas) {
     return function(sub) {
         var cb = function(e) {
+            var startX = e.clientX;
+            var startY = e.clientY;
             var lastX = e.clientX;
             var lastY = e.clientY;
 
             var f = function(e2) {
-                sub({x: lastX - e2.clientX, y: lastY - e2.clientY});
+                sub({during: {x: lastX - e2.clientX, y: lastY - e2.clientY}});
                 lastX = e2.clientX;
                 lastY = e2.clientY;
             };
@@ -93,7 +95,7 @@ exports.canvasDragImpl = function(canvas) {
 
             document.addEventListener('mouseup', function(e2) {
                 document.removeEventListener('mousemove', f);
-                sub(null);
+                sub({total: {x: e2.clientX-startX, y: e2.clientY-startY}});
             }, { once: true });
         };
 
