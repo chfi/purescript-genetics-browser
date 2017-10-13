@@ -3,8 +3,11 @@ module Genetics.Browser.UI.Native where
 import Prelude
 
 import Control.Alt ((<|>))
+import Control.Monad.Aff (Aff, launchAff)
 import Control.Monad.Eff (Eff)
+import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Random (randomRange)
+import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
 import DOM.HTML.Types (HTMLElement)
 import Data.Array ((..))
 import Data.Filterable (filter, filterMap)
@@ -28,11 +31,11 @@ import Unsafe.Coerce (unsafeCoerce)
 type Point = { x :: Number
              , y :: Number }
 
-type Fetch eff = Eff eff (Array (Feature Bp Number))
+type Fetch eff = Aff eff (Array (Feature Bp Number))
 
 
-genF :: String -> Bp -> Bp -> Eff _ (Feature Bp Number)
-genF chr' min max = do
+genF :: String -> Bp -> Bp -> Aff _ (Feature Bp Number)
+genF chr' min max = liftEff do
   let chr = Chr chr'
   score <- randomRange 5.0 10.0
   pure $ Feature chr min max score
@@ -86,11 +89,11 @@ fetchWithView :: Int -> View -> Fetch _
 fetchWithView n v = randomFetch n (Chr "chr11") (unwrap v.min) (unwrap v.max)
 
 
-fetchToCanvas :: (View -> Fetch _) -> View -> Context2D -> Eff _ Unit
+fetchToCanvas :: (View -> Fetch _) -> View -> Context2D -> Aff _ Unit
 fetchToCanvas f v ctx = do
   features <- f v
   let gs = traverse_ glyphify features
-  renderGlyph ctx gs
+  liftEff $ renderGlyph ctx gs
 
 
 foreign import getScreenSize :: forall eff. Eff eff { w :: Number, h :: Number }
@@ -173,14 +176,14 @@ btnScroll x = f' (-x) <$> buttonEvent "scrollLeft" <|>
 -- TODO: set just one side of the view?
 
 
-main :: Eff _ Unit
-main = do
-  canvas <- unsafePartial $ fromJust <$> getCanvasElementById "canvas"
-  ctx <- getContext2D canvas
+browser :: Aff _ Unit
+browser = do
+  canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
+  ctx <- liftEff $ getContext2D canvas
 
-  {w,h} <- getScreenSize
-  _ <- setCanvasWidth (w-2.0) canvas
-  backCanvas <- newCanvas {w,h}
+  {w,h} <- liftEff $ getScreenSize
+  _ <- liftEff $ setCanvasWidth (w-2.0) canvas
+  backCanvas <- liftEff $ newCanvas {w,h}
 
   let minView = Bp 0.0
       maxView = Bp w
@@ -197,13 +200,16 @@ main = do
                     (map ScrollPixels <<< horDragEv) cDrag
       viewB = viewBehavior updateViews v
 
-  _ <- FRP.subscribe cDrag $ case _ of
+  _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe cDrag $ case _ of
     Nothing -> pure unit
     Just {x,y}  -> scrollCanvas backCanvas canvas {x: -x, y: 0.0}
 
-  _ <- FRP.subscribe viewB \v' -> do
+  _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
     clearCanvas canvas
-    fetchToCanvas f v' ctx
+    launchAff $ fetchToCanvas f v' ctx
 
   -- render first frame
   fetchToCanvas f v ctx
+
+
+main = launchAff browser
