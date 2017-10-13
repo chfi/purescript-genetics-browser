@@ -20,7 +20,7 @@ import Data.Int (toNumber)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (Maybe, Maybe(Just, Nothing), fromJust, isNothing)
-import Data.Newtype (unwrap)
+import Data.Newtype (unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(..))
@@ -204,6 +204,13 @@ btnScroll x = f' (-x) <$> buttonEvent "scrollLeft" <|>
               f'   x  <$> buttonEvent "scrollRight"
   where f' = const <<< ScrollBp
 
+btnZoom :: (BpPerPixel -> BpPerPixel)
+        -> (BpPerPixel -> BpPerPixel)
+        -> Event UpdateView
+btnZoom zIn zOut = f' zOut <$> buttonEvent "zoomOut" <|>
+                   f' zIn  <$> buttonEvent "zoomIn"
+  where f' = const <<< ModScale
+
 
 -- TODO: set a range to jump the view to
 -- TODO: zoom in and out
@@ -243,7 +250,8 @@ browser = do
       -- and canvas-drag scrolls
       scroll = filterMap (map (ScrollPixels <<< _.x) <<< lefts) cDrag
       updateViews = btnScroll (Bp 500.0) <|>
-                    scroll
+                    scroll <|>
+                    btnZoom (wrap <<< (_ * 0.8) <<< unwrap) (wrap <<< (_ * 1.2) <<< unwrap)
                     -- (map ScrollPixels) cDrag
       viewB = viewBehavior updateViews v
 
