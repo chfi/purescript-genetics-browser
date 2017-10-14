@@ -16,24 +16,24 @@ import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array ((..))
 import Data.Either (Either(..))
 import Data.Filterable (filter, filterMap)
-import Data.Int (toNumber)
+import Data.Int (round, toNumber)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (Maybe, Maybe(Just, Nothing), fromJust, isNothing)
-import Data.Newtype (unwrap, wrap)
+import Data.Newtype (over, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(..))
 import FRP.Event (Event, sampleOn_)
 import FRP.Event as FRP
 import Genetics.Browser.Feature (Feature(..))
-import Genetics.Browser.Glyph (Glyph, circle, path, stroke)
+import Genetics.Browser.Glyph (Glyph, circle, fill, path, stroke)
 import Genetics.Browser.GlyphF.Canvas (renderGlyph)
 import Genetics.Browser.GlyphF.Log (showGlyph)
 import Genetics.Browser.Units (Bp(..), BpPerPixel(..), Chr(..), bpToPixels, pixelsToBp)
 import Global as Global
 import Global.Unsafe (unsafeStringify)
-import Graphics.Canvas (CanvasElement, Context2D, getCanvasElementById, getContext2D, setCanvasWidth)
+import Graphics.Canvas (CanvasElement, Context2D, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
 import Partial.Unsafe (unsafePartial)
@@ -65,42 +65,27 @@ fileFetch url view = do
     Just fs -> pure $ fs
 
 
-glyphify :: View
+glyphify :: Number
+         -> View
          -> Feature Bp Number
          -> Glyph Unit
-glyphify v (Feature chr min max score) = do
+glyphify h v (Feature chr min max score) = do
   let height = 30.0
-      color  = "red"
+      y = h - (score + height)
       x = bpToPixels v.scale (min - v.min)
-      -- x = unwrap min
-      -- midX   = min + ((max - min) / 2.0)
-  stroke color
-  circle { x: x, y: height } 3.0
-  -- path [{x: min, y: score}, {x:midX, y: score+height}, {x: max, y: score}]
-  -- path [{x: min, y: score}, {x:midX, y: score+height}, {x: max, y: score}]
+  stroke "black"
+  fill "red"
+  circle { x, y } 3.0
 
-
-visible :: View -> Bp -> Boolean
-visible v x = v.min > x && x < v.max
-
-hToScreen :: View -> Bp -> Number
-hToScreen v x = unwrap $ v.min + (offset / (v.max - v.min))
-  where offset = x - v.min
 
 
 canvasElementToHTML :: CanvasElement -> HTMLElement
 canvasElementToHTML = unsafeCoerce
 
-
-fetchWithView :: Int -> View -> Fetch _
-fetchWithView n v = randomFetch n (Chr "chr11") (unwrap v.min) (unwrap v.max)
-
-
-fetchToCanvas :: (View -> Fetch _) -> View -> Context2D -> Aff _ Unit
-fetchToCanvas f v ctx = do
+fetchToCanvas :: Number -> (View -> Fetch _) -> View -> Context2D -> Aff _ Unit
+fetchToCanvas h f v ctx = do
   features <- f v
-  let gs = traverse_ (glyphify v) features
-  -- liftEff $ log $ showGlyph gs
+  let gs = traverse_ (glyphify h v) features
   liftEff $ renderGlyph ctx gs
 
 
@@ -127,7 +112,6 @@ foreign import buttonEvent :: String
 
 foreign import canvasDragImpl :: CanvasElement -> Event { during :: Nullable Point
                                                         , total :: Nullable Point }
--- foreign import canvasDragImpl :: CanvasElement -> Event Point
 
 foreign import canvasEvent :: String -> CanvasElement -> Event Point
 
@@ -137,15 +121,6 @@ canvasDrag el = f <$> canvasDragImpl el
           Just p  -> Right p
           Nothing -> Left $ unsafePartial $ fromJust (toMaybe ev.total)
 
-  -- toMaybe <$> canvasDragImpl el
-
-
--- Given an event of dragging a canvas ending with Nothing,
--- produces an event of the total horizontal dragged distance when mouse is let go
--- horDragEv :: Event (Maybe Point) -> Event Number
--- horDragEv ev = ptSum `sampleOn_` doneEv
---   where doneEv = filter isNothing ev
---         ptSum = FRP.fold (+) (filterMap (map _.x) ev) 0.0
 
 
 type View = { min :: Bp
@@ -207,7 +182,7 @@ foreign import setViewUI :: forall eff. String -> Eff eff Unit
 -- TODO: set a range to jump the view to
 -- DONE: zoom in and out
 -- TODO: set zoom/scale
--- TODO: set just one side of the view?
+-- TODO: window/canvas resizing
 
 
 widthToView :: Number
@@ -216,6 +191,12 @@ widthToView :: Number
 widthToView w { min, max } = { min, max, scale }
   where scale = BpPerPixel $ (unwrap (max - min)) / w
 
+foreign import canvasWheelEvent :: CanvasElement -> Event Number
+
+scrollZoom :: CanvasElement -> Event UpdateView
+scrollZoom el = map (ModScale <<< f) $ canvasWheelEvent el
+  where f :: Number -> (BpPerPixel -> BpPerPixel)
+        f dY = over BpPerPixel $ (_ * (1.0 + (dY / 30.0)))
 
 
 browser :: Aff _ Unit
@@ -243,11 +224,12 @@ browser = do
       -- the alt operator <|> combines the two event streams,
       -- resulting in an event of both button-click scrolls
       -- and canvas-drag scrolls
-      scroll = filterMap (map (ScrollPixels <<< _.x) <<< lefts) cDrag
-      updateViews = btnScroll (Bp 500.0) <|>
-                    scroll <|>
-                    btnZoom (wrap <<< (_ * 0.8) <<< unwrap) (wrap <<< (_ * 1.2) <<< unwrap)
-                    -- (map ScrollPixels) cDrag
+      dragScroll = filterMap (map (ScrollPixels <<< _.x) <<< lefts) cDrag
+      updateViews = btnScroll (Bp 500.0)
+                <|> dragScroll
+                <|> btnZoom (wrap <<< (_ * 0.8) <<< unwrap)
+                            (wrap <<< (_ * 1.2) <<< unwrap)
+                <|> scrollZoom canvas
       viewB = viewBehavior updateViews v
 
 
@@ -265,11 +247,9 @@ browser = do
              <> show (round $ unwrap v'.max)
 
   -- render first frame
-  fetchToCanvas f v ctx
+  fetchToCanvas h f v ctx
+
 
 
 main :: Eff _ _
-main = launchAff do
-  x <- fileFetch "http://localhost:8080/gwas.json" (unsafeCoerce unit)
-  liftEff $ log $ unsafeStringify x
-  browser
+main = launchAff browser

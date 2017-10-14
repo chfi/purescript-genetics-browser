@@ -112,3 +112,17 @@ exports.setViewUI = function(contents) {
         el.innerHTML = contents;
     };
 };
+
+
+exports.canvasWheelEvent = function(canvas) {
+    return function(sub) {
+        var cb = function(e) {
+            sub(e.deltaY);
+        };
+
+        canvas.addEventListener("wheel", cb);
+        return function() {
+            canvas.removeEventListener("wheel", cb);
+        }
+    };
+};
