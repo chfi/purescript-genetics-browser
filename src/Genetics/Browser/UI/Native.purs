@@ -179,6 +179,17 @@ data UpdateView = ScrollBp Bp
                 | ModScale (BpPerPixel -> BpPerPixel)
                 | SetScale BpPerPixel
 
+modScale :: View
+         -> (BpPerPixel -> BpPerPixel)
+         -> View
+modScale v f = { scale, min: mid - d, max: mid + d }
+  where bpsWide = v.max - v.min
+        pixelsWide = bpToPixels v.scale bpsWide
+        mid = v.min + ((v.max - v.min) * Bp 0.5)
+        scale = f v.scale
+        bpsWide' = pixelsToBp scale pixelsWide
+        d = bpsWide' * Bp 0.5
+
 viewBehavior :: Event UpdateView
              -> View
              -> Event View
@@ -193,9 +204,9 @@ viewBehavior ev v = FRP.fold f ev v
         f (SetRange min' max') v' = v' { min = min'
                                        , max = max' }
 
-        f (ModScale g) v' = v' { scale = g v'.scale }
+        f (ModScale g) v' = modScale v' g
 
-        f (SetScale s) v' = v' { scale = s }
+        f (SetScale s) v' = modScale v' (const s)
 
 
 -- how far to scroll when clicking a button
@@ -213,11 +224,16 @@ btnZoom zIn zOut = f' zOut <$> buttonEvent "zoomOut" <|>
 
 
 -- TODO: set a range to jump the view to
--- TODO: zoom in and out
+-- DONE: zoom in and out
 -- TODO: set zoom/scale
 -- TODO: set just one side of the view?
 
 
+widthToView :: Number
+            -> { min :: Bp, max :: Bp }
+            -> View
+widthToView w { min, max } = { min, max, scale }
+  where scale = BpPerPixel $ (unwrap (max - min)) / w
 
 
 
@@ -226,18 +242,16 @@ browser = do
   canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
   ctx <- liftEff $ getContext2D canvas
 
-  {w,h} <- liftEff $ getScreenSize
+  {w} <- liftEff $ getScreenSize
+  h <- liftEff $ getCanvasHeight canvas
   _ <- liftEff $ setCanvasWidth (w-2.0) canvas
   backCanvas <- liftEff $ newCanvas {w,h}
 
   let minView = Bp 200000.0
       maxView = Bp 300000.0
-      s :: BpPerPixel
-      s = BpPerPixel $ 100000.0 / w
-      v :: View
-      v = { min: minView, max: maxView, scale: s }
+      v = widthToView w { min: minView, max: maxView }
       f :: View -> Fetch _
-      f = fileFetch "http://localhost:8080/gwas.json"
+      f = fileFetch "./gwas.json"
       -- f = fetchWithView 100
 
 
