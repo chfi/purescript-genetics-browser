@@ -46,27 +46,10 @@ type Point = { x :: Number
 type Fetch eff = Aff eff (Array (Feature Bp Number))
 
 
-genF :: String -> Bp -> Bp -> Aff _ (Feature Bp Number)
-genF chr' min max = liftEff do
-  let chr = Chr chr'
-  score <- randomRange 5.0 10.0
-  pure $ Feature chr min max score
-
-randomFetch :: Int -> Chr -> Number -> Number -> Fetch _
-randomFetch n chr min max = do
-  let d = (max - min) / toNumber n
-      bins = toNumber <$> 0 .. n
-      rs = map (\x -> Tuple (x*d) (x*d+d)) bins
-
-  traverse (\ (Tuple a b) -> genF "chr11" (Bp a) (Bp b)) rs
-
-
 fileFetch :: String
           -> View
-          -- -> Aff _ Json
           -> Fetch _
 fileFetch url view = do
-
   json <- _.response <$> Affjax.get url
 
   let f :: Json -> Maybe (Feature Bp Number)
@@ -74,13 +57,10 @@ fileFetch url view = do
             obj <- j ^? _Object
             min <- Bp <$> obj ^? ix "min" <<< _Number
             max <- Bp <$> obj ^? ix "max" <<< _Number
-        -- TODO this might get fucked up due to exponential notation
             score <- Global.readFloat <$> obj ^? ix "pValue" <<< _String
-            pure $ Feature (Chr "chr11") min max ((-5.0) * (Math.log score / Math.log 10.0))
+            pure $ Feature (Chr "chr11") min max ((-2.0) * (Math.log score / Math.log 10.0))
 
-  -- pure json
   case traverse f =<< json ^? _Array of
-    -- TODO throw error on Nothing
     Nothing -> throwError $ error "Failed to parse JSON features"
     Just fs -> pure $ fs
 
@@ -222,6 +202,7 @@ btnZoom zIn zOut = f' zOut <$> buttonEvent "zoomOut" <|>
                    f' zIn  <$> buttonEvent "zoomIn"
   where f' = const <<< ModScale
 
+foreign import setViewUI :: forall eff. String -> Eff eff Unit
 
 -- TODO: set a range to jump the view to
 -- DONE: zoom in and out
@@ -275,8 +256,13 @@ browser = do
     Right {x,y} -> scrollCanvas backCanvas canvas {x: -x, y: 0.0}
 
   _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
+    -- fetch & draw
     clearCanvas canvas
-    launchAff $ fetchToCanvas f v' ctx
+    _ <- launchAff $ fetchToCanvas f v' ctx
+    -- update other UI elements
+    setViewUI $ "View range: "
+             <> show (round $ unwrap v'.min) <> " - "
+             <> show (round $ unwrap v'.max)
 
   -- render first frame
   fetchToCanvas f v ctx

@@ -70,7 +70,7 @@ exports.canvasEvent = function(type) {
 
             canvas.addEventListener(type, cb);
             return function() {
-                removeEventListener(type, cb);
+                canvas.removeEventListener(type, cb);
             }
         };
     };
@@ -106,4 +106,9 @@ exports.canvasDragImpl = function(canvas) {
     };
 };
 
-// exports.viewChanged = function
+exports.setViewUI = function(contents) {
+    return function() {
+        var el = document.getElementById("view");
+        el.innerHTML = contents;
+    };
+};
