@@ -5,13 +5,15 @@ import Prelude
 import Control.Alt ((<|>))
 import Control.Monad.Aff (Aff, launchAff)
 import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Class (class MonadEff, liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Eff.Random (randomRange)
 import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Free (foldFree)
+import Control.Monad.State.Trans (StateT(..), evalStateT, execStateT, put)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Writer (Writer, execWriter, tell)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
@@ -92,6 +94,19 @@ fetchToCanvas h f v ctx = do
   liftEff $ renderGlyph ctx gs
 
 
+type TrackState = Array (Tuple (Feature Bp Number) (Glyph Unit))
+
+fetchToCanvas' :: Number
+               -> (View -> Fetch _)
+               -> View
+               -> Context2D
+               -> StateT TrackState (Aff _) Unit
+fetchToCanvas' h f v ctx = do
+  features <- liftAff $ f v
+  let gs :: TrackState
+      gs = map (\f -> Tuple f (glyphify h v f)) features
+  put gs
+  liftEff $ renderGlyph ctx $ traverse_ snd gs
 foreign import getScreenSize :: forall eff. Eff eff { w :: Number, h :: Number }
 
 -- 1st element is a backbuffer, 2nd the one shown on screen
