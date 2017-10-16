@@ -3,7 +3,8 @@ module Genetics.Browser.UI.Native where
 import Prelude
 
 import Control.Alt ((<|>))
-import Control.Monad.Aff (Aff, launchAff)
+import Control.Monad.Aff (Aff, delay, forkAff, launchAff)
+import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff, liftEff)
 import Control.Monad.Eff.Console (log)
@@ -29,10 +30,15 @@ import Data.Newtype (class Newtype, over, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(..))
+import Data.Time.Duration (Milliseconds(..))
+import Data.Traversable (sequence_, traverse, traverse_)
+import Data.Tuple (Tuple(..), snd)
+import FRP (FRP)
 import FRP.Event (Event, sampleOn_)
 import FRP.Event as FRP
 import Genetics.Browser.Feature (Feature(..))
 import Genetics.Browser.Glyph (Glyph, circle, fill, path, stroke)
+import Genetics.Browser.GlyphF (GlyphF(..))
 import Genetics.Browser.GlyphF.Canvas (renderGlyph)
 import Genetics.Browser.GlyphF.Log (showGlyph)
 import Genetics.Browser.Units (Bp(..), BpPerPixel(..), Chr(..), bpToPixels, pixelsToBp)
@@ -254,6 +260,11 @@ clickGlyphs :: forall f a.
             -> f (Glyph a)
 clickGlyphs gs p = filter pred gs
   where pred = \g -> unwrap (glyphBounds g) p
+foreign import subscribeM :: forall m eff a r.
+                             MonadEff (frp :: FRP | eff) m
+                          => Event a
+                          -> (a -> m r)
+                          -> m (Eff (frp :: FRP | eff) Unit)
 browser :: Aff _ Unit
 browser = do
   canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
@@ -288,11 +299,13 @@ browser = do
       viewB = viewBehavior updateViews v
 
 
-  _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe cDrag $ case _ of
+  -- x <- liftEff $ unsafeCoerceEff $ FRP.subscribe cDrag $ case _ of
+  x <- liftEff $ unsafeCoerceEff $ subscribeM cDrag $ case _ of
     Left _      -> pure unit
     Right {x,y} -> scrollCanvas backCanvas canvas {x: -x, y: 0.0}
 
-  _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
+  -- _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
+  _ <- liftEff $ unsafeCoerceEff $ subscribeM viewB \v' -> do
     -- fetch & draw
     clearCanvas canvas
     _ <- launchAff $ fetchToCanvas h f v' ctx
@@ -300,6 +313,13 @@ browser = do
     setViewUI $ "View range: "
              <> show (round $ unwrap v'.min) <> " - "
              <> show (round $ unwrap v'.max)
+
+  _ <- forkAff do
+    liftEff $ log "started kill thread"
+    delay $ (Milliseconds 3000.0)
+    liftEff $ log "Killing canvas drag subscriber!"
+    liftEff $ unsafeCoerceEff x
+    liftEff $ log "Killed canvas drag subscriber!"
 
   -- render first frame
   fetchToCanvas h f v ctx

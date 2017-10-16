@@ -126,3 +126,15 @@ exports.canvasWheelEvent = function(canvas) {
         }
     };
 };
+
+exports.subscribeM = function(dict) {
+    return function(e) {
+        return function(f) {
+            return function() {
+                return e(function(a) {
+                    dict.liftEff(f)(a)();
+                });
+            };
+        };
+    };
+};
