@@ -11,16 +11,19 @@ import Control.Monad.Eff.Exception (error)
 import Control.Monad.Eff.Random (randomRange)
 import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
 import Control.Monad.Error.Class (throwError)
+import Control.Monad.Free (foldFree)
+import Control.Monad.Writer (Writer, execWriter, tell)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array ((..))
 import Data.Either (Either(..))
-import Data.Filterable (filter, filterMap)
+import Data.Filterable (class Filterable, filter, filterMap)
 import Data.Int (round, toNumber)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.Maybe (Maybe, Maybe(Just, Nothing), fromJust, isNothing)
-import Data.Newtype (over, unwrap, wrap)
+import Data.Monoid (class Monoid)
+import Data.Newtype (class Newtype, over, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(..))
@@ -199,6 +202,43 @@ scrollZoom el = map (ModScale <<< f) $ canvasWheelEvent el
         f dY = over BpPerPixel $ (_ * (1.0 + (dY / 30.0)))
 
 
+newtype GlyphBounds = GlyphBounds (Point -> Boolean)
+
+derive instance newtypeGlyphBounds :: Newtype GlyphBounds _
+
+instance semigroupGlyphBounds :: Semigroup GlyphBounds where
+  append (GlyphBounds a) (GlyphBounds b) = GlyphBounds (a || b)
+
+instance monoidGlyphBounds :: Monoid GlyphBounds where
+  mempty = GlyphBounds $ const false
+
+glyphBoundsNat :: GlyphF ~> Writer GlyphBounds
+glyphBoundsNat (Circle p r a) = do
+  tell $ GlyphBounds \p' -> let x' = p'.x - p.x
+                                y' = p'.y - p.y
+                            in Math.sqrt ((x' * x') + (y' * y')) < r
+  pure a
+glyphBoundsNat (Line _ _ a) = pure a
+glyphBoundsNat (Rect p1 p2 a) = do
+  tell $ GlyphBounds \p' -> (p'.x > p1.x && p'.x < p2.x) &&
+                            (p'.y > p1.y && p'.y < p2.y)
+  pure a
+glyphBoundsNat (Stroke _ a) = pure a
+glyphBoundsNat (Fill _ a) = pure a
+glyphBoundsNat (Path _ a) = pure a
+
+
+glyphBounds :: forall a. Glyph a -> GlyphBounds
+glyphBounds = execWriter <<< foldFree glyphBoundsNat
+
+
+clickGlyphs :: forall f a.
+               Filterable f
+            => f (Glyph a)
+            -> Point
+            -> f (Glyph a)
+clickGlyphs gs p = filter pred gs
+  where pred = \g -> unwrap (glyphBounds g) p
 browser :: Aff _ Unit
 browser = do
   canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
@@ -240,7 +280,7 @@ browser = do
   _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
     -- fetch & draw
     clearCanvas canvas
-    _ <- launchAff $ fetchToCanvas f v' ctx
+    _ <- launchAff $ fetchToCanvas h f v' ctx
     -- update other UI elements
     setViewUI $ "View range: "
              <> show (round $ unwrap v'.min) <> " - "
