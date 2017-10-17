@@ -92,6 +92,7 @@ instance hCoordMBp :: HCoordinate MBp where
 newtype Chr = Chr String
 derive instance newtypeChr :: Newtype Chr _
 derive newtype instance eqChr :: Eq Chr
+derive newtype instance ordChr :: Ord Chr
 derive newtype instance encodeChr :: Encode Chr
 derive newtype instance decodeChr :: Decode Chr
 derive newtype instance showChr :: Show Chr
