@@ -4,6 +4,7 @@ import Prelude
 
 import Control.Alt ((<|>))
 import Control.Monad.Aff (Aff, delay, forkAff, launchAff)
+import Control.Monad.Aff.AVar (makeVar, putVar, takeVar)
 import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff, liftEff)
@@ -13,6 +14,7 @@ import Control.Monad.Eff.Random (randomRange)
 import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Free (foldFree)
+import Control.Monad.Rec.Class (forever)
 import Control.Monad.State.Trans (StateT(..), evalStateT, execStateT, put)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Writer (Writer, execWriter, tell)
@@ -28,8 +30,6 @@ import Data.Maybe (Maybe, Maybe(Just, Nothing), fromJust, isNothing)
 import Data.Monoid (class Monoid)
 import Data.Newtype (class Newtype, over, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
-import Data.Traversable (traverse, traverse_)
-import Data.Tuple (Tuple(..))
 import Data.Time.Duration (Milliseconds(..))
 import Data.Traversable (sequence_, traverse, traverse_)
 import Data.Tuple (Tuple(..), snd)
@@ -81,13 +81,12 @@ glyphify :: Number
          -> Feature Bp Number
          -> Glyph Unit
 glyphify h v (Feature chr min max score) = do
-  let height = 30.0
+  let height = 10.0
       y = h - (score + height)
       x = bpToPixels v.scale (min - v.min)
   stroke "black"
   fill "red"
   circle { x, y } 3.0
-
 
 
 canvasElementToHTML :: CanvasElement -> HTMLElement
@@ -99,20 +98,15 @@ fetchToCanvas h f v ctx = do
   let gs = traverse_ (glyphify h v) features
   liftEff $ renderGlyph ctx gs
 
+renderFeatures :: Number -> Array (Feature Bp Number) -> View -> Context2D -> Eff _ Unit
+renderFeatures h fs v ctx = do
+  let gs = traverse_ (glyphify h v) fs
+  renderGlyph ctx gs
 
-type TrackState = Array (Tuple (Feature Bp Number) (Glyph Unit))
 
-fetchToCanvas' :: Number
-               -> (View -> Fetch _)
-               -> View
-               -> Context2D
-               -> StateT TrackState (Aff _) Unit
-fetchToCanvas' h f v ctx = do
-  features <- liftAff $ f v
-  let gs :: TrackState
-      gs = map (\f -> Tuple f (glyphify h v f)) features
-  put gs
-  liftEff $ renderGlyph ctx $ traverse_ snd gs
+
+
+
 foreign import getScreenSize :: forall eff. Eff eff { w :: Number, h :: Number }
 
 -- 1st element is a backbuffer, 2nd the one shown on screen
@@ -270,17 +264,21 @@ browser = do
   canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
   ctx <- liftEff $ getContext2D canvas
 
-  {w} <- liftEff $ getScreenSize
-  h <- liftEff $ getCanvasHeight canvas
-  _ <- liftEff $ setCanvasWidth (w-2.0) canvas
+  {w,h} <- liftEff do
+    {w} <- getScreenSize
+    h <- getCanvasHeight canvas
+    _ <- setCanvasWidth (w-2.0) canvas
+    pure {w, h}
+
   backCanvas <- liftEff $ newCanvas {w,h}
+
+  browserState <- makeVar
 
   let minView = Bp 200000.0
       maxView = Bp 300000.0
       v = widthToView w { min: minView, max: maxView }
       f :: View -> Fetch _
       f = fileFetch "./gwas.json"
-      -- f = fetchWithView 100
 
 
   let cDrag = canvasDrag canvas
@@ -299,27 +297,29 @@ browser = do
       viewB = viewBehavior updateViews v
 
 
-  -- x <- liftEff $ unsafeCoerceEff $ FRP.subscribe cDrag $ case _ of
-  x <- liftEff $ unsafeCoerceEff $ subscribeM cDrag $ case _ of
+  _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe cDrag $ case _ of
     Left _      -> pure unit
     Right {x,y} -> scrollCanvas backCanvas canvas {x: -x, y: 0.0}
 
-  -- _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
-  _ <- liftEff $ unsafeCoerceEff $ subscribeM viewB \v' -> do
-    -- fetch & draw
-    clearCanvas canvas
-    _ <- launchAff $ fetchToCanvas h f v' ctx
-    -- update other UI elements
+
+  _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
+    -- fetch
+    _ <- launchAff do
+      fs <- f v'
+      putVar browserState { features: fs
+                          , view: v' }
+
     setViewUI $ "View range: "
              <> show (round $ unwrap v'.min) <> " - "
              <> show (round $ unwrap v'.max)
 
-  _ <- forkAff do
-    liftEff $ log "started kill thread"
-    delay $ (Milliseconds 3000.0)
-    liftEff $ log "Killing canvas drag subscriber!"
-    liftEff $ unsafeCoerceEff x
-    liftEff $ log "Killed canvas drag subscriber!"
+  -- thread rendering view
+  _ <- forkAff $ forever do
+    -- render when the view & features have been updated
+    state <- takeVar browserState
+    liftEff do
+      clearCanvas canvas
+      renderFeatures h state.features state.view ctx
 
   -- render first frame
   fetchToCanvas h f v ctx
