@@ -4,7 +4,7 @@ import Prelude
 
 import Control.Alt ((<|>))
 import Control.Monad.Aff (Aff, delay, forkAff, launchAff)
-import Control.Monad.Aff.AVar (makeVar, putVar, takeVar)
+import Control.Monad.Aff.AVar (makeVar, peekVar, putVar, takeVar, tryPeekVar)
 import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff, liftEff)
@@ -22,7 +22,9 @@ import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array ((..))
 import Data.Either (Either(..))
+import Data.Eq (class Eq1, eq1)
 import Data.Filterable (class Filterable, filter, filterMap)
+import Data.Identity (Identity(..))
 import Data.Int (round, toNumber)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
@@ -98,12 +100,12 @@ fetchToCanvas h f v ctx = do
   let gs = traverse_ (glyphify h v) features
   liftEff $ renderGlyph ctx gs
 
-renderFeatures :: Number -> Array (Feature Bp Number) -> View -> Context2D -> Eff _ Unit
-renderFeatures h fs v ctx = do
-  let gs = traverse_ (glyphify h v) fs
-  renderGlyph ctx gs
-
-
+glyphifyFeatures :: Number
+                 -> Array (Feature Bp Number)
+                 -> View
+                 -> (Array (Tuple (Feature Bp Number) (Glyph Unit)))
+glyphifyFeatures h fs v = gs
+  where gs = map (\f -> Tuple f (glyphify h v f)) fs
 
 
 
@@ -247,18 +249,28 @@ glyphBounds :: forall a. Glyph a -> GlyphBounds
 glyphBounds = execWriter <<< foldFree glyphBoundsNat
 
 
+-- Filters a collection of glyphs annotated with some functor,
+-- returning glyphs that cover the given point on the canvas
+clickAnnGlyphs :: forall f g a.
+                  Filterable f
+               => Functor g
+               => Eq1 g
+               => f (g (Glyph a))
+               -> Point
+               -> f (g (Glyph a))
+clickAnnGlyphs gs p =
+    filter (\x -> map pred x `eq1` map (const true) x) gs
+  where pred = \g -> unwrap (glyphBounds g) p
+
+-- For collections of unannotated glyphs
 clickGlyphs :: forall f a.
                Filterable f
             => f (Glyph a)
             -> Point
             -> f (Glyph a)
-clickGlyphs gs p = filter pred gs
-  where pred = \g -> unwrap (glyphBounds g) p
-foreign import subscribeM :: forall m eff a r.
-                             MonadEff (frp :: FRP | eff) m
-                          => Event a
-                          -> (a -> m r)
-                          -> m (Eff (frp :: FRP | eff) Unit)
+clickGlyphs fs p = unwrap $ clickAnnGlyphs (Identity fs) p
+
+
 browser :: Aff _ Unit
 browser = do
   canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
@@ -305,21 +317,39 @@ browser = do
   _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
     -- fetch
     _ <- launchAff do
-      fs <- f v'
-      putVar browserState { features: fs
+      fgs <- (\f' -> glyphifyFeatures h f' v') <$> f v'
+      putVar browserState { featsAndGlyphs: fgs
                           , view: v' }
+      liftEff do
+        clearCanvas canvas
+        traverse_ (renderGlyph ctx <<< snd) fgs
 
     setViewUI $ "View range: "
              <> show (round $ unwrap v'.min) <> " - "
              <> show (round $ unwrap v'.max)
 
   -- thread rendering view
-  _ <- forkAff $ forever do
+  -- _ <- forkAff $ forever do
     -- render when the view & features have been updated
-    state <- takeVar browserState
-    liftEff do
-      clearCanvas canvas
-      renderFeatures h state.features state.view ctx
+    -- state <- peekVar browserState
+    -- liftEff do
+    --   clearCanvas canvas
+    --   traverse_ (renderGlyph ctx <<< snd) state.featsAndGlyphs
+      -- renderFeatures h state.glyphs state.view ctx
+
+
+  _ <- liftEff $ unsafeCoerceEff $
+       FRP.subscribe (canvasEvent "click" canvas) \p -> launchAff do
+         state <- tryPeekVar browserState
+         liftEff $ log $ "clicked: (" <> show p.x <> ", " <> show p.y <> ")"
+         case state of
+           Nothing -> liftEff $ log "no state!"
+           Just s' -> do
+             liftEff $ log "state!"
+             let gs' :: _
+                 gs' = clickAnnGlyphs s'.featsAndGlyphs p
+
+             traverse_ (liftEff <<< log <<< showGlyph <<< snd) gs'
 
   -- render first frame
   fetchToCanvas h f v ctx
