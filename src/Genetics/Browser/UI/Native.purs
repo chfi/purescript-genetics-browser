@@ -20,9 +20,10 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Writer (Writer, execWriter, tell)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
-import Data.Array ((..))
+import Data.Array (zip, (..))
 import Data.Either (Either(..))
 import Data.Filterable (class Filterable, filter, filterMap)
+import Data.Foldable (class Foldable)
 import Data.Identity (Identity(..))
 import Data.Int (round, toNumber)
 import Data.Lens ((^?))
@@ -45,7 +46,7 @@ import Genetics.Browser.GlyphF.Log (showGlyph)
 import Genetics.Browser.Units (Bp(..), BpPerPixel(..), Chr(..), bpToPixels, pixelsToBp)
 import Global as Global
 import Global.Unsafe (unsafeStringify)
-import Graphics.Canvas (CanvasElement, Context2D, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth)
+import Graphics.Canvas (CanvasElement, Context2D, TranslateTransform, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth, translate, withContext)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
 import Partial.Unsafe (unsafePartial)
@@ -77,34 +78,37 @@ fileFetch url view = do
     Just fs -> pure $ fs
 
 
-glyphify :: Number
-         -> View
+glyphify :: View
          -> Feature Bp Number
          -> Glyph Unit
-glyphify h v (Feature chr min max score) = do
-  let height = 10.0
-      y = h - (score + height)
+glyphify v (Feature chr min max score) = do
+  let y = score
       x = bpToPixels v.scale (min - v.min)
   stroke "black"
   fill "red"
   circle { x, y } 3.0
 
 
+glyphifyFeatures :: Array (Feature Bp Number)
+                 -> View
+                 -> Array (Glyph Unit)
+glyphifyFeatures fs v = gs
+  where gs = map (glyphify v) fs
+
+
+renderGlyphs :: forall f a.
+                Foldable f
+             => TranslateTransform
+             -> Context2D
+             -> f (Glyph a)
+             -> Eff _ Unit
+renderGlyphs tt ctx gs = withContext ctx do
+  _ <- translate tt ctx
+  traverse_ (renderGlyph ctx) gs
+
+
 canvasElementToHTML :: CanvasElement -> HTMLElement
 canvasElementToHTML = unsafeCoerce
-
-fetchToCanvas :: Number -> (View -> Fetch _) -> View -> Context2D -> Aff _ Unit
-fetchToCanvas h f v ctx = do
-  features <- f v
-  let gs = traverse_ (glyphify h v) features
-  liftEff $ renderGlyph ctx gs
-
-glyphifyFeatures :: Number
-                 -> Array (Feature Bp Number)
-                 -> View
-                 -> (Array (Tuple (Feature Bp Number) (Glyph Unit)))
-glyphifyFeatures h fs v = gs
-  where gs = map (\f -> Tuple f (glyphify h v f)) fs
 
 
 
@@ -270,6 +274,13 @@ clickGlyphs :: forall f a.
 clickGlyphs fs p = unwrap <$> clickAnnGlyphs (Identity <$> fs) p
 
 
+
+-- negative translateY gives us a canvas where the Y-axis increases upward
+browserTransform :: Number
+                 -> TranslateTransform
+browserTransform h = { translateX: 0.0, translateY: -h }
+
+
 browser :: Aff _ Unit
 browser = do
   canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
@@ -283,6 +294,7 @@ browser = do
 
   backCanvas <- liftEff $ newCanvas {w,h}
 
+
   browserState <- makeVar
 
   let minView = Bp 200000.0
@@ -290,6 +302,19 @@ browser = do
       v = widthToView w { min: minView, max: maxView }
       f :: View -> Fetch _
       f = fileFetch "./gwas.json"
+      renderer :: _
+      renderer = renderGlyphs (browserTransform h) ctx
+      fetch :: Aff _ _
+      fetch = do
+        fs <- f v
+        let gs = glyphifyFeatures fs v
+            annGs = zip fs gs
+
+        putVar browserState { annotatedGlyphs: annGs
+                            , view: v }
+        liftEff do
+          clearCanvas canvas
+          renderer gs
 
 
   let cDrag = canvasDrag canvas
@@ -315,13 +340,8 @@ browser = do
 
   _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
     -- fetch
-    _ <- launchAff do
-      fgs <- (\f' -> glyphifyFeatures h f' v') <$> f v'
-      putVar browserState { featsAndGlyphs: fgs
-                          , view: v' }
-      liftEff do
-        clearCanvas canvas
-        traverse_ (renderGlyph ctx <<< snd) fgs
+    _ <- launchAff fetch
+
 
     setViewUI $ "View range: "
              <> show (round $ unwrap v'.min) <> " - "
@@ -332,9 +352,7 @@ browser = do
     -- render when the view & features have been updated
     -- state <- peekVar browserState
     -- liftEff do
-    --   clearCanvas canvas
-    --   traverse_ (renderGlyph ctx <<< snd) state.featsAndGlyphs
-      -- renderFeatures h state.glyphs state.view ctx
+
 
 
   _ <- liftEff $ unsafeCoerceEff $
@@ -346,12 +364,14 @@ browser = do
            Just s' -> do
              liftEff $ log "state!"
              let gs' :: _
-                 gs' = clickAnnGlyphs s'.featsAndGlyphs p
+                 gs' = clickAnnGlyphs s'.annotatedGlyphs p
 
              traverse_ (liftEff <<< log <<< showGlyph <<< snd) gs'
 
+
   -- render first frame
-  fetchToCanvas h f v ctx
+  fetch
+
 
 
 
