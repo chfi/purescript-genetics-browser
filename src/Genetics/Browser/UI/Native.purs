@@ -22,7 +22,6 @@ import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array ((..))
 import Data.Either (Either(..))
-import Data.Eq (class Eq1, eq1)
 import Data.Filterable (class Filterable, filter, filterMap)
 import Data.Identity (Identity(..))
 import Data.Int (round, toNumber)
@@ -254,12 +253,12 @@ glyphBounds = execWriter <<< foldFree glyphBoundsNat
 clickAnnGlyphs :: forall f g a.
                   Filterable f
                => Functor g
-               => Eq1 g
+               => Eq (g Boolean)
                => f (g (Glyph a))
                -> Point
                -> f (g (Glyph a))
 clickAnnGlyphs gs p =
-    filter (\x -> map pred x `eq1` map (const true) x) gs
+    filter (\x -> map pred x == map (const true) x) gs
   where pred = \g -> unwrap (glyphBounds g) p
 
 -- For collections of unannotated glyphs
@@ -268,7 +267,7 @@ clickGlyphs :: forall f a.
             => f (Glyph a)
             -> Point
             -> f (Glyph a)
-clickGlyphs fs p = unwrap $ clickAnnGlyphs (Identity fs) p
+clickGlyphs fs p = unwrap <$> clickAnnGlyphs (Identity <$> fs) p
 
 
 browser :: Aff _ Unit
