@@ -43,7 +43,9 @@ import Genetics.Browser.Glyph (Glyph, circle, fill, path, stroke)
 import Genetics.Browser.GlyphF (GlyphF(..))
 import Genetics.Browser.GlyphF.Canvas (renderGlyph)
 import Genetics.Browser.GlyphF.Log (showGlyph)
-import Genetics.Browser.UI.Native.View (UpdateView(..), View, foldView)
+import Genetics.Browser.Types (Point)
+import Genetics.Browser.UI.Native.GlyphBounds (clickAnnGlyphs)
+import Genetics.Browser.UI.Native.View (UpdateView(..), View, browserTransform, foldView)
 import Genetics.Browser.UI.Native.View as View
 import Genetics.Browser.Units (Bp(..), BpPerPixel(..), Chr(..), bpToPixels, pixelsToBp)
 import Global as Global
@@ -54,9 +56,6 @@ import Network.HTTP.Affjax as Affjax
 import Partial.Unsafe (unsafePartial)
 import Unsafe.Coerce (unsafeCoerce)
 
-
-type Point = { x :: Number
-             , y :: Number }
 
 type Fetch eff = Aff eff (Array (Feature Bp Number))
 
@@ -80,23 +79,16 @@ fileFetch url view = do
     Just fs -> pure $ fs
 
 
-glyphify :: View
-         -> Feature Bp Number
-         -> Glyph Unit
-glyphify v (Feature chr min max score) = do
-  let y = score
-      x = bpToPixels v.scale (min - v.min)
-  stroke "black"
-  fill "red"
-  circle { x, y } 3.0
-
-
 glyphifyFeatures :: Array (Feature Bp Number)
                  -> View
                  -> Array (Glyph Unit)
-glyphifyFeatures fs v = gs
-  where gs = map (glyphify v) fs
-
+glyphifyFeatures fs v' = map (g v') fs
+  where g v (Feature chr min max score) = do
+            let y = score
+                x = bpToPixels v.scale (min - v.min)
+            stroke "black"
+            fill "red"
+            circle { x, y } 3.0
 
 renderGlyphs :: forall f a.
                 Foldable f
@@ -109,10 +101,9 @@ renderGlyphs tt ctx gs = withContext ctx do
   traverse_ (renderGlyph ctx) gs
 
 
+
 canvasElementToHTML :: CanvasElement -> HTMLElement
 canvasElementToHTML = unsafeCoerce
-
-
 
 foreign import getScreenSize :: forall eff. Eff eff { w :: Number, h :: Number }
 
@@ -147,8 +138,6 @@ canvasDrag el = f <$> canvasDragImpl el
           Nothing -> Left $ unsafePartial $ fromJust (toMaybe ev.total)
 
 
-
-
 -- how far to scroll when clicking a button
 btnScroll :: Bp -> Event UpdateView
 btnScroll x = f' (-x) <$> buttonEvent "scrollLeft" <|>
@@ -177,70 +166,6 @@ scrollZoom el = map (ModScale <<< f) $ canvasWheelEvent el
         f dY = over BpPerPixel $ (_ * (1.0 + (dY / 30.0)))
 
 
--- for a glyph to be clicked, we need to be able to map the Glyph position
--- to screen coordinates, or screen coordinates to a glyph position.
--- it's also not a GlyphPosition we're looking at -- it's more of a bounding box.
--- a good representation would probably be
--- Foldable f => f Glyph ~> (Point -> Glyph)
--- I.e. producing a function that returns the clicked glyph.
--- Each glyph also needs to carry a reference to its Feature, since all data from the Feature
--- may be of interest.
-
-newtype GlyphBounds = GlyphBounds (Point -> Boolean)
-
-derive instance newtypeGlyphBounds :: Newtype GlyphBounds _
-
-instance semigroupGlyphBounds :: Semigroup GlyphBounds where
-  append (GlyphBounds a) (GlyphBounds b) = GlyphBounds (a || b)
-
-instance monoidGlyphBounds :: Monoid GlyphBounds where
-  mempty = GlyphBounds $ const false
-
-glyphBoundsNat :: GlyphF ~> Writer GlyphBounds
-glyphBoundsNat (Circle p r a) = do
-  tell $ GlyphBounds \p' -> let x' = p'.x - p.x
-                                y' = p'.y - p.y
-                            in Math.sqrt ((x' * x') + (y' * y')) < 100.0
-  -- tell $ GlyphBounds \p' -> p.x > 0.0 && p.x < 1000.0
-  pure a
-glyphBoundsNat (Line _ _ a) = pure a
-glyphBoundsNat (Rect p1 p2 a) = do
-  tell $ GlyphBounds \p' -> (p'.x > p1.x && p'.x < p2.x) &&
-                            (p'.y > p1.y && p'.y < p2.y)
-  pure a
-glyphBoundsNat (Stroke _ a) = pure a
-glyphBoundsNat (Fill _ a) = pure a
-glyphBoundsNat (Path _ a) = pure a
-
-
-glyphBounds :: forall a. Glyph a -> GlyphBounds
-glyphBounds = execWriter <<< foldFree glyphBoundsNat
-
-
--- Filters a collection of glyphs annotated with some functor,
--- returning glyphs that cover the given point on the canvas
-clickAnnGlyphs :: forall f g a.
-                  Filterable f
-               => Functor g
-               => Eq (g Boolean)
-               => f (g (Glyph a))
-               -> Point
-               -> f (g (Glyph a))
-clickAnnGlyphs gs p =
-    filter (\x -> map pred x == map (const true) x) gs
-  where pred = \g -> unwrap (glyphBounds g) p
-
--- For collections of unannotated glyphs
-clickGlyphs :: forall f a.
-               Filterable f
-            => f (Glyph a)
-            -> Point
-            -> f (Glyph a)
-
--- negative translateY gives us a canvas where the Y-axis increases upward
-browserTransform :: Number
-                 -> TranslateTransform
-browserTransform h = { translateX: 0.0, translateY: -h }
 
 
 browser :: Aff _ Unit

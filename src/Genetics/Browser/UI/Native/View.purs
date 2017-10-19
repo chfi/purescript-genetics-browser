@@ -4,6 +4,7 @@ import Prelude
 
 import Data.Newtype (unwrap)
 import Genetics.Browser.Units (Bp(..), BpPerPixel(..), bpToPixels, pixelsToBp)
+import Graphics.Canvas (TranslateTransform)
 
 
 
@@ -17,6 +18,10 @@ fromCanvasWidth :: Number
                 -> View
 fromCanvasWidth w { min, max } = { min, max, scale }
   where scale = BpPerPixel $ (unwrap (max - min)) / w
+
+browserTransform :: Number
+                 -> TranslateTransform
+browserTransform h = { translateX: 0.0, translateY: -h }
 
 
 data UpdateView = ScrollBp Bp

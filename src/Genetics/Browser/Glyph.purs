@@ -9,6 +9,18 @@ import Genetics.Browser.GlyphF (GlyphF(..))
 import Genetics.Browser.Types (Point)
 import Prelude
 
+{-
+TODO: could we use FreeAp instead?
+instead of e.g. setting stroke & fill and keeping it in state,
+explicitly tagging circles etc. (if that's even necessary).
+
+the idea is that if we could do more introspection we could batch
+together all circles of a given color; when drawing 1000s of glyphs,
+setting a color once instead of 1000s of times makes a difference.
+
+however, it's possible that could be done with a Free monad too -- need to read more.
+-}
+
 -- | Free monad for constructing glyphs
 type Glyph = Free GlyphF
 
