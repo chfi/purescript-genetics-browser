@@ -3,53 +3,40 @@ module Genetics.Browser.UI.Native where
 import Prelude
 
 import Control.Alt ((<|>))
-import Control.Monad.Aff (Aff, delay, forkAff, launchAff)
-import Control.Monad.Aff.AVar (makeVar, peekVar, putVar, takeVar, tryPeekVar)
-import Control.Monad.Aff.Class (liftAff)
+import Control.Monad.Aff (Aff, launchAff)
+import Control.Monad.Aff.AVar (makeVar, putVar, tryPeekVar)
 import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (class MonadEff, liftEff)
+import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
-import Control.Monad.Eff.Random (randomRange)
 import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
 import Control.Monad.Error.Class (throwError)
-import Control.Monad.Free (foldFree)
-import Control.Monad.Rec.Class (forever)
-import Control.Monad.State.Trans (StateT(..), evalStateT, execStateT, put)
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Writer (Writer, execWriter, tell)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
-import Data.Array (zip, (..))
+import Data.Array (zip)
 import Data.Either (Either(..))
-import Data.Filterable (class Filterable, filter, filterMap)
+import Data.Filterable (filterMap)
 import Data.Foldable (class Foldable)
-import Data.Identity (Identity(..))
-import Data.Int (round, toNumber)
+import Data.Int (round)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
-import Data.Maybe (Maybe, Maybe(Just, Nothing), fromJust, isNothing)
-import Data.Monoid (class Monoid)
-import Data.Newtype (class Newtype, over, unwrap, wrap)
+import Data.Maybe (Maybe(Just, Nothing), fromJust)
+import Data.Newtype (over, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
-import Data.Time.Duration (Milliseconds(..))
-import Data.Traversable (sequence_, traverse, traverse_)
-import Data.Tuple (Tuple(..), snd)
-import FRP (FRP)
-import FRP.Event (Event, sampleOn_)
+import Data.Traversable (traverse, traverse_)
+import Data.Tuple (snd)
+import FRP.Event (Event)
 import FRP.Event as FRP
 import Genetics.Browser.Feature (Feature(..))
-import Genetics.Browser.Glyph (Glyph, circle, fill, path, stroke)
-import Genetics.Browser.GlyphF (GlyphF(..))
+import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
 import Genetics.Browser.GlyphF.Canvas (renderGlyph)
 import Genetics.Browser.GlyphF.Log (showGlyph)
 import Genetics.Browser.Types (Point)
 import Genetics.Browser.UI.Native.GlyphBounds (clickAnnGlyphs)
 import Genetics.Browser.UI.Native.View (UpdateView(..), View, browserTransform, foldView)
 import Genetics.Browser.UI.Native.View as View
-import Genetics.Browser.Units (Bp(..), BpPerPixel(..), Chr(..), bpToPixels, pixelsToBp)
+import Genetics.Browser.Units (Bp(Bp), BpPerPixel(BpPerPixel), Chr(Chr), bpToPixels)
 import Global as Global
-import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, Context2D, TranslateTransform, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth, translate, withContext)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
@@ -166,6 +153,10 @@ scrollZoom el = map (ModScale <<< f) $ canvasWheelEvent el
         f dY = over BpPerPixel $ (_ * (1.0 + (dY / 30.0)))
 
 
+-- TODO: fetching could (should) be done completely async,
+-- and done on subscribing to the Event View. Like now,
+-- but less clumsy -- model rendering around the fetch function,
+-- and add some caching to it
 
 
 browser :: Aff _ Unit
@@ -227,9 +218,8 @@ browser = do
 
 
   _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
-    -- fetch
-    _ <- launchAff fetch
 
+    _ <- launchAff fetch
 
     setViewUI $ "View range: "
              <> show (round $ unwrap v'.min) <> " - "
