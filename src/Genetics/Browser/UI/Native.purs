@@ -43,6 +43,8 @@ import Genetics.Browser.Glyph (Glyph, circle, fill, path, stroke)
 import Genetics.Browser.GlyphF (GlyphF(..))
 import Genetics.Browser.GlyphF.Canvas (renderGlyph)
 import Genetics.Browser.GlyphF.Log (showGlyph)
+import Genetics.Browser.UI.Native.View (UpdateView(..), View, foldView)
+import Genetics.Browser.UI.Native.View as View
 import Genetics.Browser.Units (Bp(..), BpPerPixel(..), Chr(..), bpToPixels, pixelsToBp)
 import Global as Global
 import Global.Unsafe (unsafeStringify)
@@ -146,46 +148,6 @@ canvasDrag el = f <$> canvasDragImpl el
 
 
 
-type View = { min :: Bp
-            , max :: Bp
-            , scale :: BpPerPixel
-            }
-
-data UpdateView = ScrollBp Bp
-                | ScrollPixels Number
-                | SetRange Bp Bp
-                | ModScale (BpPerPixel -> BpPerPixel)
-                | SetScale BpPerPixel
-
-modScale :: View
-         -> (BpPerPixel -> BpPerPixel)
-         -> View
-modScale v f = { scale, min: mid - d, max: mid + d }
-  where bpsWide = v.max - v.min
-        pixelsWide = bpToPixels v.scale bpsWide
-        mid = v.min + ((v.max - v.min) * Bp 0.5)
-        scale = f v.scale
-        bpsWide' = pixelsToBp scale pixelsWide
-        d = bpsWide' * Bp 0.5
-
-viewBehavior :: Event UpdateView
-             -> View
-             -> Event View
-viewBehavior ev v = FRP.fold f ev v
-  where f :: UpdateView -> View -> View
-        f (ScrollBp x) v' = v' { min = v'.min + x
-                               , max = v'.max + x }
-
-        f (ScrollPixels x) v' = v' { min = v'.min - (pixelsToBp v'.scale x)
-                                   , max = v'.max - (pixelsToBp v'.scale x) }
-
-        f (SetRange min' max') v' = v' { min = min'
-                                       , max = max' }
-
-        f (ModScale g) v' = modScale v' g
-
-        f (SetScale s) v' = modScale v' (const s)
-
 
 -- how far to scroll when clicking a button
 btnScroll :: Bp -> Event UpdateView
@@ -207,13 +169,6 @@ foreign import setViewUI :: forall eff. String -> Eff eff Unit
 -- TODO: set zoom/scale
 -- TODO: window/canvas resizing
 
-
-widthToView :: Number
-            -> { min :: Bp, max :: Bp }
-            -> View
-widthToView w { min, max } = { min, max, scale }
-  where scale = BpPerPixel $ (unwrap (max - min)) / w
-
 foreign import canvasWheelEvent :: CanvasElement -> Event Number
 
 scrollZoom :: CanvasElement -> Event UpdateView
@@ -221,6 +176,15 @@ scrollZoom el = map (ModScale <<< f) $ canvasWheelEvent el
   where f :: Number -> (BpPerPixel -> BpPerPixel)
         f dY = over BpPerPixel $ (_ * (1.0 + (dY / 30.0)))
 
+
+-- for a glyph to be clicked, we need to be able to map the Glyph position
+-- to screen coordinates, or screen coordinates to a glyph position.
+-- it's also not a GlyphPosition we're looking at -- it's more of a bounding box.
+-- a good representation would probably be
+-- Foldable f => f Glyph ~> (Point -> Glyph)
+-- I.e. producing a function that returns the clicked glyph.
+-- Each glyph also needs to carry a reference to its Feature, since all data from the Feature
+-- may be of interest.
 
 newtype GlyphBounds = GlyphBounds (Point -> Boolean)
 
@@ -236,7 +200,8 @@ glyphBoundsNat :: GlyphF ~> Writer GlyphBounds
 glyphBoundsNat (Circle p r a) = do
   tell $ GlyphBounds \p' -> let x' = p'.x - p.x
                                 y' = p'.y - p.y
-                            in Math.sqrt ((x' * x') + (y' * y')) < r
+                            in Math.sqrt ((x' * x') + (y' * y')) < 100.0
+  -- tell $ GlyphBounds \p' -> p.x > 0.0 && p.x < 1000.0
   pure a
 glyphBoundsNat (Line _ _ a) = pure a
 glyphBoundsNat (Rect p1 p2 a) = do
@@ -271,9 +236,6 @@ clickGlyphs :: forall f a.
             => f (Glyph a)
             -> Point
             -> f (Glyph a)
-clickGlyphs fs p = unwrap <$> clickAnnGlyphs (Identity <$> fs) p
-
-
 
 -- negative translateY gives us a canvas where the Y-axis increases upward
 browserTransform :: Number
@@ -299,7 +261,7 @@ browser = do
 
   let minView = Bp 200000.0
       maxView = Bp 300000.0
-      v = widthToView w { min: minView, max: maxView }
+      v = View.fromCanvasWidth w { min: minView, max: maxView }
       f :: View -> Fetch _
       f = fileFetch "./gwas.json"
       renderer :: _
@@ -324,13 +286,14 @@ browser = do
       -- the alt operator <|> combines the two event streams,
       -- resulting in an event of both button-click scrolls
       -- and canvas-drag scrolls
+
       dragScroll = filterMap (map (ScrollPixels <<< _.x) <<< lefts) cDrag
       updateViews = btnScroll (Bp 500.0)
                 <|> dragScroll
                 <|> btnZoom (wrap <<< (_ * 0.8) <<< unwrap)
                             (wrap <<< (_ * 1.2) <<< unwrap)
                 <|> scrollZoom canvas
-      viewB = viewBehavior updateViews v
+      viewB = FRP.fold foldView updateViews v
 
 
   _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe cDrag $ case _ of
