@@ -16,7 +16,7 @@ import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array (zip)
 import Data.Either (Either(..))
 import Data.Filterable (filterMap)
-import Data.Foldable (class Foldable)
+import Data.Foldable (class Foldable, length)
 import Data.Int (round)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
@@ -25,6 +25,7 @@ import Data.Newtype (over, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (snd)
+import Debug.Trace (traceShow)
 import FRP.Event (Event)
 import FRP.Event as FRP
 import Genetics.Browser.Feature (Feature(..))
@@ -37,6 +38,7 @@ import Genetics.Browser.UI.Native.View (UpdateView(..), View, browserTransform, 
 import Genetics.Browser.UI.Native.View as View
 import Genetics.Browser.Units (Bp(Bp), BpPerPixel(BpPerPixel), Chr(Chr), bpToPixels)
 import Global as Global
+import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, Context2D, TranslateTransform, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth, translate, withContext)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
@@ -58,8 +60,11 @@ fileFetch url view = do
             obj <- j ^? _Object
             min <- Bp <$> obj ^? ix "min" <<< _Number
             max <- Bp <$> obj ^? ix "max" <<< _Number
-            score <- Global.readFloat <$> obj ^? ix "pValue" <<< _String
-            pure $ Feature (Chr "chr11") min max ((-2.0) * (Math.log score / Math.log 10.0))
+            -- score <- Global.readFloat <$> obj ^? ix "pValue" <<< _String
+            score <- obj ^? ix "score" <<< _Number
+            -- pure $ Feature (Chr "chr11") min max ((-2.0) * (Math.log score / Math.log 10.0))
+            -- pure $ Feature (Chr "chr11") min max ((-2.0) * (Math.log score / Math.log 10.0))
+            pure $ Feature (Chr "chr11") min max (score * 100.0)
 
   case traverse f =<< json ^? _Array of
     Nothing -> throwError $ error "Failed to parse JSON features"
@@ -71,11 +76,40 @@ glyphifyFeatures :: Array (Feature Bp Number)
                  -> Array (Glyph Unit)
 glyphifyFeatures fs v' = map (g v') fs
   where g v (Feature chr min max score) = do
-            let y = score
+            let y = 100.0
                 x = bpToPixels v.scale (min - v.min)
+                -- z = traceShow x \_ -> unit
+                -- x = 100.0
+                -- x = 100.0
             stroke "black"
             fill "red"
             circle { x, y } 3.0
+
+-- add function (Array (Glyph Unit)) -> Context2D -> Context2D -> Eff _ Unit,
+-- where a single glyph is drawn many times by filling a backbuffer and copying it.
+-- probably won't work with GlyphF; the glyphs are in fact not the same,
+-- each one has its own position etc.
+-- can we have a way to simplify this so each track only gets one glyph?
+-- an explicit mapping from feature to pair of glyph and offset, or something like that.
+-- then we could construct a tree, with the stroke & fill at the root. woop.
+-- worth thinking about. & reading about optimizing these things
+-- basically traversing/sequence something like
+-- [Stroke "black" (Circle _ _ _), Stroke "black" (Circle _ _ _) ...]
+-- into
+-- Stroke "black" [Circle _ _ _, Circle _ _ _...]
+-- though that is fundamentally different from the idea of drawing a single glyph
+-- to a backbuffer.
+-- *that* idea makes more sense with the idea of a glyph being somehow atomic;
+-- a glyph should only describe what it looks like, in its own system -- not its
+-- height, nothing like that. hmm.
+-- the glyph would be more a function of the track than the feature.
+-- however, it shouldn't necessarily be so; a track should be able to display different
+-- glyphs depending on the feature values.
+-- Buuut they should also memoize based on feature, so if the features in a track
+-- only produce like 10 glyphs that are identical except for color, then those
+-- renderings should be optimized.
+-- need research!!!
+
 
 renderGlyphs :: forall f a.
                 Foldable f
@@ -84,6 +118,7 @@ renderGlyphs :: forall f a.
              -> f (Glyph a)
              -> Eff _ Unit
 renderGlyphs tt ctx gs = withContext ctx do
+  -- log $ show $ (length gs) :: Int
   _ <- translate tt ctx
   traverse_ (renderGlyph ctx) gs
 
@@ -158,9 +193,12 @@ scrollZoom el = map (ModScale <<< f) $ canvasWheelEvent el
 -- but less clumsy -- model rendering around the fetch function,
 -- and add some caching to it
 
+-- fetcho :: String -> Event View -> Aff _ _
+-- fetcho uri ev = launchAff do
 
-browser :: Aff _ Unit
-browser = do
+
+browser :: String -> Aff _ Unit
+browser uri = do
   canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
   ctx <- liftEff $ getContext2D canvas
 
@@ -175,18 +213,23 @@ browser = do
 
   browserState <- makeVar
 
-  let minView = Bp 200000.0
-      maxView = Bp 300000.0
+  let minView = Bp 20000.0
+      maxView = Bp 3000000.0
       v = View.fromCanvasWidth w { min: minView, max: maxView }
       f :: View -> Fetch _
-      f = fileFetch "./gwas.json"
+      f = fileFetch uri
       renderer :: _
-      renderer = renderGlyphs (browserTransform h) ctx
-      fetch :: Aff _ _
-      fetch = do
+      -- renderer = renderGlyphs (browserTransform h) ctx
+      renderer = renderGlyphs {translateX: 0.0, translateY: 0.0} ctx
+      fetch :: View -> Aff _ _
+      fetch v = do
+
+
         fs <- f v
         let gs = glyphifyFeatures fs v
             annGs = zip fs gs
+
+        liftEff $ log $ unsafeStringify gs
 
         putVar browserState { annotatedGlyphs: annGs
                             , view: v }
@@ -219,7 +262,7 @@ browser = do
 
   _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
 
-    _ <- launchAff fetch
+    _ <- launchAff $ fetch v'
 
     setViewUI $ "View range: "
              <> show (round $ unwrap v'.min) <> " - "
@@ -233,25 +276,25 @@ browser = do
 
 
 
-  _ <- liftEff $ unsafeCoerceEff $
-       FRP.subscribe (canvasEvent "click" canvas) \p -> launchAff do
-         state <- tryPeekVar browserState
-         liftEff $ log $ "clicked: (" <> show p.x <> ", " <> show p.y <> ")"
-         case state of
-           Nothing -> liftEff $ log "no state!"
-           Just s' -> do
-             liftEff $ log "state!"
-             let gs' :: _
-                 gs' = clickAnnGlyphs s'.annotatedGlyphs p
+  -- _ <- liftEff $ unsafeCoerceEff $
+  --      FRP.subscribe (canvasEvent "click" canvas) \p -> launchAff do
+  --        state <- tryPeekVar browserState
+  --        liftEff $ log $ "clicked: (" <> show p.x <> ", " <> show p.y <> ")"
+  --        case state of
+  --          Nothing -> liftEff $ log "no state!"
+  --          Just s' -> do
+  --            liftEff $ log "state!"
+  --            let gs' :: _
+  --                gs' = clickAnnGlyphs s'.annotatedGlyphs p
 
-             traverse_ (liftEff <<< log <<< showGlyph <<< snd) gs'
+  --            traverse_ (liftEff <<< log <<< showGlyph <<< snd) gs'
 
 
   -- render first frame
-  fetch
+  fetch v
 
 
 
 
 main :: Eff _ _
-main = launchAff browser
+main = launchAff $ browser "./alot.json"
