@@ -5,7 +5,7 @@ import Prelude
 import Control.Alt ((<|>))
 import Control.Monad.Aff (Aff, launchAff)
 import Control.Monad.Aff.AVar (makeVar, putVar, tryPeekVar)
-import Control.Monad.Eff (Eff)
+import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
@@ -120,7 +120,7 @@ renderGlyphs :: forall f a.
 renderGlyphs tt ctx gs = withContext ctx do
   -- log $ show $ (length gs) :: Int
   _ <- translate tt ctx
-  traverse_ (renderGlyph ctx) gs
+  foreachE (Array.fromFoldable gs) $ void <$> renderGlyph ctx
 
 
 
