@@ -41,7 +41,7 @@ import Genetics.Browser.UI.Native.View as View
 import Genetics.Browser.Units (Bp(Bp), BpPerPixel(BpPerPixel), Chr(Chr), bpToPixels)
 import Global as Global
 import Global.Unsafe (unsafeStringify)
-import Graphics.Canvas (CanvasElement, Context2D, TranslateTransform, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth, translate, withContext)
+import Graphics.Canvas (CanvasElement, Context2D, TranslateTransform, Transform, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth, transform, translate, withContext)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
 import Partial.Unsafe (unsafePartial)
@@ -124,13 +124,13 @@ filterFeatures view = map snd <<< Filterable.filter f
 
 renderGlyphs :: forall f a.
                 Foldable f
-             => TranslateTransform
+             => Transform
              -> Context2D
              -> View
              -> f (Glyph a)
              -> Eff _ Unit
 renderGlyphs tt ctx v gs = withContext ctx do
-  void $ translate tt ctx
+  void $ transform tt ctx
   foreachE (Array.fromFoldable gs) $ void <$> renderGlyph ctx
 
 
@@ -234,9 +234,8 @@ browser uri = do
   fs <- f v
 
 
-  let renderer :: _
+  let renderer :: View -> Array _ -> _
       renderer = renderGlyphs (browserTransform h) ctx
-      -- renderer = renderGlyphs {translateX: 0.0, translateY: 0.0} ctx
       fetch :: View -> Aff _ _
       fetch v = do
 
