@@ -13,10 +13,12 @@ import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
 import Control.Monad.Error.Class (throwError)
 import DOM.HTML.Types (HTMLElement)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
-import Data.Array (zip)
+import Data.Array (take, zip)
+import Data.Array as Array
 import Data.Either (Either(..))
-import Data.Filterable (filterMap)
-import Data.Foldable (class Foldable, length)
+import Data.Filterable (class Filterable, filter, filterMap)
+import Data.Filterable as Filterable
+import Data.Foldable (class Foldable, for_, length)
 import Data.Int (round)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
@@ -24,7 +26,7 @@ import Data.Maybe (Maybe(Just, Nothing), fromJust)
 import Data.Newtype (over, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Traversable (traverse, traverse_)
-import Data.Tuple (snd)
+import Data.Tuple (Tuple(..), snd)
 import Debug.Trace (traceShow)
 import FRP.Event (Event)
 import FRP.Event as FRP
@@ -52,7 +54,7 @@ type Fetch eff = Aff eff (Array (Feature Bp Number))
 fileFetch :: String
           -> View
           -> Fetch _
-fileFetch url view = do
+fileFetch url _ = do
   json <- _.response <$> Affjax.get url
 
   let f :: Json -> Maybe (Feature Bp Number)
@@ -76,7 +78,7 @@ glyphifyFeatures :: Array (Feature Bp Number)
                  -> Array (Glyph Unit)
 glyphifyFeatures fs v' = map (g v') fs
   where g v (Feature chr min max score) = do
-            let y = 100.0
+            let y = score
                 x = bpToPixels v.scale (min - v.min)
                 -- z = traceShow x \_ -> unit
                 -- x = 100.0
@@ -110,18 +112,26 @@ glyphifyFeatures fs v' = map (g v') fs
 -- renderings should be optimized.
 -- need research!!!
 
+filterFeatures :: forall f a b.
+                  Filterable f
+               => View
+               -> f (Tuple (Feature Bp b) a)
+               -> f a
+filterFeatures view = map snd <<< Filterable.filter f
+  where f :: _
+        f (Tuple (Feature _ min max _) g) = min > view.min && max < view.max
+
 
 renderGlyphs :: forall f a.
                 Foldable f
              => TranslateTransform
              -> Context2D
+             -> View
              -> f (Glyph a)
              -> Eff _ Unit
-renderGlyphs tt ctx gs = withContext ctx do
-  -- log $ show $ (length gs) :: Int
-  _ <- translate tt ctx
+renderGlyphs tt ctx v gs = withContext ctx do
+  void $ translate tt ctx
   foreachE (Array.fromFoldable gs) $ void <$> renderGlyph ctx
-
 
 
 canvasElementToHTML :: CanvasElement -> HTMLElement
@@ -235,7 +245,7 @@ browser uri = do
                             , view: v }
         liftEff do
           clearCanvas canvas
-          renderer gs
+          renderer v gs'
 
 
   let cDrag = canvasDrag canvas
