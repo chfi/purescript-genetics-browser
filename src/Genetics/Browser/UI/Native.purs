@@ -223,23 +223,26 @@ browser uri = do
 
   browserState <- makeVar
 
-  let minView = Bp 20000.0
-      maxView = Bp 3000000.0
+
+
+  let minView = Bp 0.0
+      maxView = Bp 15000000.0
       v = View.fromCanvasWidth w { min: minView, max: maxView }
       f :: View -> Fetch _
       f = fileFetch uri
-      renderer :: _
-      -- renderer = renderGlyphs (browserTransform h) ctx
-      renderer = renderGlyphs {translateX: 0.0, translateY: 0.0} ctx
+
+  fs <- f v
+
+
+  let renderer :: _
+      renderer = renderGlyphs (browserTransform h) ctx
+      -- renderer = renderGlyphs {translateX: 0.0, translateY: 0.0} ctx
       fetch :: View -> Aff _ _
       fetch v = do
 
-
-        fs <- f v
         let gs = glyphifyFeatures fs v
             annGs = zip fs gs
-
-        liftEff $ log $ unsafeStringify gs
+        let gs' = filterFeatures v annGs
 
         putVar browserState { annotatedGlyphs: annGs
                             , view: v }
@@ -273,7 +276,6 @@ browser uri = do
   _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
 
     _ <- launchAff $ fetch v'
-
     setViewUI $ "View range: "
              <> show (round $ unwrap v'.min) <> " - "
              <> show (round $ unwrap v'.max)
@@ -307,4 +309,4 @@ browser uri = do
 
 
 main :: Eff _ _
-main = launchAff $ browser "./alot.json"
+main = launchAff $ browser "./data3.json"
