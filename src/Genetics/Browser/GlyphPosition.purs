@@ -1,13 +1,16 @@
-module Genetics.Browser.GlyphPosition
-       ( GlyphPosition(..)
-       )
-       where
+module Genetics.Browser.GlyphPosition where
+       -- ( GlyphPosition(..)
+       -- )
+       -- where
 
 import Prelude
 
 import Data.Generic.Rep (class Generic)
-import Data.Monoid (class Monoid)
-import Data.Newtype (class Newtype)
+import Data.Maybe (Maybe(..))
+import Data.Monoid (class Monoid, mempty)
+import Data.Newtype (class Newtype, over, unwrap, wrap)
+import Data.Ord.Max (Max(..))
+import Data.Ord.Min (Min(..))
 import Global (infinity)
 import Math as Math
 
@@ -60,3 +63,39 @@ instance monoidGlyphPosition :: Monoid GlyphPosition where
                     , minY: infinity
                     , maxY: (-infinity)
                     }
+
+
+newtype BBox a = BBox { min :: Maybe (Min a)
+                      , max :: Maybe (Max a)
+                      , minY :: Maybe (Min a)
+                      , maxY :: Maybe (Max a)
+                      }
+
+instance functorBBox :: Functor BBox where
+  map f (BBox b) = BBox $ { min:  map (over Min f) b.min
+                          , max:  map (over Max f) b.max
+                          , minY: map (over Min f) b.minY
+                          , maxY: map (over Max f) b.maxY
+                          }
+
+instance semigroupBBox :: Ord a => Semigroup (BBox a) where
+  append (BBox b1) (BBox b2) =
+    BBox { min:  b1.min  <> b2.min
+         , max:  b1.max  <> b2.max
+         , minY: b1.minY <> b2.minY
+         , maxY: b1.maxY <> b2.maxY
+         }
+
+instance monoidBBox :: Ord a => Monoid (BBox a) where
+  mempty = BBox { min: Nothing
+                , max: Nothing
+                , minY: Nothing
+                , maxY: Nothing
+                }
+
+mkBB :: Number -> Number -> Number -> Number -> BBox Number
+mkBB min max minY maxY = BBox { min: pure $ wrap min
+                              , max: pure $ wrap max
+                              , minY: pure $ wrap min
+                              , maxY: pure $ wrap max
+                              }
