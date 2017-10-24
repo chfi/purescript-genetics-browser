@@ -26,7 +26,7 @@ import Data.Either.Nested (Either2)
 import Data.Foldable (foldMap, length, sequence_)
 import Data.Foreign (Foreign, renderForeignError)
 import Data.Functor.Contravariant ((>$<))
-import Data.Functor.Coproduct.Nested (type (<\/>))
+import Data.Functor.Coproduct.Nested (type (<\/>), Coproduct3, Coproduct2)
 import Data.Int (round)
 import Data.Lens (re, (^?))
 import Data.Lens.Index (ix)
@@ -129,12 +129,12 @@ data Query a
 data Message
   = BDInstance Biodalliance
   | CyInstance Cytoscape
-  -- | WithCy Cytoscape
 
 type ChildSlot = Either2 UIBD.Slot UICy.Slot
 
-type ChildQuery = UIBD.Query <\/> UICy.Query <\/> Const Void
+type ChildQuery = Coproduct2 UIBD.Query UICy.Query
 type Effects eff = UIBD.Effects (UICy.Effects eff)
+
 
 
 component :: ∀ eff. H.Component HH.HTML Query Unit Message (Aff (Effects eff))
@@ -153,25 +153,23 @@ component =
   render :: State -> H.ParentHTML Query ChildQuery ChildSlot (Aff (Effects eff))
   render state =
     HH.div_
-      [ HH.div_
-        [ HH.button
-          [  HE.onClick (HE.input_ (BDScroll (Bp (-1000000.0))))
-          ]
-          [ HH.text "Scroll left 1MBp" ]
-        , HH.button
-          [  HE.onClick (HE.input_ (BDScroll (Bp 1000000.0)))
-          ]
-          [ HH.text "Scroll right 1MBp" ]
-        , HH.button
-          [  HE.onClick (HE.input_ ResetCy)
-          ]
-          [ HH.text "Reset cytoscape" ]
-          -- these divs are used to control the sizes of the subcomponents without having to query the children
-        , HH.div
-            [] [HH.slot' CP.cp1 UIBD.Slot UIBD.component unit handleBDMessage]
-        , HH.div
-            [] [HH.slot' CP.cp2 UICy.Slot UICy.component unit handleCyMessage]
+      [ HH.button
+        [  HE.onClick (HE.input_ (BDScroll (Bp (-1000000.0))))
         ]
+        [ HH.text "Scroll left 1MBp" ]
+      , HH.button
+        [  HE.onClick (HE.input_ (BDScroll (Bp 1000000.0)))
+        ]
+        [ HH.text "Scroll right 1MBp" ]
+      , HH.button
+        [  HE.onClick (HE.input_ ResetCy)
+        ]
+        [ HH.text "Reset cytoscape" ]
+        -- these divs are used to control the sizes of the subcomponents without having to query the children
+      , HH.div
+          [] [HH.slot' CP.cp1 UIBD.Slot UIBD.component unit handleBDMessage]
+      , HH.div
+          [] [HH.slot' CP.cp2 UICy.Slot UICy.component unit handleCyMessage]
       ]
 
 
