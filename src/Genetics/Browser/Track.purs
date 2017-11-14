@@ -2,10 +2,13 @@ module Genetics.Browser.Track where
 
 import Prelude
 
+import Control.Monad.Eff (Eff)
+import Genetics.Browser.DataSource (DataSource)
+import Genetics.Browser.Types (Bp(..), Chr, Point)
 import Genetics.Browser.View (View, Range, Pixels)
 
 
-type Track aff eff a = { fetch :: (forall r. Range r -> Aff aff (Array a))
+type Track aff eff a = { source :: DataSource aff a
                        , render :: Array a -> Eff eff Unit
                        , getPoint :: Point -> Array a
                        , chrSize :: Chr -> Bp
@@ -13,22 +16,74 @@ type Track aff eff a = { fetch :: (forall r. Range r -> Aff aff (Array a))
 
 
 
--- type View r = { leftHand  :: { chr :: Chr, pos :: Bp }
---               , rightHand :: { chr :: Chr, pos :: Bp }
---               | r
---               }
 
-type TrackDOM r = { canvas :: CanvasElement
-                  , backCanvas :: CanvasElement
-                  | r
-                  }
+{-
+
+Have a way to "prepare" data per-chromosome for rendering.
+
+Then have a way to actually render that prepared data,
+given some extra information such as offset, height scaling, etc.
+
+
+
+Also need to map clicks backward, but that should be doable.
+
+
+
+Maybe render to an offscreen canvas and copyImage.
+Not sure that makes sense either
+-}
+
+
+newtype RenderParams =
+  RenderParams
+    (Maybe { xOffset :: Pixels
+           , yOffset :: Pixels
+           , vScale :: Pixels
+           , height :: Pixels })
+
+
+-- A Renderer maps data attached to a chromosome id to
+-- a way to render said data,
+-- when provided some extra information on where and how to render it
+type Renderer eff a = { chrId :: ChrId, features :: Array a }
+                   -> RenderParams -> Eff eff Unit
+
+
+-- Commands the renderer thread can receive
+data RenderCmds a =
+    Render (Array { chrId :: ChrId, features :: Array a})
+  | Scroll Pixels
+
+
+type RenderBackend = { canvas :: CanvasElement
+                     , backCanvas :: CanvasElement
+                     }
+
+renderer :: forall eff a.
+            RenderBackend
+         -> Renderer eff a
+         -> AVar (RenderCmds a)
+         -> Aff _ Unit
+renderer cvs r cmds = forever do
+  cmd <- takeVar cmds
+  case cmd of
+    Render fs -> do
+      let toRender :: Array (RenderParams -> Eff _ Unit)
+          toRender = map r fs
+      -- Use current (or provided?) View to derive RenderParams for each
+      pure unit
+
+    Scroll n -> do
+      pure unit
+
 
 
 fetchTrack :: forall r.
               Track _ _ a
            -> Range r
            -> Aff _ (Array a)
-fetchTrack track r = track.fetch r
+fetchTrack track r = track.source.fetch r.lHand r.rHand
 
 
 
@@ -56,8 +111,6 @@ trackEvents = viewB
 
 -- TODO it also needs to be able to receive messages and send messages
 
-              -- NOTE `chrSizes` will probably be used other places. Reader?
--- TODO use RWS or something to clean up state etc.
 runTrack :: forall a r.
             View
          -> Track _ _ a
