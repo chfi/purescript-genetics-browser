@@ -2,9 +2,14 @@ module Genetics.Browser.View where
 
 import Prelude
 
-import Data.Newtype (unwrap)
-import Genetics.Browser.Types (Point, Pos, Range)
-import Genetics.Browser.Units (Chr(..), Bp(..), BpPerPixel(..), bpToPixels, pixelsToBp)
+import Data.Array (index, (..))
+import Data.Array as Array
+import Data.Foldable (foldMap)
+import Data.Maybe (Maybe)
+import Data.Monoid.Additive (Additive(..))
+import Data.Newtype (alaF, unwrap, wrap)
+import Data.Traversable (traverse)
+import Genetics.Browser.Types (Bp(..), BpPerPixel(..), Chr, Point, Pos, Range)
 import Graphics.Canvas (TranslateTransform, Transform)
 
 
@@ -24,6 +29,31 @@ type View = { lHand :: Pos, rHand :: Pos
             , pixelsWide :: Pixels
             }
 
+-- TODO This module is probably not the best place for these functions
+chrsInRange :: forall aff a r.
+               Array Chr
+            -> Range r
+            -> Maybe (Array Chr)
+chrsInRange chrs { lHand, rHand } = do
+  lI <- Array.findIndex (\x -> x.chrId == lHand.chrId) chrs
+  rI <- Array.findIndex (\x -> x.chrId == rHand.chrId) chrs
+  traverse (index chrs) (lI .. rI)
+
+
+getRangeSize :: forall aff a r.
+                Array Chr
+             -> Range r
+             -> Maybe Bp
+getRangeSize chrs r@{ lHand, rHand } = do
+  chrs' <- chrsInRange chrs r
+  {head, tail} <- Array.uncons chrs'
+  {init, last} <- Array.unsnoc tail
+
+  let l = head.size - lHand.bp
+      mid = alaF Additive foldMap (_.size) init
+      r = rHand.bp
+  pure $ l + mid + r
+
 
 -- we can just assume we always have all the data...
 -- only special instances when that's not the case, e.g. when creating it
@@ -31,14 +61,16 @@ type View = { lHand :: Pos, rHand :: Pos
 -- newtype View =
 
 
-fromCanvasWidth :: (Chr -> Bp)
+fromCanvasWidth :: forall r.
+                   Array Chr
                 -> { lHand :: Pos, rHand :: Pos
                    , pixelsWide :: Pixels }
-                -> View
-fromCanvasWidth chrSizes v' = ?later
-  -- TODO fix this...
-  -- sum up the chr sizes in between if applicable
-  -- where scale = BpPerPixel $ (unwrap (max - min)) / w
+                -> Maybe View
+fromCanvasWidth chrs v' = do
+  totalBps <- getRangeSize chrs v'
+  let scale = wrap $ (unwrap totalBps) / v'.pixelsWide
+
+  pure $ { lHand: v'.lHand, rHand: v'.rHand, pixelsWide: v'.pixelsWide, scale: scale }
 
 
 browserTransform :: Number
@@ -71,14 +103,14 @@ data UpdateView = ScrollBp Bp
 modScale :: View
          -> (BpPerPixel -> BpPerPixel)
          -> View
-modScale v f = ?later
+modScale v f = v
   -- where bpsWide = v.max - v.min
   --       pixelsWide = bpToPixels v.scale bpsWide
   --       mid = v.min + ((v.max - v.min) * Bp 0.5)
   --       scale = f v.scale
   --       bpsWide' = pixelsToBp scale pixelsWide
   --       d = bpsWide' * Bp 0.5
-
+{-
 foldView :: UpdateView
          -> View
          -> View
@@ -94,3 +126,5 @@ foldView (SetRange l r)   v = v { min = l, max = r }
 foldView (ModScale f)     v = modScale v f
 
 foldView (SetScale s)     v = modScale v (const s)
+
+-}
