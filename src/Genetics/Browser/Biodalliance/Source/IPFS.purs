@@ -8,7 +8,7 @@ import Control.Monad.Error.Class (throwError)
 import Data.Argonaut (class DecodeJson, Json, decodeJson, jsonParser)
 import Data.Either (Either(..))
 import Data.Traversable (class Traversable, traverse)
-import Genetics.Browser.Units (Bp, Chr)
+import Genetics.Browser.Types (Bp, Chr)
 import IPFS (IPFS, IPFSEff)
 import IPFS.Files as Files
 import IPFS.Types (IPFSPath(..))

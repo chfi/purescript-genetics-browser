@@ -63,7 +63,7 @@ import Genetics.Browser.Renderer.Lineplot (LinePlotConfig)
 import Genetics.Browser.Renderer.Lineplot as QTL
 import Genetics.Browser.UI.Biodalliance as UIBD
 import Genetics.Browser.UI.Cytoscape as UICy
-import Genetics.Browser.Units (Bp(Bp), Chr(..), _Bp, _BpMBp, _Chr, _MBp, bp)
+import Genetics.Browser.Types (Bp(Bp), ChrId(..), _Bp, _BpMBp, _ChrId, _MBp, bp)
 import Global.Unsafe (unsafeStringify)
 import Halogen as H
 import Halogen.Aff as HA
@@ -122,7 +122,7 @@ data Query a
   = CreateBD (∀ eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance) a
   | PropagateMessage Message a
   | BDScroll Bp a
-  | BDJump Chr Bp Bp a
+  | BDJump ChrId Bp Bp a
   | CreateCy String a
   | ResetCy a
 
@@ -226,7 +226,7 @@ gwasRenderer h = { renderer: gwasGlyphify
                  }
 
 
-createSource :: forall eff a. (Chr -> Bp -> Bp -> Aff eff a) -> Source a
+createSource :: forall eff a. (ChrId -> Bp -> Bp -> Aff eff a) -> Source a
 createSource = Source.createSource
 
 
@@ -350,7 +350,7 @@ main fConfig = HA.runHalogenAff do
                   case cyGraphSink of
                       Left err -> liftEff $ log "No Cy.js TrackSink!"
                       Right ts -> forkTrackSink ts cy busFromBD *> pure unit
-                   
+
 
                   pure Nothing
                 _ -> pure $ Just unit

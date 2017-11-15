@@ -12,7 +12,7 @@ import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
 import Genetics.Browser.Biodalliance.Types (BD, Biodalliance, Renderer)
 import Genetics.Browser.Config.Track (BDTrackConfig)
-import Genetics.Browser.Units (class HCoordinate, Bp, Chr, bp)
+import Genetics.Browser.Types (class HCoordinate, Bp, Chr, bp)
 import Unsafe.Coerce (unsafeCoerce)
 
 

@@ -34,11 +34,10 @@ import Genetics.Browser.Feature (Feature(..))
 import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
 import Genetics.Browser.GlyphF.Canvas (renderGlyph)
 import Genetics.Browser.GlyphF.Log (showGlyph)
-import Genetics.Browser.Types (Point)
+import Genetics.Browser.Types (Bp(Bp), BpPerPixel(BpPerPixel), ChrId(..), bpToPixels, Point)
 import Genetics.Browser.UI.Native.GlyphBounds (clickAnnGlyphs)
 import Genetics.Browser.UI.Native.View (UpdateView(..), View, browserTransform, foldView)
 import Genetics.Browser.UI.Native.View as View
-import Genetics.Browser.Units (Bp(Bp), BpPerPixel(BpPerPixel), Chr(Chr), bpToPixels)
 import Global as Global
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, Context2D, TranslateTransform, Transform, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth, transform, translate, withContext)
@@ -66,7 +65,7 @@ fileFetch url _ = do
             score <- obj ^? ix "score" <<< _Number
             -- pure $ Feature (Chr "chr11") min max ((-2.0) * (Math.log score / Math.log 10.0))
             -- pure $ Feature (Chr "chr11") min max ((-2.0) * (Math.log score / Math.log 10.0))
-            pure $ Feature (Chr "chr11") min max (score * 100.0)
+            pure $ Feature (ChrId "chr11") min max (score * 100.0)
 
   case traverse f =<< json ^? _Array of
     Nothing -> throwError $ error "Failed to parse JSON features"

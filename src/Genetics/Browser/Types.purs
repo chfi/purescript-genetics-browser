@@ -113,6 +113,12 @@ _ChrId :: Iso' ChrId String
 _ChrId = _Newtype
 
 
+
+-- TODO be *really cool* and represent it as a ratio of bp and pixels
+-- i.e. just a tuple!
+-- also it doesn't mean anything on its own;
+-- or, rather, it's implicit that it only concerns a single chr at origin
+
 newtype BpPerPixel = BpPerPixel Number
 derive instance newtypeBpPerPixel :: Newtype BpPerPixel _
 

@@ -11,15 +11,15 @@ import Prelude
 
 import Data.Bifunctor (class Bifunctor, lmap)
 import Data.Foreign (Foreign)
-import Genetics.Browser.Units (class HCoordinate, Chr(..), toScreen)
+import Genetics.Browser.Types (class HCoordinate, ChrId(..), toScreen)
 
 -- c = coordinate, r = rest of feature data
-data Feature c r = Feature Chr c c r
+data Feature c r = Feature ChrId c c r
 
 derive instance eqFeature :: (Eq c, Eq r) => Eq (Feature c r)
 derive instance ordFeature :: (Ord c, Ord r) => Ord (Feature c r)
 
-feature :: ∀ c r. HCoordinate c => Chr -> c -> c -> r -> Feature c r
+feature :: ∀ c r. HCoordinate c => ChrId -> c -> c -> r -> Feature c r
 feature = Feature
 
 -- don't want to export the Feature constructor,

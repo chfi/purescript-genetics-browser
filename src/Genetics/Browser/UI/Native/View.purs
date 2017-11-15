@@ -3,7 +3,7 @@ module Genetics.Browser.UI.Native.View where
 import Prelude
 
 import Data.Newtype (unwrap)
-import Genetics.Browser.Units (Bp(..), BpPerPixel(..), bpToPixels, pixelsToBp)
+import Genetics.Browser.Types (Bp(..), BpPerPixel(..), bpToPixels, pixelsToBp)
 import Graphics.Canvas (TranslateTransform, Transform)
 
 

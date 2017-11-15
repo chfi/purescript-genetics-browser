@@ -24,7 +24,7 @@ import Genetics.Browser.Cytoscape as Cytoscape
 import Genetics.Browser.Cytoscape.Collection (filter)
 import Genetics.Browser.Cytoscape.Types (CY, Cytoscape, Element, elementJObject)
 import Genetics.Browser.Events (Location(..))
-import Genetics.Browser.Units (_BpMBp, _Chr, _MBp)
+import Genetics.Browser.Types (_BpMBp, _ChrId, _MBp)
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Properties as HP
@@ -156,7 +156,7 @@ component =
 cyParseEventLocation :: Element -> Maybe Location
 cyParseEventLocation el = do
   loc <- elementJObject el ^? ix "data" <<< _Object <<< ix "lrsLoc"
-  chr <- loc ^? _Object <<< ix "chr" <<< _String <<< re _Chr
+  chr <- loc ^? _Object <<< ix "chr" <<< _String <<< re _ChrId
            -- ridiculous.
   pos <- loc ^? _Object <<< ix "pos" <<< _Number
                   <<< re _MBp <<< re _BpMBp

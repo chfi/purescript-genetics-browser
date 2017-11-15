@@ -24,11 +24,11 @@ glyphEffN ctx (Fill c a) = do
 glyphEffN ctx (Circle p r a) = do
   _ <- C.beginPath ctx
   _ <- C.arc ctx { x: p.x
-            , y: p.y
-            , r: r
-            , start: 0.0
-            , end: 2.0 * Math.pi
-            }
+                 , y: p.y
+                 , r: r
+                 , start: 0.0
+                 , end: 2.0 * Math.pi
+                 }
   _ <- C.stroke ctx
   _ <- C.fill ctx
   pure a

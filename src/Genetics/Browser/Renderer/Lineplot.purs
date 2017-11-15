@@ -15,7 +15,7 @@ import Genetics.Browser.Biodalliance.Types (Renderer(..))
 import Genetics.Browser.Feature (Feature(..), ScreenFeature, featureToScreen)
 import Genetics.Browser.Glyph (Glyph, path, stroke)
 import Genetics.Browser.GlyphF.Interpret (writeGlyph)
-import Genetics.Browser.Units (Bp(..), Chr)
+import Genetics.Browser.Types (Bp(..), ChrId)
 import Global (readFloat)
 
 type LineData = { score :: Number }
@@ -24,7 +24,7 @@ type LineScreenFeature = ScreenFeature LineData
 
 
   -- TODO: refactor into separate module, handle both string encoded regular numbers as well as string encoded exponential numbers, _and_ regular numbers
-readLineFeature :: Chr -> Foreign -> F LineFeature
+readLineFeature :: ChrId -> Foreign -> F LineFeature
 readLineFeature chr f = do
   fMin <- Bp <$> (readProp "min" f >>= readNumber)
   fMax <- Bp <$> (readProp "max" f >>= readNumber)

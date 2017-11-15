@@ -3,13 +3,13 @@ module Genetics.Browser.Biodalliance.Types where
 
 import Control.Monad.Eff (kind Effect)
 import Data.Foreign (Foreign)
-import Genetics.Browser.Units (Chr)
+import Genetics.Browser.Types (ChrId)
 
 
 type View = { viewStart :: Number
             , scale :: Number
             , height :: Number
-            , chr :: Chr
+            , chr :: ChrId
             }
 
 

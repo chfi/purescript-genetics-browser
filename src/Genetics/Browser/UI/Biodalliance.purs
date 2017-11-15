@@ -14,7 +14,7 @@ import Control.Monad.Eff.Console (CONSOLE)
 import DOM.HTML.Types (HTMLElement)
 import Data.Maybe (Maybe(..))
 import Genetics.Browser.Biodalliance.Types (BD, Biodalliance)
-import Genetics.Browser.Units (Bp, Chr)
+import Genetics.Browser.Types (Bp, ChrId)
 
 
 type State = { bd :: Maybe Biodalliance
@@ -22,7 +22,7 @@ type State = { bd :: Maybe Biodalliance
 
 data Query a
   = Scroll Bp a
-  | Jump Chr Bp Bp a
+  | Jump ChrId Bp Bp a
   | Initialize (forall eff. HTMLElement -> Eff (bd :: BD | eff) Biodalliance) a
   | InitializeCallback (H.SubscribeStatus -> a)
 

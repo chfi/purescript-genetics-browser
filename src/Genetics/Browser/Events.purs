@@ -8,10 +8,10 @@ module Genetics.Browser.Events
 import Prelude
 import Data.Argonaut (class DecodeJson, class EncodeJson, decodeJson, jsonEmptyObject, (.?), (:=), (~>))
 import Data.Newtype (class Newtype, unwrap, wrap)
-import Genetics.Browser.Units (Bp, Chr)
+import Genetics.Browser.Types (Bp, ChrId)
 
 
-newtype Location = Location { chr :: Chr
+newtype Location = Location { chr :: ChrId
                             , pos :: Bp
                             }
 
@@ -31,7 +31,7 @@ instance decodeJSONLocation :: DecodeJson Location where
     pure $ Location { chr, pos }
 
 
-newtype Range = Range { chr :: Chr
+newtype Range = Range { chr :: ChrId
                       , minPos :: Bp
                       , maxPos :: Bp
                       }

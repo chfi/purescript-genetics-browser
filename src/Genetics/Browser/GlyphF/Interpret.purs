@@ -17,12 +17,12 @@ import Genetics.Browser.Glyph (Glyph)
 import Genetics.Browser.GlyphF.Canvas as Canvas
 import Genetics.Browser.GlyphF.Position (glyphToGlyphPosition)
 import Genetics.Browser.GlyphF.SVG as SVG
-import Genetics.Browser.Units (Chr)
+import Genetics.Browser.Types (ChrId)
 
 -- TODO: this should be dealt with in Feature, in a safer way
 helper :: ∀ c r.
           Feature c r
-       -> { chr :: Chr
+       -> { chr :: ChrId
           , min :: c
           , max :: c
           }

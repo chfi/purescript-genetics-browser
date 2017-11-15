@@ -25,7 +25,7 @@ import Data.Function.Uncurried (Fn3, runFn3)
 import Data.Newtype (class Newtype)
 import Data.Options (Option, Options, opt, options)
 import Genetics.Browser.Biodalliance.Types (BD, Biodalliance)
-import Genetics.Browser.Units (class HCoordinate, Bp, Chr, bp)
+import Genetics.Browser.Types (class HCoordinate, Bp, ChrId, bp)
 
 import Genetics.Browser.Biodalliance.Types (BD, Biodalliance) as Exports
 
@@ -88,7 +88,7 @@ onInit bd cb = runEffFn2 addInitListener bd cb
 foreign import setLocationImpl :: ∀ eff.
                                   EffFn4 (bd :: BD | eff)
                                   Biodalliance
-                                  Chr Bp Bp
+                                  ChrId Bp Bp
                                   Unit
 
 
@@ -96,7 +96,7 @@ foreign import setLocationImpl :: ∀ eff.
 setLocation :: ∀ c eff.
                HCoordinate c
             => Biodalliance
-            -> Chr -> c -> c
+            -> ChrId -> c -> c
             -> Eff (bd :: BD | eff) Unit
 setLocation bd chr xl xr = runEffFn4 setLocationImpl bd chr (bp xl) (bp xr)
 
