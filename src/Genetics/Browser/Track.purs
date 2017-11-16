@@ -12,6 +12,7 @@ import Control.Monad.State as State
 import Control.Monad.Trans.Class (lift)
 import Data.Foldable (for_)
 import Data.Maybe (Maybe(..))
+import Data.Traversable (traverse_)
 import Data.Tuple (Tuple(..))
 import Genetics.Browser.DataSource (DataSource)
 import Genetics.Browser.Glyph (Glyph, circle)
@@ -48,8 +49,8 @@ Not sure that makes sense either
 -}
 
 
-newtype RenderParams =
-  RenderParams
+newtype ChrRenderParams =
+  ChrRenderParams
     (Maybe { xOffset :: Pixels
            , yOffset :: Pixels
            , height :: Pixels })
@@ -60,65 +61,10 @@ newtype RenderParams =
 -- a way to render said data,
 -- when provided some extra information on where and how to render it
 type Renderer eff a = { chrId :: ChrId, features :: Array a }
-                   -> RenderParams -> Eff eff Unit
+                   -> ChrRenderParams -> Eff eff Unit
 
 -- I get the feeling using all of these renderers is going to be a hylomorphism...
 
--- the center of a glyph is assumed to be at {0, 0},
--- glyphs are be placed by translating the canvas
-render1 :: Context2D
-        -> Glyph Unit
-        -> RenderParams
-        -> Eff _ Unit
-render1 _ g   (RenderParams  Nothing) = pure unit
-render1 ctx g (RenderParams (Just p)) = C.withContext ctx do
-  -- translate by p.x,y
-  _ <- C.translate { translateX: p.xOffset
-                   , translateY: p.yOffset } ctx
-
-  -- translate by height
-  _ <- C.translate { translateX: 0.0
-                   , translateY: p.height } ctx
-
-  renderGlyph ctx g
-
-
--- given a way to create a glyph from a feature,
--- and a way to create a RenderParam offset from a feature,
--- we create a function that takes a bunch of features,
--- a chr-wide renderparam,
--- and renders a whole chromosome.
-render1Chr :: forall a.
-              Context2D
-           -> (a -> { glyph :: Glyph Unit, rp :: RenderParams } )
-           -> Array a
-           -> RenderParams
-           -> Eff _ Unit
-render1Chr ctx _ _ (RenderParams Nothing) = pure unit
-render1Chr ctx toG features (RenderParams (Just p)) = C.withContext ctx do
-  -- translate to Chr position
-  _ <- C.translate { translateX: p.xOffset
-                   , translateY: p.yOffset } ctx
-
-  for_ features (\a -> let {glyph, rp} = toG a
-                       in render1 ctx glyph rp)
-
-
--- given an array of chromosomes that can be constructed,
--- and a way to create a render offset from a chrId,
--- we can render a bunch of chrs at once.
-renderManyChrs :: forall a.
-                  Context2D
-               -> (ChrId -> RenderParams)
-               -> Array { chrId :: ChrId
-                        , chrRenderer :: RenderParams -> Eff _ Unit }
-               -> RenderParams -> Eff _ Unit
-renderManyChrs ctx toRP chrs ( RenderParams Nothing) = pure unit
-renderManyChrs ctx toRP chrs (RenderParams (Just p)) = C.withContext ctx do
-  _ <- C.translate { translateX: p.xOffset
-                   , translateY: p.yOffset } ctx
-
-  for_ chrs (\{chrId, chrRenderer} -> chrRenderer (toRP chrId))
 
 
 
@@ -126,41 +72,83 @@ renderManyChrs ctx toRP chrs (RenderParams (Just p)) = C.withContext ctx do
 chrRenderParams :: { xOffset :: Number, xDist :: Number }
                 -> (ChrId -> Number)
                 -> ChrId
-                -> RenderParams
-chrRenderParams { xOffset, xDist } chrIndex chrId = RenderParams $
+                -> ChrRenderParams
+chrRenderParams { xOffset, xDist } chrIndex chrId = ChrRenderParams $
   Just { xOffset: xOffset+xDist*(chrIndex chrId), yOffset: 0.0, height: 0.0 }
 
 
 
-posInPixels :: Bp
-            -> Bp
-            -> BpPerPixel
-            -> Pixels
-posInPixels pos size scale = bpToPixels scale (pos / size)
+-- given a position on the chromosome, the size of the chromosome,
+-- and the scale,
+-- return the canvas X-coordinate
+posPixelsX :: Bp
+           -> Bp
+           -> BpPerPixel
+           -> Pixels
+posPixelsX pos size scale = bpToPixels scale (pos / size)
+
+
+-- given a position relative to the track where 0.0 = bottom, 1.0 = top,
+-- information about where the track will be drawn and how,
+-- return the canvas Y-coordinate
+posPixelsY :: Number
+           -> Pixels
+           -> Pixels
+           -> Pixels
+posPixelsY rel height offset = rel * height + offset
 
 
 
-placeGwas :: forall a r.
-             Bp
-          -> BpPerPixel
-          -> { pos :: Bp, height :: Pixels }
-          -> a
-          -> { glyph :: a, rp :: RenderParams }
-placeGwas size scale { pos, height } glyph = { glyph, rp }
-  where rp = RenderParams $ Just { xOffset: posInPixels pos size scale
-                                 , yOffset: 0.0
-                                 , height
-                                 }
+data RenderType eff a =
+    SingleGlyph (a -> { translateX :: Number, translateY :: Number }) (Eff eff Unit)
+  | ManyGlyphs (a -> { translateX :: Number, translateY :: Number }) (a -> Eff eff Unit)
+  | Connected (Array a -> Eff eff Unit)
 
 
 
-renderGwas :: Array (Tuple ChrId { pos :: Bp, height :: Pixels } )
+-- Given a score range,
+-- size of the current chr + scale (scale should be somewhere else...)
+-- vertical size of the track
+-- we can produce a mapping from canvases to SingleGlyph renderers
+renderGWAS :: forall r.
+              { minScore :: Number, maxScore :: Number }
+           -> { size :: Bp, scale :: BpPerPixel }
+           -> { trackHeight :: Pixels, trackYOffset :: Pixels }
            -> Context2D
-           -> Eff _ Unit
-renderGwas arr ctx = do
-  let toG = const $ circle {x: 0.0, y: 0.0} 3.0
+           -> RenderType _ {score :: Number, pos :: Bp | r }
+renderGWAS scoreRange hInfo vInfo ctx = SingleGlyph t f
+  where f = renderGlyph ctx (circle { x: 0.0, y: 0.0 } 3.0 )
+        t {pos,score} = let translateX = posPixelsX pos hInfo.size hInfo.scale
+                            translateY = posPixelsY ((score - scoreRange.minScore) /
+                                              (scoreRange.maxScore - scoreRange.minScore))
+                                          vInfo.trackHeight vInfo.trackYOffset
+                        in {translateX, translateY}
 
-  pure unit
+-- this one's weird, since the context changes... but close enough for now
+renderChr :: forall a.
+             RenderType _ a
+          -> Context2D
+          -> Array a
+          -> Eff _ Unit
+renderChr (SingleGlyph t draw) ctx =
+  traverse_ (\a -> C.withContext ctx (C.translate (t a) ctx *> draw))
+renderChr (ManyGlyphs t f) ctx =
+  traverse_ (\a -> C.withContext ctx (C.translate (t a) ctx *> f a))
+renderChr (Connected f) _ = f
+
+
+
+{- note:
+  check purescript-drawings out.
+
+wait, aren't these basically the same
+
+(         a -> (Translation, Eff _ Unit))
+(Identity a -> (Translation, Eff _ Unit))
+
+(       f a ->  g           (Eff _ Unit))
+(       f a ->  Identity    (Eff _ Unit))
+-}
 
 
 
@@ -187,8 +175,8 @@ renderer cvs r cmdVar = forever do
   cmd <- lift $ takeVar cmdVar
   case cmd of
     Render fs -> do
-      let toRender :: Array (RenderParams -> Eff _ Unit)
-          toRender = map r fs
+      -- let toRender :: Array (RenderParams -> Eff _ Unit)
+      --     toRender = map r fs
       -- Use current (or provided?) View to derive RenderParams for each
       pure unit
 
