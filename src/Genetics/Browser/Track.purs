@@ -186,6 +186,62 @@ renderer cvs r cmdVar = forever do
     SetView v -> do
       State.put v
       pure unit
+testFetch :: String
+          -> Aff _ (Array { score :: Number, pos :: Bp })
+testFetch url = do
+  json <- _.response <$> Affjax.get url
+
+  let f :: Json -> Maybe {score :: Number, pos :: Bp}
+      f j = do
+            obj <- j ^? _Object
+            pos <- Bp <$> obj ^? ix "min" <<< _Number
+            pValue <- readFloat <$> obj ^? ix "pValue" <<< _String
+            let score = (-1.0) * (Math.log pValue / Math.log 10.0)
+            pure {pos, score}
+
+  case traverse f =<< json ^? _Array of
+    Nothing -> throwError $ error "Failed to parse JSON features"
+    Just fs -> pure $ fs
+
+
+
+
+
+testRender :: forall a.
+              Renderer _ a
+           -> Array a
+           -> Aff _ Unit
+testRender r as = do
+  liftEff $ log "running"
+  canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
+  ctx <- liftEff $ getContext2D canvas
+
+  {w,h} <- liftEff do
+    {w} <- getScreenSize
+    h <- getCanvasHeight canvas
+    _ <- setCanvasWidth (w-2.0) canvas
+    pure {w, h}
+
+  let size = Bp 122030190.0
+      n = 10
+      scale = BpPerPixel (unwrap size / (w / 10.0))
+      xInfo = { size, scale }
+      height = h
+      offset = 0.0
+      yInfo = { height, offset }
+      colors = Tuple <$> ["yellow", "orange", "red", "purple", "blue"]
+
+      fs :: Frames (Array _)
+      fs = frames w 20.0 (const size) (Array.replicate 5 as)
+
+      fs' :: Frames (Tuple String (Array _))
+      fs' = zipWithFrames colors fs
+
+      r' :: Renderer _ (Tuple String a)
+      r' = strokeRenderer r
+
+
+  liftEff $ renderFramesN yInfo fs r ctx
 
 
 
@@ -194,6 +250,11 @@ fetchTrack :: forall r a.
            -> Range r
            -> Aff _ (Array a)
 fetchTrack track r = track.source.fetch r.lHand r.rHand
+main = launchAff $ do
+  dat <- testFetch "./gwas.json"
+  let min = 0.0
+      max = 50.0
+  testRender (gwasRenderer {min, max}) dat
 
 
 
@@ -223,11 +284,11 @@ trackEvents = viewB
 
 -- TODO it also needs to be able to receive messages and send messages
 
-runTrack :: forall a r.
-            View
-         -> Track _ _ a
-         -> Aff _ Unit
-runTrack opts { source, render, getPoint, chrSize } = do
+-- runTrack :: forall a r.
+--             View
+--          -> Track _ _ a
+--          -> Aff _ Unit
+-- runTrack opts { source, render, getPoint, chrSize } = do
   -- ctx <- liftEff $ getContext2D opts.canvas
 
   -- {w,h} <- liftEff do
