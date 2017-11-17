@@ -2,18 +2,28 @@ module Genetics.Browser.Track where
 
 import Prelude
 
-import Control.Monad.Aff (Aff)
+import Control.Monad.Aff (Aff, launchAff)
 import Control.Monad.Aff.AVar (AVar, makeVar, takeVar)
-import Control.Monad.Eff (Eff)
+import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (log)
+import Control.Monad.Eff.Exception (error)
+import Control.Monad.Error.Class (throwError)
 import Control.Monad.Rec.Class (forever)
 import Control.Monad.State (StateT(..))
 import Control.Monad.State as State
 import Control.Monad.Trans.Class (lift)
-import Data.Foldable (for_)
-import Data.Maybe (Maybe(..))
-import Data.Traversable (traverse_)
+import Data.Argonaut (Json, _Array, _Number, _Object, _String)
+import Data.Array as Array
+import Data.Foldable (foldMap, for_, length)
+import Data.Lens ((^?))
+import Data.Lens.Index (ix)
+import Data.Maybe (Maybe, Maybe(..), fromJust)
+import Data.Monoid.Additive (Additive(..))
+import Data.Newtype (ala, alaF, unwrap, wrap)
+import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(..))
+import Debug.Trace (trace)
 import Genetics.Browser.DataSource (DataSource)
 import Genetics.Browser.Glyph (Glyph, circle)
 import Genetics.Browser.GlyphF.Canvas (renderGlyph)
@@ -21,8 +31,12 @@ import Genetics.Browser.Types (Bp(..), BpPerPixel(..), Chr, ChrId(..), Point, Ra
 import Genetics.Browser.UI.Native (getScreenSize)
 import Genetics.Browser.UI.Native.View as View
 import Genetics.Browser.View (View, Pixels)
-import Graphics.Canvas (CanvasElement, Context2D, getCanvasHeight, getContext2D, setCanvasWidth)
+import Global (readFloat)
+import Graphics.Canvas (CanvasElement, Context2D, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth)
 import Graphics.Canvas as C
+import Math as Math
+import Network.HTTP.Affjax as Affjax
+import Partial.Unsafe (unsafePartial)
 
 
 type Track aff eff a = { source :: DataSource aff a
@@ -75,11 +89,71 @@ posPixelsY { offset, height } rel = height - (rel * height + offset)
 
 
 
--- Given a score range,
--- size of the current chr + scale (scale should be somewhere else...)
--- vertical size of the track
--- we can produce a mapping from canvases to SingleGlyph renderers
+type Renderer eff a =
+  { hPos :: a -> XPosInfo -> Pixels
+  , vPos :: a -> YPosInfo -> Pixels
+  , render :: a -> Context2D -> Eff eff Unit
+  , hit :: Maybe (a -> { x :: Pixels, y :: Pixels } -> a)
+  }
 
+
+gwasRenderer :: {min :: Number, max :: Number}
+             -> Renderer _ {score :: Number, pos :: Bp}
+gwasRenderer {min, max} = { hPos, vPos, render, hit: Nothing }
+  where hPos a xInfo = posPixelsX xInfo a.pos
+        nScore s = (s - min) / (max - min)
+        vPos a yInfo = posPixelsY yInfo (nScore a.score)
+        render _ ctx = renderGlyph ctx $ circle { x: 0.0, y: 0.0 } 5.0
+
+-- profunctors/arrows could come in here
+-- or polymorphic records, maybe? would have to be (Tuple r1 a) -> (Tuple r2 a) tho
+strokeRenderer :: forall a.
+                  Renderer _ a
+               -> Renderer _ (Tuple String a)
+strokeRenderer r = {hPos, vPos, render, hit}
+  where hPos (Tuple _ a) = r.hPos a
+        vPos (Tuple _ a) = r.vPos a
+        hit = Nothing -- TODO fix this
+        render (Tuple col a) ctx = C.withContext ctx do
+          _ <- C.setStrokeStyle col ctx
+          r.render a ctx
+
+
+fillRenderer :: forall a.
+                Renderer _ a
+             -> Renderer _ (Tuple String a)
+fillRenderer r = {hPos, vPos, render, hit}
+  where hPos (Tuple _ a) = r.hPos a
+        vPos (Tuple _ a) = r.vPos a
+        hit = Nothing -- TODO fix this
+        render (Tuple col a) ctx = C.withContext ctx do
+          _ <- C.setFillStyle col ctx
+          r.render a ctx
+
+
+
+
+runRenderer :: forall a.
+               a
+            -> Renderer _ a
+            -> { xInfo :: XPosInfo, yInfo :: YPosInfo }
+            -> Context2D
+            -> Eff _ Unit
+runRenderer a { hPos, vPos, render, hit } { xInfo, yInfo } ctx = C.withContext ctx do
+  let translateX = hPos a xInfo
+      translateY = vPos a yInfo
+  _ <- C.translate {translateX, translateY} ctx
+  render a ctx
+
+
+runRendererN :: forall a.
+                Renderer _ a
+             -> { xInfo :: XPosInfo, yInfo :: YPosInfo }
+             -> Array a
+             -> Context2D
+             -> Eff _ Unit
+runRendererN r p as ctx =
+  for_ as (\a -> runRenderer a r p ctx)
 
 
 {- note:
