@@ -49,60 +49,29 @@ Not sure that makes sense either
 -}
 
 
-newtype ChrRenderParams =
-  ChrRenderParams
-    (Maybe { xOffset :: Pixels
-           , yOffset :: Pixels
-           , height :: Pixels })
 
+-- given a size on the chromosome,
+-- the position of the chromosome,
+-- return a function from scale to ncanvas X-coordinate
+type XPosInfo = { size :: Bp, scale :: BpPerPixel }
 
-
--- A Renderer maps data attached to a chromosome id to
--- a way to render said data,
--- when provided some extra information on where and how to render it
-type Renderer eff a = { chrId :: ChrId, features :: Array a }
-                   -> ChrRenderParams -> Eff eff Unit
-
--- I get the feeling using all of these renderers is going to be a hylomorphism...
-
-
-
-
-
-chrRenderParams :: { xOffset :: Number, xDist :: Number }
-                -> (ChrId -> Number)
-                -> ChrId
-                -> ChrRenderParams
-chrRenderParams { xOffset, xDist } chrIndex chrId = ChrRenderParams $
-  Just { xOffset: xOffset+xDist*(chrIndex chrId), yOffset: 0.0, height: 0.0 }
-
-
-
--- given a position on the chromosome, the size of the chromosome,
--- and the scale,
--- return the canvas X-coordinate
-posPixelsX :: Bp
+posPixelsX :: XPosInfo
            -> Bp
-           -> BpPerPixel
            -> Pixels
-posPixelsX pos size scale = bpToPixels scale (pos / size)
+posPixelsX { scale } pos = bpToPixels scale pos
+
 
 
 -- given a position relative to the track where 0.0 = bottom, 1.0 = top,
 -- information about where the track will be drawn and how,
 -- return the canvas Y-coordinate
-posPixelsY :: Number
-           -> Pixels
-           -> Pixels
-           -> Pixels
-posPixelsY rel height offset = rel * height + offset
+type YPosInfo = { offset :: Pixels, height :: Pixels }
 
+posPixelsY :: YPosInfo
+           -> Number
+           -> Pixels
+posPixelsY { offset, height } rel = height - (rel * height + offset)
 
-
-data RenderType eff a =
-    SingleGlyph (a -> { translateX :: Number, translateY :: Number }) (Eff eff Unit)
-  | ManyGlyphs (a -> { translateX :: Number, translateY :: Number }) (a -> Eff eff Unit)
-  | Connected (Array a -> Eff eff Unit)
 
 
 
@@ -110,31 +79,6 @@ data RenderType eff a =
 -- size of the current chr + scale (scale should be somewhere else...)
 -- vertical size of the track
 -- we can produce a mapping from canvases to SingleGlyph renderers
-renderGWAS :: forall r.
-              { minScore :: Number, maxScore :: Number }
-           -> { size :: Bp, scale :: BpPerPixel }
-           -> { trackHeight :: Pixels, trackYOffset :: Pixels }
-           -> Context2D
-           -> RenderType _ {score :: Number, pos :: Bp | r }
-renderGWAS scoreRange hInfo vInfo ctx = SingleGlyph t f
-  where f = renderGlyph ctx (circle { x: 0.0, y: 0.0 } 3.0 )
-        t {pos,score} = let translateX = posPixelsX pos hInfo.size hInfo.scale
-                            translateY = posPixelsY ((score - scoreRange.minScore) /
-                                              (scoreRange.maxScore - scoreRange.minScore))
-                                          vInfo.trackHeight vInfo.trackYOffset
-                        in {translateX, translateY}
-
--- this one's weird, since the context changes... but close enough for now
-renderChr :: forall a.
-             RenderType _ a
-          -> Context2D
-          -> Array a
-          -> Eff _ Unit
-renderChr (SingleGlyph t draw) ctx =
-  traverse_ (\a -> C.withContext ctx (C.translate (t a) ctx *> draw))
-renderChr (ManyGlyphs t f) ctx =
-  traverse_ (\a -> C.withContext ctx (C.translate (t a) ctx *> f a))
-renderChr (Connected f) _ = f
 
 
 
@@ -165,7 +109,7 @@ data RenderCmds a =
 type RenderBackend = { canvas :: CanvasElement
                      , backCanvas :: CanvasElement
                      }
-
+{-
 renderer :: forall eff a.
             RenderBackend
          -> Renderer eff a
@@ -186,6 +130,9 @@ renderer cvs r cmdVar = forever do
     SetView v -> do
       State.put v
       pure unit
+-}
+
+
 testFetch :: String
           -> Aff _ (Array { score :: Number, pos :: Bp })
 testFetch url = do
@@ -245,11 +192,6 @@ testRender r as = do
 
 
 
-fetchTrack :: forall r a.
-              Track _ _ a
-           -> Range r
-           -> Aff _ (Array a)
-fetchTrack track r = track.source.fetch r.lHand r.rHand
 main = launchAff $ do
   dat <- testFetch "./gwas.json"
   let min = 0.0
@@ -303,7 +245,7 @@ trackEvents = viewB
   -- let v = View.fromCanvasWidth chrSize opts
 
   -- feats <- fetch
-  pure unit
+  -- pure unit
 
 {-
 
