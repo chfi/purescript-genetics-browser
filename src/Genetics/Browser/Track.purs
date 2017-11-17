@@ -155,6 +155,68 @@ runRendererN :: forall a.
 runRendererN r p as ctx =
   for_ as (\a -> runRenderer a r p ctx)
 
+-- TODO the `offset` should probably be in XPosInfo,
+-- and be the actual pixel offset for that bit on the canvas...
+type Frames a = { offset :: Pixels, frames :: Array (Tuple XPosInfo a) }
+
+
+frames :: forall a.
+          Pixels
+       -> Pixels
+       -> (a -> Bp)
+       -> Array a
+       -> Frames a
+frames width offset f chrs = {offset, frames: g <$> chrs}
+  where n = length chrs
+        -- TODO the scale should depend on the current size; that needs more work
+        totalSize = alaF Additive foldMap f chrs
+        width' = width - offset * n
+        g chr = let size = f chr
+                in Tuple { size, scale: BpPerPixel (unwrap totalSize / width') } chr
+
+
+mapFrames :: forall a b.
+             (a -> b)
+          -> Frames a
+          -> Frames b
+mapFrames f fs = fs { frames = map f <$> fs.frames }
+
+
+zipWithFrames :: forall a b.
+             Array (a -> b)
+          -> Frames a
+          -> Frames b
+zipWithFrames funs fs = fs { frames = frames }
+  where frames = Array.zipWith (\fun frame -> fun <$> frame) funs fs.frames
+
+
+renderFrames :: forall a.
+                YPosInfo
+             -> Frames a
+             -> Renderer _ a
+             -> Context2D
+             -> Eff _ Unit
+renderFrames yInfo {offset, frames} r ctx = C.withContext ctx (foreachE frames f)
+  where f (Tuple {scale, size} a) = do
+            void $ C.translate {translateX: offset, translateY: 0.0} ctx
+            r.render a ctx
+            let len = bpToPixels scale size
+            void $ C.translate {translateX: len, translateY: 0.0} ctx
+
+
+
+renderFramesN :: forall a.
+                 YPosInfo
+              -> Frames (Array a)
+              -> Renderer _ a
+              -> Context2D
+              -> Eff _ Unit
+renderFramesN yInfo {offset, frames} r ctx = C.withContext ctx (foreachE frames f)
+  where f (Tuple xInfo@{scale, size} as) = do
+            runRendererN r {xInfo, yInfo} as ctx
+            log $ "scale: " <> show (unwrap scale)
+            let len = bpToPixels scale size
+            void $ C.translate {translateX: len+offset, translateY: 0.0} ctx
 
 {- note:
   check purescript-drawings out.
