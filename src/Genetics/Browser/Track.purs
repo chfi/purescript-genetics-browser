@@ -14,15 +14,16 @@ import Control.Monad.State (StateT(..))
 import Control.Monad.State as State
 import Control.Monad.Trans.Class (lift)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
+import Data.Array ((!!), (..))
 import Data.Array as Array
 import Data.Foldable (foldMap, for_, length)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
-import Data.Maybe (Maybe, Maybe(..), fromJust)
+import Data.Maybe (Maybe, Maybe(..), fromJust, fromMaybe)
 import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (ala, alaF, unwrap, wrap)
 import Data.Traversable (traverse, traverse_)
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), snd)
 import Debug.Trace (trace)
 import Genetics.Browser.DataSource (DataSource)
 import Genetics.Browser.Glyph (Glyph, circle)
@@ -157,65 +158,80 @@ runRendererN r p as ctx =
 
 -- TODO the `offset` should probably be in XPosInfo,
 -- and be the actual pixel offset for that bit on the canvas...
-type Frames a = { offset :: Pixels, frames :: Array (Tuple XPosInfo a) }
+-- type Frames a = { offset :: Pixels, frames :: Array (Tuple {xInfo :: XPosInfo} a) }
 
 
-frames :: forall a.
+type Frames f a = { offset :: Pixels
+                  , frames :: Array { xInfo :: XPosInfo
+                                    , context :: f
+                                    , contents :: a
+                                    } }
+
+
+frames :: forall f a.
           Pixels
        -> Pixels
        -> (a -> Bp)
-       -> Array a
-       -> Frames a
-frames width offset f chrs = {offset, frames: g <$> chrs}
+       -> Array (Tuple f a)
+       -> Frames f a
+frames width offset f chrs = { offset
+                             , frames: g <$> chrs}
   where n = length chrs
         -- TODO the scale should depend on the current size; that needs more work
-        totalSize = alaF Additive foldMap f chrs
+        totalSize = alaF Additive foldMap (f <<< snd) chrs
         width' = width - offset * n
-        g chr = let size = f chr
-                in Tuple { size, scale: BpPerPixel (unwrap totalSize / width') } chr
+        g (Tuple b a) = let size = f a
+                            xInfo = { size, scale: BpPerPixel (unwrap totalSize / width' ) }
+                            context = b
+                            contents = a
+                        in { xInfo, context, contents }
 
 
-mapFrames :: forall a b.
-             (a -> b)
-          -> Frames a
-          -> Frames b
-mapFrames f fs = fs { frames = map f <$> fs.frames }
+-- mapFrames :: forall a b.
+--              (a -> b)
+--           -> Frames a
+--           -> Frames b
+-- mapFrames f fs = fs { frames = map f <$> fs.frames }
 
 
-zipWithFrames :: forall a b.
-             Array (a -> b)
-          -> Frames a
-          -> Frames b
-zipWithFrames funs fs = fs { frames = frames }
-  where frames = Array.zipWith (\fun frame -> fun <$> frame) funs fs.frames
+-- zipWithFrames :: forall a b.
+--              Array (a -> b)
+--           -> Frames a
+--           -> Frames b
+-- zipWithFrames funs fs = fs { frames = frames }
+--   where frames = Array.zipWith (\fun frame -> fun <$> frame) funs fs.frames
 
 
-renderFrames :: forall a.
+renderFrames :: forall f a.
                 YPosInfo
-             -> Frames a
+             -> Frames f a
              -> Renderer _ a
+             -> (f -> Context2D -> Eff _ Unit)
              -> Context2D
              -> Eff _ Unit
-renderFrames yInfo {offset, frames} r ctx = C.withContext ctx (foreachE frames f)
-  where f (Tuple {scale, size} a) = do
+renderFrames yInfo {offset, frames} r pre ctx = C.withContext ctx (foreachE frames f)
+  where f {xInfo, context, contents} = do
             void $ C.translate {translateX: offset, translateY: 0.0} ctx
-            r.render a ctx
-            let len = bpToPixels scale size
+            r.render contents ctx
+            let len = bpToPixels xInfo.scale xInfo.size
             void $ C.translate {translateX: len, translateY: 0.0} ctx
 
 
 
-renderFramesN :: forall a.
+
+renderFramesN :: forall f a.
                  YPosInfo
-              -> Frames (Array a)
+              -> Frames f (Array a)
               -> Renderer _ a
+              -> (f -> Context2D -> Eff _ Unit)
               -> Context2D
               -> Eff _ Unit
-renderFramesN yInfo {offset, frames} r ctx = C.withContext ctx (foreachE frames f)
-  where f (Tuple xInfo@{scale, size} as) = do
-            runRendererN r {xInfo, yInfo} as ctx
-            log $ "scale: " <> show (unwrap scale)
-            let len = bpToPixels scale size
+renderFramesN yInfo {offset, frames} r pre ctx = C.withContext ctx (foreachE frames f)
+  where f {xInfo, context, contents} = do
+            pre context ctx
+            runRendererN r {xInfo, yInfo} contents ctx
+            log $ "scale: " <> show (unwrap xInfo.scale)
+            let len = bpToPixels xInfo.scale xInfo.size
             void $ C.translate {translateX: len+offset, translateY: 0.0} ctx
 
 {- note:
@@ -312,19 +328,18 @@ testRender r as = do
       height = h
       offset = 0.0
       yInfo = { height, offset }
-      colors = Tuple <$> ["yellow", "orange", "red", "purple", "blue"]
+      colors = ["yellow", "orange", "red", "purple", "blue"]
 
-      fs :: Frames (Array _)
-      fs = frames w 20.0 (const size) (Array.replicate 5 as)
+      fs :: Frames _ (Array _)
+      fs = frames w 20.0 (const size) $ Array.zip (1..5) (Array.replicate 5 as)
 
-      fs' :: Frames (Tuple String (Array _))
-      fs' = zipWithFrames colors fs
+      pre :: Int -> Context2D -> Eff _ Unit
+      pre i ctx = do
+        let color = fromMaybe "black" (colors !! i `mod` 5)
+        void $ C.setStrokeStyle color ctx
+        void $ C.setFillStyle color ctx
 
-      r' :: Renderer _ (Tuple String a)
-      r' = strokeRenderer r
-
-
-  liftEff $ renderFramesN yInfo fs r ctx
+  liftEff $ renderFramesN yInfo fs r pre ctx
 
 
 
