@@ -46,28 +46,12 @@ type Track aff eff a = { source :: DataSource aff a
                        , chrSize :: Chr -> Bp
                        }
 
-{-
-
-Have a way to "prepare" data per-chromosome for rendering.
-
-Then have a way to actually render that prepared data,
-given some extra information such as offset, height scaling, etc.
-
-
-
-Also need to map clicks backward, but that should be doable.
-
-
-
-Maybe render to an offscreen canvas and copyImage.
-Not sure that makes sense either
--}
-
 
 
 -- given a size on the chromosome,
 -- the position of the chromosome,
 -- return a function from scale to ncanvas X-coordinate
+-- TODO this should be more closely connected to Frames
 type XPosInfo = { size :: Bp, scale :: BpPerPixel }
 
 posPixelsX :: XPosInfo
@@ -86,7 +70,6 @@ posPixelsY :: YPosInfo
            -> Number
            -> Pixels
 posPixelsY { offset, height } rel = height - (rel * height + offset)
-
 
 
 
@@ -113,64 +96,52 @@ gwasRenderer {min, max} color = { hPos, vPos, render, hit: Nothing }
 
 
 
+-- Renderers always run on collections (for now Arrays) of objects,
+-- since it's rare to only want to render one single thing.
+-- if that is desired, one can simply pass along a singleton array.
 runRenderer :: forall a.
-               a
-            -> Renderer _ a
+               Renderer _ a
             -> { xInfo :: XPosInfo, yInfo :: YPosInfo }
+            -> Array a
             -> Context2D
             -> Eff _ Unit
-runRenderer a { hPos, vPos, render, hit } { xInfo, yInfo } ctx = C.withContext ctx do
-  let translateX = hPos a xInfo
-      translateY = vPos a yInfo
-  _ <- C.translate {translateX, translateY} ctx
-  render a ctx
+runRenderer r {xInfo, yInfo} as ctx =
+  for_ as (\a -> C.withContext ctx do
+              let translateX = r.hPos a xInfo
+                  translateY = r.vPos a yInfo
+              _ <- C.translate {translateX, translateY} ctx
+              r.render a ctx)
 
-
-runRendererN :: forall a.
-                Renderer _ a
-             -> { xInfo :: XPosInfo, yInfo :: YPosInfo }
-             -> Array a
-             -> Context2D
-             -> Eff _ Unit
-runRendererN r p as ctx =
-  for_ as (\a -> runRenderer a r p ctx)
 
 -- TODO the `offset` should probably be in XPosInfo,
 -- and be the actual pixel offset for that bit on the canvas...
--- type Frames a = { offset :: Pixels, frames :: Array (Tuple {xInfo :: XPosInfo} a) }
+type Frames a = { offset :: Pixels
+                , frames :: Array { xInfo :: XPosInfo
+                                  , contents :: a
+                                  } }
 
 
-type Frames f a = { offset :: Pixels
-                  , frames :: Array { xInfo :: XPosInfo
-                                    , context :: f
-                                    , contents :: a
-                                    } }
-
-
-frames :: forall f a.
+frames :: forall a.
           Pixels
        -> Pixels
        -> (a -> Bp)
-       -> Array (Tuple f a)
-       -> Frames f a
-frames width offset f chrs = { offset
-                             , frames: g <$> chrs}
+       -> Array a
+       -> Frames a
+frames width offset f chrs = {offset, frames: g <$> chrs}
   where n = length chrs
         -- TODO the scale should depend on the current size; that needs more work
-        totalSize = alaF Additive foldMap (f <<< snd) chrs
+        totalSize = alaF Additive foldMap f chrs
         width' = width - offset * n
-        g (Tuple b a) = let size = f a
-                            xInfo = { size, scale: BpPerPixel (unwrap totalSize / width' ) }
-                            context = b
-                            contents = a
-                        in { xInfo, context, contents }
+        g chr = let size = f chr
+                    scale = BpPerPixel (unwrap totalSize / width')
+                in {xInfo: {size, scale}, contents: chr}
 
 
--- mapFrames :: forall a b.
---              (a -> b)
---           -> Frames a
---           -> Frames b
--- mapFrames f fs = fs { frames = map f <$> fs.frames }
+mapFrames :: forall a b.
+             (a -> b)
+          -> Frames a
+          -> Frames b
+mapFrames f fs = fs { frames = (\a -> a { contents = f a.contents }) <$> fs.frames }
 
 
 -- zipWithFrames :: forall a b.
@@ -183,49 +154,16 @@ frames width offset f chrs = { offset
 
 renderFrames :: forall f a.
                 YPosInfo
-             -> Frames f a
+             -> Frames (Array a)
              -> Renderer _ a
-             -> (f -> Context2D -> Eff _ Unit)
              -> Context2D
              -> Eff _ Unit
-renderFrames yInfo {offset, frames} r pre ctx = C.withContext ctx (foreachE frames f)
-  where f {xInfo, context, contents} = do
-            void $ C.translate {translateX: offset, translateY: 0.0} ctx
-            r.render contents ctx
-            let len = bpToPixels xInfo.scale xInfo.size
-            void $ C.translate {translateX: len, translateY: 0.0} ctx
-
-
-
-
-renderFramesN :: forall f a.
-                 YPosInfo
-              -> Frames f (Array a)
-              -> Renderer _ a
-              -> (f -> Context2D -> Eff _ Unit)
-              -> Context2D
-              -> Eff _ Unit
-renderFramesN yInfo {offset, frames} r pre ctx = C.withContext ctx (foreachE frames f)
-  where f {xInfo, context, contents} = do
-            pre context ctx
-            runRendererN r {xInfo, yInfo} contents ctx
+renderFrames yInfo {offset, frames} r ctx = C.withContext ctx (foreachE frames f)
+  where f {xInfo, contents} = do
+            runRenderer r {xInfo, yInfo} contents ctx
             log $ "scale: " <> show (unwrap xInfo.scale)
             let len = bpToPixels xInfo.scale xInfo.size
             void $ C.translate {translateX: len+offset, translateY: 0.0} ctx
-
-{- note:
-  check purescript-drawings out.
-
-wait, aren't these basically the same
-
-(         a -> (Translation, Eff _ Unit))
-(Identity a -> (Translation, Eff _ Unit))
-
-(       f a ->  g           (Eff _ Unit))
-(       f a ->  Identity    (Eff _ Unit))
--}
-
-
 
 
 -- Commands the renderer thread can receive
@@ -233,8 +171,6 @@ data RenderCmds a =
     Render (Array { chrId :: ChrId, features :: Array a})
   | SetView View
   | Scroll Pixels
-
-
 
 
 type RenderBackend = { canvas :: CanvasElement
@@ -285,11 +221,9 @@ testFetch url = do
 
 
 
-
-
-testRender :: forall a.
-              Renderer _ a
-           -> Array a
+testRender :: forall r a.
+              Renderer _ { chr :: Int | r }
+           -> Array { chr :: a | r }
            -> Aff _ Unit
 testRender r as = do
   liftEff $ log "running"
@@ -309,141 +243,27 @@ testRender r as = do
       height = h
       offset = 0.0
       yInfo = { height, offset }
-      colors = ["yellow", "orange", "red", "purple", "blue"]
 
-      fs :: Frames _ (Array _)
-      fs = frames w 20.0 (const size) $ Array.zip (1..5) (Array.replicate 5 as)
+      as' :: _
+      as' = Array.zipWith (\i as' -> _ {chr = i} <$> as') (1..5) (Array.replicate 5 as)
 
-      pre :: Int -> Context2D -> Eff _ Unit
-      pre i ctx = do
-        let color = fromMaybe "black" (colors !! i `mod` 5)
-        void $ C.setStrokeStyle color ctx
-        void $ C.setFillStyle color ctx
+      fs :: Frames _
+      fs = frames w 20.0 (const size) as'
 
-  liftEff $ renderFramesN yInfo fs r pre ctx
-
+  liftEff $ renderFrames yInfo fs r ctx
 
 
 main = launchAff $ do
   dat <- testFetch "./gwas.json"
   let min = 0.0
       max = 50.0
-  testRender (gwasRenderer {min, max}) dat
 
+      colors = ["green", "yellow", "orange", "red", "purple", "blue"]
 
+      chrColor :: Int -> String
+      chrColor i = fromMaybe "black" (colors !! i `mod` 5)
 
-{-
-trackEvents :: _
-trackEvents = viewB
-  where cDrag = canvasDrag canvas
-        lefts = case _ of
-          Left x -> Just x
-          Right _ -> Nothing
-        -- the alt operator <|> combines the two event streams,
-        -- resulting in an event of both button-click scrolls
-        -- and canvas-drag scrolls
+      render' :: _
+      render' = gwasRenderer {min, max} chrColor
 
-        dragScroll = filterMap (map (ScrollPixels <<< _.x) <<< lefts) cDrag
-        updateViews = btnScroll (Bp 500.0)
-                  <|> dragScroll
-                  <|> btnZoom (wrap <<< (_ * 0.8) <<< unwrap)
-                              (wrap <<< (_ * 1.2) <<< unwrap)
-                  <|> scrollZoom canvas
-        viewB = FRP.fold foldView updateViews v
--}
-
-
--- a `Track` is the more or less abstract representation of the track;
--- it needs to be run to do anything.
-
--- TODO it also needs to be able to receive messages and send messages
-
--- runTrack :: forall a r.
---             View
---          -> Track _ _ a
---          -> Aff _ Unit
--- runTrack opts { source, render, getPoint, chrSize } = do
-  -- ctx <- liftEff $ getContext2D opts.canvas
-
-  -- {w,h} <- liftEff do
-  --   {w} <- getScreenSize
-  --   h <- getCanvasHeight opts.canvas
-  --   _ <- setCanvasWidth (w-2.0) opts.canvas
-  --   pure {w, h}
-
-  -- trackState <- makeVar
-
-  -- -- TODO handle resize
-  -- let v = View.fromCanvasWidth chrSize opts
-
-  -- feats <- fetch
-  -- pure unit
-
-{-
-
-browser :: Aff _ Unit
-browser uri = do
-  canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
-  ctx <- liftEff $ getContext2D canvas
-
-  {w,h} <- liftEff do
-    {w} <- getScreenSize
-    h <- getCanvasHeight canvas
-    _ <- setCanvasWidth (w-2.0) canvas
-    pure {w, h}
-
-  backCanvas <- liftEff $ newCanvas {w,h}
-  browserState <- makeVar
-
-  let minView = Bp 0.0
-      maxView = Bp 15000000.0
-      v = View.fromCanvasWidth w { min: minView, max: maxView }
-      f :: View -> Fetch _
-      f = fileFetch uri
-
-  fs <- f v
-
-
-  let renderer :: View -> Array _ -> _
-      renderer = renderGlyphs (browserTransform h) ctx
-      fetch :: View -> Aff _ _
-      fetch v = do
-
-        let gs = glyphifyFeatures fs v
-            annGs = zip fs gs
-        let gs' = filterFeatures v annGs
-
-        putVar browserState { annotatedGlyphs: annGs
-                            , view: v }
-        liftEff do
-          clearCanvas canvas
-          renderer v gs'
-
-
-  let cDrag = canvasDrag canvas
-      lefts = case _ of
-        Left x -> Just x
-        Right _ -> Nothing
-      -- the alt operator <|> combines the two event streams,
-      -- resulting in an event of both button-click scrolls
-      -- and canvas-drag scrolls
-
-      dragScroll = filterMap (map (ScrollPixels <<< _.x) <<< lefts) cDrag
-      updateViews = btnScroll (Bp 500.0)
-                <|> dragScroll
-                <|> btnZoom (wrap <<< (_ * 0.8) <<< unwrap)
-                            (wrap <<< (_ * 1.2) <<< unwrap)
-                <|> scrollZoom canvas
-      viewB = FRP.fold foldView updateViews v
-
-
-  _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe cDrag $ case _ of
-    Left _      -> pure unit
-    Right {x,y} -> scrollCanvas backCanvas canvas {x: -x, y: 0.0}
-
-
-  _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe viewB \v' -> do
-    _ <- launchAff $ fetch v'
-
-  fetch v
-  -}
+  testRender render' dat
