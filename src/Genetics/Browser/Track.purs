@@ -26,7 +26,7 @@ import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(..), snd)
 import Debug.Trace (trace)
 import Genetics.Browser.DataSource (DataSource)
-import Genetics.Browser.Glyph (Glyph, circle)
+import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
 import Genetics.Browser.GlyphF.Canvas (renderGlyph)
 import Genetics.Browser.Types (Bp(..), BpPerPixel(..), Chr, ChrId(..), Point, Range, bpToPixels)
 import Genetics.Browser.UI.Native (getScreenSize)
@@ -98,39 +98,18 @@ type Renderer eff a =
   }
 
 
-gwasRenderer :: {min :: Number, max :: Number}
-             -> Renderer _ {score :: Number, pos :: Bp}
-gwasRenderer {min, max} = { hPos, vPos, render, hit: Nothing }
+gwasRenderer :: forall a.
+                {min :: Number, max :: Number}
+             -> (a -> String)
+             -> Renderer _ {score :: Number, pos :: Bp, chr :: a}
+gwasRenderer {min, max} color = { hPos, vPos, render, hit: Nothing }
   where hPos a xInfo = posPixelsX xInfo a.pos
         nScore s = (s - min) / (max - min)
         vPos a yInfo = posPixelsY yInfo (nScore a.score)
-        render _ ctx = renderGlyph ctx $ circle { x: 0.0, y: 0.0 } 5.0
-
--- profunctors/arrows could come in here
--- or polymorphic records, maybe? would have to be (Tuple r1 a) -> (Tuple r2 a) tho
-strokeRenderer :: forall a.
-                  Renderer _ a
-               -> Renderer _ (Tuple String a)
-strokeRenderer r = {hPos, vPos, render, hit}
-  where hPos (Tuple _ a) = r.hPos a
-        vPos (Tuple _ a) = r.vPos a
-        hit = Nothing -- TODO fix this
-        render (Tuple col a) ctx = C.withContext ctx do
-          _ <- C.setStrokeStyle col ctx
-          r.render a ctx
-
-
-fillRenderer :: forall a.
-                Renderer _ a
-             -> Renderer _ (Tuple String a)
-fillRenderer r = {hPos, vPos, render, hit}
-  where hPos (Tuple _ a) = r.hPos a
-        vPos (Tuple _ a) = r.vPos a
-        hit = Nothing -- TODO fix this
-        render (Tuple col a) ctx = C.withContext ctx do
-          _ <- C.setFillStyle col ctx
-          r.render a ctx
-
+        render a ctx = renderGlyph ctx $ do
+          stroke (color a.chr)
+          fill (color a.chr)
+          circle { x: 0.0, y: 0.0 } 5.0
 
 
 
@@ -285,18 +264,20 @@ renderer cvs r cmdVar = forever do
 -}
 
 
-testFetch :: String
-          -> Aff _ (Array { score :: Number, pos :: Bp })
+testFetch :: forall r.
+             String
+          -> Aff _ (Array { score :: Number, pos :: Bp, chr :: Int })
 testFetch url = do
   json <- _.response <$> Affjax.get url
 
-  let f :: Json -> Maybe {score :: Number, pos :: Bp}
+  let f :: Json -> Maybe {score :: Number, pos :: Bp, chr :: Int }
       f j = do
             obj <- j ^? _Object
             pos <- Bp <$> obj ^? ix "min" <<< _Number
             pValue <- readFloat <$> obj ^? ix "pValue" <<< _String
             let score = (-1.0) * (Math.log pValue / Math.log 10.0)
-            pure {pos, score}
+                chr = 11
+            pure {pos, score, chr}
 
   case traverse f =<< json ^? _Array of
     Nothing -> throwError $ error "Failed to parse JSON features"
