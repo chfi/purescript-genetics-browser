@@ -32,12 +32,15 @@ import Genetics.Browser.Types (Bp(..), BpPerPixel(..), Chr, ChrId(..), Point, Ra
 import Genetics.Browser.UI.Native (getScreenSize)
 import Genetics.Browser.UI.Native.View as View
 import Genetics.Browser.View (View, Pixels)
-import Global (readFloat)
+import Global (readFloat, readInt)
+import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, Context2D, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth)
 import Graphics.Canvas as C
 import Math as Math
 import Network.HTTP.Affjax as Affjax
 import Partial.Unsafe (unsafePartial)
+import Text.Parsing.CSV as CSV
+import Text.Parsing.Parser as CSV
 
 
 type Track aff eff a = { source :: DataSource aff a
@@ -224,6 +227,23 @@ testFetch url = do
 testRender :: forall r a.
               Renderer _ { chr :: Int | r }
            -> Array { chr :: a | r }
+fetchGemma :: String
+           -> Aff _ (List { chr :: ChrId, pos :: Bp, score :: Number })
+fetchGemma url = do
+  liftEff $ log "fetching gwas"
+  csv <- _.response <$> Affjax.get url
+  let parsed :: _
+      parsed = CSV.runParser csv CSV.defaultParsers.fileHeaded
+      parseEntry :: Map String String -> Maybe _
+      parseEntry m = do
+        chr <- ChrId <$> Map.lookup "chr" m
+        pos <- Bp <<< readFloat <$> Map.lookup "ps" m
+        score <- readFloat <$> Map.lookup "af" m
+        pure { chr, pos, score }
+
+  case parsed of
+    Left err -> throwError $ error "error parsing csv"
+    Right p  -> pure $ mapMaybe parseEntry p
            -> Aff _ Unit
 testRender r as = do
   liftEff $ log "running"
