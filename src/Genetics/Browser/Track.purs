@@ -14,16 +14,24 @@ import Control.Monad.State (StateT(..))
 import Control.Monad.State as State
 import Control.Monad.Trans.Class (lift)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
-import Data.Array ((!!), (..))
+import Data.Array (foldl, (!!), (..), (:))
 import Data.Array as Array
-import Data.Foldable (foldMap, for_, length)
+import Data.Either (Either(..))
+import Data.Foldable (fold, foldMap, for_, length)
+import Data.Int as Int
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
+import Data.List (List, mapMaybe)
+import Data.List as List
+import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe, Maybe(..), fromJust, fromMaybe)
 import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (ala, alaF, unwrap, wrap)
+import Data.NonEmpty (foldl1, fromNonEmpty)
+import Data.NonEmpty as NE
 import Data.Traversable (traverse, traverse_)
-import Data.Tuple (Tuple(..), snd)
+import Data.Tuple (Tuple(..), fst, snd)
 import Debug.Trace (trace)
 import Genetics.Browser.DataSource (DataSource)
 import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
@@ -98,7 +106,6 @@ gwasRenderer {min, max} color = { hPos, vPos, render, hit: Nothing }
           circle { x: 0.0, y: 0.0 } 5.0
 
 
-
 -- Renderers always run on collections (for now Arrays) of objects,
 -- since it's rare to only want to render one single thing.
 -- if that is desired, one can simply pass along a singleton array.
@@ -123,21 +130,29 @@ type Frames a = { offset :: Pixels
                                   , contents :: a
                                   } }
 
-
 frames :: forall a.
           Pixels
        -> Pixels
-       -> (a -> Bp)
-       -> Array a
+       -> Array (Tuple Bp a)
        -> Frames a
-frames width offset f chrs = {offset, frames: g <$> chrs}
+frames width offset chrs = {offset, frames: g <$> chrs}
   where n = length chrs
         -- TODO the scale should depend on the current size; that needs more work
-        totalSize = alaF Additive foldMap f chrs
+        totalSize = alaF Additive foldMap fst chrs
         width' = width - offset * n
-        g chr = let size = f chr
-                    scale = BpPerPixel (unwrap totalSize / width')
-                in {xInfo: {size, scale}, contents: chr}
+        g (Tuple size a) = let scale = BpPerPixel (unwrap totalSize / width')
+                           in {xInfo: {size, scale}, contents: a}
+
+
+-- A Frame contains the information required to, in conjunction with a Renderer on `a`,
+-- render the contained data to a given place on the canvas.
+
+-- not going to be entirely trivial to construct this -- need to take the
+-- total size, offsets, etc. into account. not just a map; we need a fold, too.
+-- ... a hylomorphism?
+type Frame a = { offset :: Pixels, width :: Pixels, contents :: a }
+type Frames' a = Array (Frame a)
+
 
 
 mapFrames :: forall a b.
@@ -164,7 +179,6 @@ renderFrames :: forall f a.
 renderFrames yInfo {offset, frames} r ctx = C.withContext ctx (foreachE frames f)
   where f {xInfo, contents} = do
             runRenderer r {xInfo, yInfo} contents ctx
-            log $ "scale: " <> show (unwrap xInfo.scale)
             let len = bpToPixels xInfo.scale xInfo.size
             void $ C.translate {translateX: len+offset, translateY: 0.0} ctx
 
@@ -202,31 +216,6 @@ renderer cvs r cmdVar = forever do
       pure unit
 -}
 
-
-testFetch :: forall r.
-             String
-          -> Aff _ (Array { score :: Number, pos :: Bp, chr :: Int })
-testFetch url = do
-  json <- _.response <$> Affjax.get url
-
-  let f :: Json -> Maybe {score :: Number, pos :: Bp, chr :: Int }
-      f j = do
-            obj <- j ^? _Object
-            pos <- Bp <$> obj ^? ix "min" <<< _Number
-            pValue <- readFloat <$> obj ^? ix "pValue" <<< _String
-            let score = (-1.0) * (Math.log pValue / Math.log 10.0)
-                chr = 11
-            pure {pos, score, chr}
-
-  case traverse f =<< json ^? _Array of
-    Nothing -> throwError $ error "Failed to parse JSON features"
-    Just fs -> pure $ fs
-
-
-
-testRender :: forall r a.
-              Renderer _ { chr :: Int | r }
-           -> Array { chr :: a | r }
 fetchGemma :: String
            -> Aff _ (List { chr :: ChrId, pos :: Bp, score :: Number })
 fetchGemma url = do
@@ -300,9 +289,12 @@ mouseChrs = Map.fromFoldable $ Array.zip mouseChrIds $
 mouseChrSize :: Bp -> ChrId -> Bp
 mouseChrSize def chr = fromMaybe def $ Map.lookup chr mouseChrs
 
+
+testRender :: forall a.
+              Renderer _ a
+           -> Array (Tuple Bp (Array a))
            -> Aff _ Unit
-testRender r as = do
-  liftEff $ log "running"
+testRender r chrs = do
   canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
   ctx <- liftEff $ getContext2D canvas
 
@@ -312,27 +304,19 @@ testRender r as = do
     _ <- setCanvasWidth (w-2.0) canvas
     pure {w, h}
 
-  let size = Bp 122030190.0
-      n = 10
-      scale = BpPerPixel (unwrap size / (w / 10.0))
-      xInfo = { size, scale }
-      height = h
+  let height = h
       offset = 0.0
       yInfo = { height, offset }
 
-      as' :: _
-      as' = Array.zipWith (\i as' -> _ {chr = i} <$> as') (1..5) (Array.replicate 5 as)
-
-      fs :: Frames _
-      fs = frames w 20.0 (const size) as'
+      fs :: Frames (Array a)
+      fs = frames w 20.0 chrs
 
   liftEff $ renderFrames yInfo fs r ctx
 
 
 main = launchAff $ do
-  dat <- testFetch "./gwas.json"
-  let min = 0.0
-      max = 50.0
+  let min = 0.1
+      max = 0.4
 
       colors = fold $ Array.replicate 5 ["green", "yellow", "orange", "red", "purple", "blue"]
       chrColors :: _
@@ -341,7 +325,19 @@ main = launchAff $ do
       chrColor :: ChrId -> String
       chrColor chr = fromMaybe "black" (Map.lookup chr chrColors)
 
-      render' :: _
+      render' :: Renderer _ _
       render' = gwasRenderer {min, max} chrColor
 
-  testRender render' dat
+      chrSize :: _ -> Bp
+      chrSize x = mouseChrSize (Bp 0.0) x.chr
+
+  dat <- Array.fromFoldable <$> fetchGemma "./gwas.csv"
+
+  let chrs :: _
+      chrs = (\a -> let bp = chrSize $ NE.head a
+                    in Tuple bp a) <$> Array.groupBy (\a b -> a.chr == b.chr) dat
+      chrs' = map (fromNonEmpty (:)) <$> chrs
+
+  liftEff $ log $ show $ (length chrs' :: Int)
+
+  testRender render' chrs'

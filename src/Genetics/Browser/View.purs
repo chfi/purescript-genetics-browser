@@ -24,6 +24,8 @@ import Graphics.Canvas (TranslateTransform, Transform)
 
 type Pixels = Number
 
+-- the view is relatively abstract; containing only the end points.
+-- i.e. it's not concerned with rendering, directly.
 type View = { lHand :: Pos, rHand :: Pos
             , scale :: BpPerPixel
             , pixelsWide :: Pixels
