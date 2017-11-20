@@ -244,6 +244,62 @@ fetchGemma url = do
   case parsed of
     Left err -> throwError $ error "error parsing csv"
     Right p  -> pure $ mapMaybe parseEntry p
+
+
+mouseChrIds :: Array ChrId
+mouseChrIds =
+            [ (ChrId "1")
+            , (ChrId "2")
+            , (ChrId "3")
+            , (ChrId "4")
+            , (ChrId "5")
+            , (ChrId "6")
+            , (ChrId "7")
+            , (ChrId "8")
+            , (ChrId "9")
+            , (ChrId "10")
+            , (ChrId "11")
+            , (ChrId "12")
+            , (ChrId "13")
+            , (ChrId "14")
+            , (ChrId "15")
+            , (ChrId "16")
+            , (ChrId "17")
+            , (ChrId "18")
+            , (ChrId "19")
+            , (ChrId "X")
+            , (ChrId "Y")
+            ]
+
+mouseChrs :: Map ChrId Bp
+mouseChrs = Map.fromFoldable $ Array.zip mouseChrIds $
+            [ (Bp 195471971.0)
+            , (Bp 182113224.0)
+            , (Bp 160039680.0)
+            , (Bp 156508116.0)
+            , (Bp 151834684.0)
+            , (Bp 149736546.0)
+            , (Bp 145441459.0)
+            , (Bp 129401213.0)
+            , (Bp 124595110.0)
+            , (Bp 130694993.0)
+            , (Bp 122082543.0)
+            , (Bp 120129022.0)
+            , (Bp 120421639.0)
+            , (Bp 124902244.0)
+            , (Bp 104043685.0)
+            , (Bp 98207768.0)
+            , (Bp 94987271.0)
+            , (Bp 90702639.0)
+            , (Bp 61431566.0)
+            , (Bp 17103129.0)
+            , (Bp 9174469.0)
+            ]
+
+
+mouseChrSize :: Bp -> ChrId -> Bp
+mouseChrSize def chr = fromMaybe def $ Map.lookup chr mouseChrs
+
            -> Aff _ Unit
 testRender r as = do
   liftEff $ log "running"
@@ -278,10 +334,12 @@ main = launchAff $ do
   let min = 0.0
       max = 50.0
 
-      colors = ["green", "yellow", "orange", "red", "purple", "blue"]
+      colors = fold $ Array.replicate 5 ["green", "yellow", "orange", "red", "purple", "blue"]
+      chrColors :: _
+      chrColors = Map.fromFoldable $ Array.zip mouseChrIds colors
 
-      chrColor :: Int -> String
-      chrColor i = fromMaybe "black" (colors !! i `mod` 5)
+      chrColor :: ChrId -> String
+      chrColor chr = fromMaybe "black" (Map.lookup chr chrColors)
 
       render' :: _
       render' = gwasRenderer {min, max} chrColor
