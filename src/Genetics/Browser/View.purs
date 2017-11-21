@@ -5,7 +5,8 @@ import Prelude
 import Data.Array (index, (..))
 import Data.Array as Array
 import Data.Foldable (foldMap)
-import Data.Maybe (Maybe)
+import Data.Maybe (Maybe, fromMaybe)
+import Data.Monoid (mempty)
 import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (alaF, unwrap, wrap)
 import Data.Traversable (traverse)
@@ -26,35 +27,31 @@ type Pixels = Number
 
 -- the view is relatively abstract; containing only the end points.
 -- i.e. it's not concerned with rendering, directly.
-type View = { lHand :: Pos, rHand :: Pos
-            , scale :: BpPerPixel
-            , pixelsWide :: Pixels
-            }
+type View = { lHand :: Pos, rHand :: Pos }
 
 -- TODO This module is probably not the best place for these functions
 chrsInRange :: forall aff a r.
                Array Chr
             -> Range r
-            -> Maybe (Array Chr)
-chrsInRange chrs { lHand, rHand } = do
+            -> (Array Chr)
+chrsInRange chrs { lHand, rHand } = fromMaybe mempty do
   lI <- Array.findIndex (\x -> x.chrId == lHand.chrId) chrs
   rI <- Array.findIndex (\x -> x.chrId == rHand.chrId) chrs
   traverse (index chrs) (lI .. rI)
 
 
-getRangeSize :: forall aff a r.
-                Array Chr
-             -> Range r
-             -> Maybe Bp
-getRangeSize chrs r@{ lHand, rHand } = do
-  chrs' <- chrsInRange chrs r
-  {head, tail} <- Array.uncons chrs'
-  {init, last} <- Array.unsnoc tail
-
-  let l = head.size - lHand.bp
-      mid = alaF Additive foldMap (_.size) init
-      r = rHand.bp
-  pure $ l + mid + r
+-- getRangeSize :: forall aff a r.
+--                 Array Chr
+--              -> Range r
+--              -> Maybe Bp
+-- getRangeSize chrs r@{ lHand, rHand } = do
+--   chrs' <- chrsInRange chrs r
+--   {head, tail} <- Array.uncons chrs'
+--   {init, last} <- Array.unsnoc tail
+--   let l = head.size - lHand.bp
+--       mid = alaF Additive foldMap (_.size) init
+--       r = rHand.bp
+--   pure $ l + mid + r
 
 
 -- we can just assume we always have all the data...
@@ -63,16 +60,16 @@ getRangeSize chrs r@{ lHand, rHand } = do
 -- newtype View =
 
 
-fromCanvasWidth :: forall r.
-                   Array Chr
-                -> { lHand :: Pos, rHand :: Pos
-                   , pixelsWide :: Pixels }
-                -> Maybe View
-fromCanvasWidth chrs v' = do
-  totalBps <- getRangeSize chrs v'
-  let scale = wrap $ (unwrap totalBps) / v'.pixelsWide
+-- fromCanvasWidth :: forall r.
+--                    Array Chr
+--                 -> { lHand :: Pos, rHand :: Pos
+--                    , pixelsWide :: Pixels }
+--                 -> Maybe View
+-- fromCanvasWidth chrs v' = do
+--   totalBps <- getRangeSize chrs v'
+--   let scale = wrap $ (unwrap totalBps) / v'.pixelsWide
 
-  pure $ { lHand: v'.lHand, rHand: v'.rHand, pixelsWide: v'.pixelsWide, scale: scale }
+  -- pure $ { lHand: v'.lHand, rHand: v'.rHand, pixelsWide: v'.pixelsWide, scale: scale }
 
 
 browserTransform :: Number
