@@ -122,52 +122,75 @@ runRenderer r {xInfo, yInfo} as ctx =
               _ <- C.translate {translateX, translateY} ctx
               r.render a ctx)
 
-
--- TODO the `offset` should probably be in XPosInfo,
--- and be the actual pixel offset for that bit on the canvas...
-type Frames a = { offset :: Pixels
-                , frames :: Array { xInfo :: XPosInfo
-                                  , contents :: a
-                                  } }
-
-frames :: forall a.
-          Pixels
-       -> Pixels
-       -> Array (Tuple Bp a)
-       -> Frames a
-frames width offset chrs = {offset, frames: g <$> chrs}
-  where n = length chrs
-        -- TODO the scale should depend on the current size; that needs more work
-        totalSize = alaF Additive foldMap fst chrs
-        width' = width - offset * n
-        g (Tuple size a) = let scale = BpPerPixel (unwrap totalSize / width')
-                           in {xInfo: {size, scale}, contents: a}
-
-
 -- A Frame contains the information required to, in conjunction with a Renderer on `a`,
 -- render the contained data to a given place on the canvas.
 
 -- not going to be entirely trivial to construct this -- need to take the
--- total size, offsets, etc. into account. not just a map; we need a fold, too.
+-- total size, padding, etc. into account. not just a map; we need a fold, too.
 -- ... a hylomorphism?
-type Frame a = { offset :: Pixels, width :: Pixels, contents :: a }
-type Frames' a = Array (Frame a)
+
+-- The actual size the contents have to be rendered to is equal to width - (2.0 * padding).
+-- When rendered, individual frames are always immediately adjacent to one another
+-- Likewise, the sum of `width`s in a Frames' is always equal to the total width the
+-- Frames' can be drawn to.
+type Frame a = { padding :: Pixels, width :: Pixels, contents :: a }
+
+type ChrCtx r = Map ChrId (Record r)
+
+type Frames' r a = ChrCtx (frame :: Frame a | r)
+
+chrIdsEq :: forall a b.
+            Map ChrId a
+         -> Map ChrId b
+         -> Boolean
+chrIdsEq a b = (Map.keys a) == (Map.keys b)
+
+chrIdsSub :: forall a b.
+             Map ChrId a
+          -> Map ChrId b
+          -> Boolean
+chrIdsSub a b = setA `Map.isSubmap` setB
+  where setA = map (const unit) a
+        setB = map (const unit) b
 
 
-
-mapFrames :: forall a b.
-             (a -> b)
-          -> Frames a
-          -> Frames b
-mapFrames f fs = fs { frames = (\a -> a { contents = f a.contents }) <$> fs.frames }
+totalSize :: forall r.
+             ChrCtx (size :: Bp | r)
+          -> Bp
+totalSize chrCtx = alaF Additive foldMap _.size chrCtx
 
 
--- zipWithFrames :: forall a b.
---              Array (a -> b)
---           -> Frames a
---           -> Frames b
--- zipWithFrames funs fs = fs { frames = frames }
---   where frames = Array.zipWith (\fun frame -> fun <$> frame) funs fs.frames
+insertFrame :: forall r a.
+               RowLacks "frame" r
+            => a
+            -> { | r }
+            -> { frame :: a | r }
+insertFrame = Record.insert (SProxy :: SProxy "frame")
+
+mkFrame :: forall r a.
+            RowLacks "frame" (size :: Bp | r)
+         => Pixels
+         -> (Bp -> Pixels)
+         -> {size :: Bp | r}
+         -> a
+         -> {size :: Bp, frame :: Frame a | r}
+mkFrame padding getWidth chr a = chr'
+  where chr' :: {size :: Bp, frame :: Frame a | r}
+        chr' = insertFrame frame chr
+        frame :: Frame a
+        frame = { padding, width: getWidth chr.size, contents: a }
+
+
+zipChrs :: forall a b c.
+           Map ChrId a
+        -> Map ChrId b
+        -> Maybe ((a -> b -> c) -> Map ChrId c)
+zipChrs a b =
+  if chrIdsEq a b
+     then let (Tuple chrs a') = Array.unzip $ Map.toAscUnfoldable a
+              b' = snd <$> Map.toAscUnfoldable b
+          in pure $ \f -> Map.fromFoldable $ Array.zip chrs $ Array.zipWith f a' b'
+     else Nothing
 
 
 renderFrames :: forall f a.
@@ -286,13 +309,17 @@ mouseChrs = Map.fromFoldable $ Array.zip mouseChrIds $
             ]
 
 
+mouseChrCtx :: ChrCtx (size :: Bp)
+mouseChrCtx = map (\size -> { size }) mouseChrs
+
+
 mouseChrSize :: Bp -> ChrId -> Bp
 mouseChrSize def chr = fromMaybe def $ Map.lookup chr mouseChrs
 
 
 testRender :: forall a.
               Renderer _ a
-           -> Array (Tuple Bp (Array a))
+           -> Map ChrId (Array a)
            -> Aff _ Unit
 testRender r chrs = do
   canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
