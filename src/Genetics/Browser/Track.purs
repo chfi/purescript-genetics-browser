@@ -3,40 +3,36 @@ module Genetics.Browser.Track where
 import Prelude
 
 import Control.Monad.Aff (Aff, launchAff)
-import Control.Monad.Aff.AVar (AVar, makeVar, takeVar)
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
-import Control.Monad.Rec.Class (forever)
-import Control.Monad.State (StateT(..))
-import Control.Monad.State as State
-import Control.Monad.Trans.Class (lift)
-import Data.Argonaut (Json, _Array, _Number, _Object, _String)
-import Data.Array (foldl, (!!), (..), (:))
+import Control.Monad.Reader (Reader, ReaderT(..), ask, runReader, runReaderT)
+import Control.MonadPlus (guard)
+import Data.Array ((:))
 import Data.Array as Array
-import Data.Either (Either(..))
-import Data.Foldable (fold, foldMap, for_, length)
-import Data.Int as Int
-import Data.Lens ((^?))
-import Data.Lens.Index (ix)
+import Data.Distributive (distribute)
+import Data.Either (Either, Either(..))
+import Data.Foldable (fold, foldMap, for_, length, sum)
 import Data.List (List, mapMaybe)
-import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe, Maybe(..), fromJust, fromMaybe)
+import Data.Maybe (Maybe(..), fromJust, fromMaybe)
+import Data.Monoid (mempty)
 import Data.Monoid.Additive (Additive(..))
-import Data.Newtype (ala, alaF, unwrap, wrap)
+import Data.Newtype (ala, alaF, unwrap)
 import Data.NonEmpty (foldl1, fromNonEmpty)
 import Data.NonEmpty as NE
+import Data.Record as Record
+import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(..), fst, snd)
 import Debug.Trace (trace)
 import Genetics.Browser.DataSource (DataSource)
 import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
 import Genetics.Browser.GlyphF.Canvas (renderGlyph)
-import Genetics.Browser.Types (Bp(..), BpPerPixel(..), Chr, ChrId(..), Point, Range, bpToPixels)
+import Genetics.Browser.Types (Bp(..), BpPerPixel(..), Chr, ChrId(..), Point, Range, Pos, bpToPixels)
 import Genetics.Browser.UI.Native (getScreenSize)
 import Genetics.Browser.UI.Native.View as View
 import Genetics.Browser.View (View, Pixels)
@@ -49,6 +45,8 @@ import Network.HTTP.Affjax as Affjax
 import Partial.Unsafe (unsafePartial)
 import Text.Parsing.CSV as CSV
 import Text.Parsing.Parser as CSV
+import Type.Prelude (class RowLacks)
+import Unsafe.Coerce (unsafeCoerce)
 
 
 type Track aff eff a = { source :: DataSource aff a
@@ -193,17 +191,64 @@ zipChrs a b =
      else Nothing
 
 
-renderFrames :: forall f a.
+frames :: forall r a.
+          RowLacks "frame" (size :: Bp | r)
+       => Pixels
+       -> Pixels
+       -> Map ChrId a
+       -> ReaderT (ChrCtx (size :: Bp | r))
+            (Either String) (ChrCtx (size :: Bp, frame :: Frame a | r))
+frames totalWidth padding chrs = do
+  chrCtx <- ask
+  let tot :: Bp
+      tot = totalSize chrCtx
+      width :: Bp -> Pixels
+      width bp = unwrap $ bp / tot
+      mkF :: {size :: Bp | r} -> a -> {size :: Bp, frame :: Frame a | r }
+      mkF = mkFrame padding width
+
+  case zipChrs chrCtx chrs of
+    Nothing ->
+      throwError $ "ChrIds mismatch when creating frames"
+    Just zp -> pure $ zp mkF
+
+
+chrSubrange :: forall a r.
+               Range r
+            -> Map ChrId a
+            -> Map ChrId a
+chrSubrange {lHand, rHand} = Map.submap (Just lHand.chrId) (Just rHand.chrId)
+
+
+
+renderFrame :: forall r a.
+               YPosInfo
+            -> {size :: Bp, frame :: Frame (Array a) | r}
+            -> Renderer _ a
+            -> Context2D
+            -> Eff _ Unit
+renderFrame yInfo {size, frame} r ctx = foreachE frame.contents render
+  where render a = C.withContext ctx do
+              let xInfo = { size, scale: BpPerPixel ((unwrap size) / frame.width) }
+                  translateX = r.hPos a xInfo
+                  translateY = r.vPos a yInfo
+              _ <- C.translate {translateX, translateY} ctx
+              r.render a ctx
+
+
+renderFrames :: forall r a.
                 YPosInfo
-             -> Frames (Array a)
+             -> ChrCtx (size :: Bp, frame :: Frame (Array a) | r)
              -> Renderer _ a
+             -> {lHand :: Pos, rHand :: Pos}
              -> Context2D
              -> Eff _ Unit
-renderFrames yInfo {offset, frames} r ctx = C.withContext ctx (foreachE frames f)
-  where f {xInfo, contents} = do
-            runRenderer r {xInfo, yInfo} contents ctx
-            let len = bpToPixels xInfo.scale xInfo.size
-            void $ C.translate {translateX: len+offset, translateY: 0.0} ctx
+renderFrames yInfo fs r ran ctx = do
+  let frames' :: Array _
+      frames' = map snd <$> Map.toAscUnfoldable $ chrSubrange ran fs
+
+  C.withContext ctx do
+    for_ frames' (\f -> renderFrame yInfo f r ctx)
 
 
 -- Commands the renderer thread can receive
@@ -230,6 +275,8 @@ renderer cvs r cmdVar = forever do
       --     toRender = map r fs
       -- Use current (or provided?) View to derive RenderParams for each
       pure unit
+
+
 
     Scroll n -> do
       pure unit
@@ -335,10 +382,23 @@ testRender r chrs = do
       offset = 0.0
       yInfo = { height, offset }
 
-      fs :: Frames (Array a)
-      fs = frames w 20.0 chrs
+      fs :: _
+      fs = runReaderT (frames w 20.0 chrs) mouseChrCtx
 
-  liftEff $ renderFrames yInfo fs r ctx
+      lHand = { chrId: ChrId "3", bp: Bp 0.0 }
+      rHand = { chrId: ChrId "9", bp: Bp 0.0 }
+      ran :: Range ()
+      ran = { lHand, rHand }
+
+  liftEff $ log "chrs"
+  liftEff $ log $ show $ Map.keys chrs
+  liftEff $ log "mouseChrCtx"
+  liftEff $ log $ show $ Map.keys mouseChrCtx
+  liftEff $ log $ show $ chrIdsEq chrs mouseChrCtx
+
+  case fs of
+    Left err -> liftEff $ log err
+    Right fs' -> liftEff $ renderFrames yInfo fs' r ran ctx
 
 
 main = launchAff $ do
@@ -355,16 +415,12 @@ main = launchAff $ do
       render' :: Renderer _ _
       render' = gwasRenderer {min, max} chrColor
 
-      chrSize :: _ -> Bp
-      chrSize x = mouseChrSize (Bp 0.0) x.chr
-
   dat <- Array.fromFoldable <$> fetchGemma "./gwas.csv"
+  -- dat <- Array.fromFoldable <$> fetchGemma "./gwas_head.csv"
 
   let chrs :: _
-      chrs = (\a -> let bp = chrSize $ NE.head a
-                    in Tuple bp a) <$> Array.groupBy (\a b -> a.chr == b.chr) dat
-      chrs' = map (fromNonEmpty (:)) <$> chrs
-
-  liftEff $ log $ show $ (length chrs' :: Int)
+      chrs = (\a -> let chrId = _.chr $ NE.head a
+                    in Tuple chrId a) <$> Array.groupBy (\a b -> a.chr == b.chr) dat
+      chrs' = Map.fromFoldable $ map (fromNonEmpty (:)) <$> chrs
 
   testRender render' chrs'
