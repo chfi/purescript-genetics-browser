@@ -2,6 +2,7 @@ module Genetics.Browser.TruTrack where
 
 import Prelude
 
+import Color (Color)
 import Control.Monad.Aff (Aff, launchAff)
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
@@ -34,8 +35,6 @@ import Data.Tuple (Tuple(..), fst, snd, uncurry)
 import Data.Unfoldable (unfoldr)
 import Debug.Trace (trace)
 import Genetics.Browser.DataSource (DataSource)
-import Genetics.Browser.Glyph (Glyph, circle, fill, stroke)
-import Genetics.Browser.GlyphF.Canvas (renderGlyph)
 import Genetics.Browser.Types (Bp(..), BpPerPixel(..), Chr, ChrId(..), Point, Range, Pos, bpToPixels)
 import Genetics.Browser.UI.Native (getScreenSize)
 import Genetics.Browser.UI.Native.View as View
@@ -44,7 +43,8 @@ import Global (readFloat, readInt)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, Context2D, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth)
 import Graphics.Canvas as C
-import Graphics.Drawing (Drawing, translate)
+import Graphics.Drawing (Drawing, circle, fillColor, filled, outlineColor, outlined, translate)
+import Graphics.Drawing as Drawing
 import Math as Math
 import Network.HTTP.Affjax as Affjax
 import Partial.Unsafe (unsafePartial)
@@ -103,7 +103,40 @@ nPointToFrame w h (Normalized p) = {x: p.x * w, y: p.y * h}
 -- A renderer draws a single value to a normalized "canvas",
 -- i.e. the whole chromosome is located in x = (0.0, 1.0),
 -- and the whole track height in y = (0.0, 1.0).
-type Renderer a = { draw :: a -> Drawing
+-- It can fail if the given feature for some reason cannot be rendered,
+-- either because the feature lacks information, or because the context lacks something.
+type PureRenderer a = a -> Maybe { drawing :: Drawing
+                                 , point   :: Normalized Point
+                                 }
+
+
+type GWASFeature r = { score :: Number
+                     , pos :: Bp
+                     , chrId :: ChrId | r }
+
+mkGwasRenderer :: forall m rf rctx.
+                  MonadReader (ChrCtx (size :: Bp, color :: Color | rctx)) m
+               -- => MonadError Unit m
+               => {min :: Number, max :: Number}
+               -> m (PureRenderer (GWASFeature rf))
+mkGwasRenderer {min, max} = do
+  ctx <- ask
+  let renderer f = do
+        size <- _.size <$> Map.lookup f.chrId ctx
+        color <- _.color <$> Map.lookup f.chrId ctx
+
+        let r = 1.0
+            x = (unwrap $ f.pos / size) - r
+            y = (f.score - min / max - min) - r
+            c = circle x y r
+            out = outlined (outlineColor color) c
+            fill = filled (fillColor color) c
+            drawing = out <> fill
+        point <- normPoint {x, y}
+        pure { drawing, point }
+
+  pure renderer
+
                   , point :: a -> Normalized Point
                   }
 
