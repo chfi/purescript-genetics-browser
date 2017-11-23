@@ -15,7 +15,7 @@ import Data.Array ((:))
 import Data.Array as Array
 import Data.Distributive (distribute)
 import Data.Either (Either, Either(..))
-import Data.Filterable (filterMap)
+import Data.Filterable (class Filterable, filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, for_, length, maximum, minimum, sum)
 import Data.List (List(..), mapMaybe)
 import Data.Map (Map)
@@ -141,25 +141,55 @@ mkGwasRenderer {min, max} = do
                   }
 
 
+-- A single Frame that contains all data that is required to draw it
+type ReadyFrame r a = { width :: Pixels
+                      , padding :: Pixels
+                      , height :: Pixels
+                      , frame :: Frame (Array a) | r}
+
+
 drawFrame :: forall a r.
-             { width :: Pixels
-             , padding :: Pixels
-             , height :: Pixels
-             , frame :: Frame (Array a) | r}
-          -> Renderer a
+             PureRenderer a
+          -> ReadyFrame r a
           -> Drawing
-drawFrame {width, padding, height, frame} {draw, point} = foldMap draw' frame.contents
-  where draw' a = let {x,y} = nPointToFrame (width - padding * 2.0) height $ point a
-                      drawing = draw a
-                  in translate (x + padding) y drawing
+drawFrame r {width, padding, height, frame} = foldMap draw' frame.contents
+  where draw' a = case r a of
+          Nothing -> mempty
+          Just {drawing, point} ->
+            let {x,y} = nPointToFrame (width - padding * 2.0) height $ point
+            in translate (x + padding) y drawing
+
+
+-- Draw a collection of ReadyFrames, lined up one after another
+drawFrames :: forall a r.
+              Array (ReadyFrame r a)
+           -> PureRenderer a
+           -> Drawing
+drawFrames frames r = fold drawings
+  where os = framesOffsets frames
+        drawings = Array.zipWith (\o -> translate o 0.0) os
+                     $ map (drawFrame r) frames
+
+
+renderFrames :: forall f a r.
+                Foldable f
+             => Filterable f
+             => f ChrId
+             -> Map ChrId (ReadyFrame r a)
+             -> PureRenderer a
+             -> Context2D
+             -> Eff _ Unit
+renderFrames ids chrFs r ctx = Drawing.render ctx drawing
+  where drawing = drawFrames fs r
+        fs = Array.fromFoldable $ filterMap (\chrId -> Map.lookup chrId chrFs) ids
 
 
 
-offsets :: forall f r.
-           Traversable f
-        => f { width :: Pixels | r }
-        -> f Pixels
-offsets fs = scanl (\o {width} -> width + o) 0.0 fs
+framesOffsets :: forall f r.
+                 Traversable f
+              => f { width :: Pixels | r }
+              -> f Pixels
+framesOffsets fs = scanl (\o {width} -> width + o) 0.0 fs
 
 
 addOffsets :: forall k r.
@@ -167,7 +197,7 @@ addOffsets :: forall k r.
            => Map k { width :: Pixels | r }
            -> Map k { width :: Pixels, offset :: Pixels | r }
 addOffsets fs = zipMapsWith (unsafeSet "offset") os fs
-  where os = offsets fs
+  where os = framesOffsets fs
 
 
 
@@ -181,43 +211,6 @@ fitFrames :: forall f a r.
 fitFrames totalWidth fs = unsafeCoerce unit
   where totalSize = alaF Additive foldMap _.size fs
         w size = unwrap $ size / totalSize
-
-
-
--- TODO reasonable way of defining frame/track y-position, based on:
-
--- given a position relative to the track where 0.0 = bottom, 1.0 = top,
--- information about where the track will be drawn and how,
--- return the canvas Y-coordinate
-type YPosInfo = { offset :: Pixels, height :: Pixels }
-
-posPixelsY :: YPosInfo
-           -> Number
-           -> Pixels
-posPixelsY { offset, height } rel = height - (rel * height + offset)
-
-
--- type Renderer eff a =
---   { hPos :: a -> XPosInfo -> Pixels
---   , vPos :: a -> YPosInfo -> Pixels
---   , render :: a -> Context2D -> Eff eff Unit
---   , hit :: Maybe (a -> { x :: Pixels, y :: Pixels } -> a)
---   }
-
-
--- gwasRenderer :: forall a.
---                 {min :: Number, max :: Number}
---              -> (a -> String)
---              -> Renderer _ {score :: Number, pos :: Bp, chr :: a}
--- gwasRenderer {min, max} color = { hPos, vPos, render, hit: Nothing }
---   where hPos a xInfo = posPixelsX xInfo a.pos
---         nScore s = (s - min) / (max - min)
---         vPos a yInfo = posPixelsY yInfo (nScore a.score)
---         render a ctx = renderGlyph ctx $ do
---           stroke (color a.chr)
---           fill (color a.chr)
---           circle { x: 0.0, y: 0.0 } 5.0
-
 
 
 insertFrame :: forall r a.
@@ -278,12 +271,9 @@ chrSubrange {lHand, rHand} = Map.submap (Just lHand.chrId) (Just rHand.chrId)
 
 
 
--- renderFrame :: _
--- renderFrame = ?idk
-
 
 fetchGemma :: String
-           -> Aff _ (List { chr :: ChrId, pos :: Bp, score :: Number })
+           -> Aff _ (List { chrId :: ChrId, pos :: Bp, score :: Number })
 fetchGemma url = do
   liftEff $ log "fetching gwas"
   csv <- _.response <$> Affjax.get url
@@ -291,10 +281,10 @@ fetchGemma url = do
       parsed = CSV.runParser csv CSV.defaultParsers.fileHeaded
       parseEntry :: Map String String -> Maybe _
       parseEntry m = do
-        chr <- ChrId <$> Map.lookup "chr" m
+        chrId <- ChrId <$> Map.lookup "chr" m
         pos <- Bp <<< readFloat <$> Map.lookup "ps" m
         score <- readFloat <$> Map.lookup "af" m
-        pure { chr, pos, score }
+        pure { chrId, pos, score }
 
   case parsed of
     Left err -> throwError $ error "error parsing csv"
