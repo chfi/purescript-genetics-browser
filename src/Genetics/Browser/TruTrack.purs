@@ -166,27 +166,6 @@ framesOffsets :: forall f r.
 framesOffsets fs = scanl (\o {width} -> width + o) 0.0 fs
 
 
-addOffsets :: forall k r.
-              Ord k
-           => Map k { width :: Pixels | r }
-           -> Map k { width :: Pixels, offset :: Pixels | r }
-addOffsets fs = zipMapsWith (unsafeSet "offset") os fs
-  where os = framesOffsets fs
-
-
-
--- We simply throw away existing width, offset, height data if it exists
-fitFrames :: forall f a r.
-             Foldable f
-          => Pixels
-          -> f { size :: Bp | r }
-          -> f { width :: Pixels
-               , offset :: Pixels | r }
-fitFrames totalWidth fs = unsafeCoerce unit
-  where totalSize = alaF Additive foldMap _.size fs
-        w size = unwrap $ size / totalSize
-
-
 insertFrame :: forall r a.
                RowLacks "frame" r
             => a
@@ -271,7 +250,33 @@ addHeight :: forall a r.
                        | r }
 addHeight h fs = map f fs
   where f entry = entry { frame = Record.insert (SProxy :: SProxy "height") h entry.frame }
+
+
+fetchGemmaJSON :: String
+               -> Aff _ (Array (GWASFeature ()))
+fetchGemmaJSON url = do
+  json <- _.response <$> Affjax.get url
+
+  let f :: Json -> Maybe {score :: Number, pos :: Bp, chrId :: ChrId }
+      f j = do
+            obj <- j ^? _Object
+            pos <- Bp <$> obj ^? ix "min" <<< _Number
+            pValue <- readFloat <$> obj ^? ix "pValue" <<< _String
+            -- chrId <- ChrId <$> obj ^? ix "segment" <<< _String
+            let score = (-1.0) * (Math.log pValue / Math.log 10.0)
+            let chrId = ChrId "11"
+            pure {pos, score, chrId}
+
+  case traverse f =<< json ^? _Array of
+    Nothing -> throwError $ error "Failed to parse JSON features"
+    Just fs -> pure $ fs
+
+
+fetchGemmaCSV :: String
+              -> Aff _ (List (GWASFeature ()))
+fetchGemmaCSV url = do
   csv <- _.response <$> Affjax.get url
+
   let parsed :: _
       parsed = CSV.runParser csv CSV.defaultParsers.fileHeaded
       parseEntry :: Map String String -> Maybe _
@@ -284,6 +289,37 @@ addHeight h fs = map f fs
   case parsed of
     Left err -> throwError $ error "error parsing csv"
     Right p  -> pure $ mapMaybe parseEntry p
+
+
+
+
+drawGemma :: Pixels -> Pixels -> Pixels -> Pixels
+          -> { min :: Number, max :: Number }
+          -> Array ChrId
+          -> String -> Aff _ Drawing
+drawGemma w h p y s chrs url = do
+  gemma <- fetchGemmaCSV url
+
+  let features :: Map ChrId (Array (GWASFeature ()))
+      features = map Array.fromFoldable
+                 $ Map.filterKeys (\k -> k `Array.elem` chrs)
+                 $ groupToChrs gemma
+
+      readyFrames :: Map ChrId { size :: Bp, frame :: ReadyFrame (Array (GWASFeature ())) }
+      readyFrames = addHeight h $ chrFrames w p features
+
+      toDraw :: Array (ReadyFrame (Array (GWASFeature ())))
+      toDraw = _.frame <<< snd <$> Map.toAscUnfoldable readyFrames
+
+      colors' = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
+                  readyFrames mouseColors
+
+      renderer' :: PureRenderer (GWASFeature ())
+      renderer' = mkGwasRenderer s colors'
+
+  -- pure $ translate 0.0 (-y) $ drawFrames toDraw renderer'
+  pure $ drawFrames toDraw renderer'
+
 
 
 mouseChrIds :: Array ChrId
@@ -336,6 +372,14 @@ mouseChrs = Map.fromFoldable $ Array.zip mouseChrIds $
             , (Bp 9174469.0)
             ]
 
+mouseColors :: _
+mouseColors = Map.fromFoldable $ Array.zip mouseChrIds $ map (\x -> {color: x})
+              [ navy, blue, aqua, teal, olive
+              , green, lime, yellow, orange, red
+              , maroon, fuchsia, purple, navy, blue
+              , aqua, teal, olive, green, lime
+              , yellow ]
+
 
 mouseChrCtx :: ChrCtx (size :: Bp)
 mouseChrCtx = map (\size -> { size }) mouseChrs
@@ -343,3 +387,28 @@ mouseChrCtx = map (\size -> { size }) mouseChrs
 
 mouseChrSize :: Bp -> ChrId -> Bp
 mouseChrSize def chr = fromMaybe def $ Map.lookup chr mouseChrs
+
+
+
+main :: Eff _ _
+main = launchAff do
+
+  canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
+  ctx <- liftEff $ getContext2D canvas
+
+  {w,h} <- liftEff do
+    {w} <- getScreenSize
+    h <- getCanvasHeight canvas
+    _ <- setCanvasWidth (w-2.0) canvas
+    pure {w, h}
+
+  let height = h
+      offset = 0.0
+      yInfo = { height, offset }
+
+      -- chrIds = Array.take 4 $ Array.drop 9 mouseChrIds
+      chrIds = mouseChrIds
+
+  drawing <- drawGemma w h 50.0 10.0 {min: 0.0, max: 0.4} chrIds "./gwas.csv"
+
+  liftEff $ Drawing.render ctx drawing
