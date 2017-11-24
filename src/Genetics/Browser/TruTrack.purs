@@ -221,19 +221,18 @@ insertFrame :: forall r a.
 insertFrame = Record.insert (SProxy :: SProxy "frame")
 
 
-mkFrame :: forall r a.
-            RowLacks "frame" (size :: Bp | r)
-         => Pixels
-         -> (Bp -> Pixels)
-         -> {size :: Bp | r}
-         -> a
-         -> {size :: Bp, frame :: Frame a | r}
-mkFrame padding getWidth chr a = chr'
-  where chr' :: {size :: Bp, frame :: Frame a | r}
-        chr' = insertFrame frame chr
-        frame :: Frame a
-        frame = { padding, width: getWidth chr.size, contents: a }
-
+createFrames :: forall r a.
+                RowLacks "frame" (size :: Bp | r)
+             => Pixels
+             -> Pixels
+             -> Map ChrId {size :: Bp | r}
+             -> Map ChrId a
+             -> Map ChrId { size :: Bp, frame :: Frame a | r }
+createFrames totalWidth padding sizes as = zipMapsWith zippy sizes as
+  where ts = totalSize sizes
+        mkWidth size = (unwrap $ size / ts) * totalWidth
+        mkFrame' {size} a = { padding, width: mkWidth size, contents: a }
+        zippy r a = insertFrame (mkFrame' r a) r
 
 intersection :: forall k a b.
                 Ord k
@@ -262,20 +261,42 @@ zipMapsWith :: forall k a b c.
             -> Map k c
 zipMapsWith f a b = uncurry f <$> zipMaps a b
 
-
-chrSubrange :: forall a r.
-               Range r
-            -> Map ChrId a
-            -> Map ChrId a
-chrSubrange {lHand, rHand} = Map.submap (Just lHand.chrId) (Just rHand.chrId)
-
-
+groupToChrs :: forall r.
+               List { chrId :: ChrId | r }
+            -> Map ChrId (List { chrId :: ChrId | r })
+groupToChrs = foldl (\chrs r@{chrId} -> Map.alter (add r) chrId chrs ) mempty
+  where add x Nothing   = Just $ singleton x
+        add x (Just xs) = Just $ Cons x xs
 
 
-fetchGemma :: String
-           -> Aff _ (List { chrId :: ChrId, pos :: Bp, score :: Number })
-fetchGemma url = do
-  liftEff $ log "fetching gwas"
+
+chrFrames :: forall a.
+             Pixels
+          -> Pixels
+          -> Map ChrId a
+          -> Map ChrId { size :: Bp
+                       , frame :: { padding :: Pixels
+                                  , width :: Pixels
+                                  , contents :: a
+                                  }
+                       }
+chrFrames w p as = createFrames w p chrCtx' as
+  where chrCtx' = Map.filterKeys (\k -> k `Map.member` as) mouseChrCtx
+
+addHeight :: forall a r.
+             Pixels
+          -> Map ChrId { size :: Bp
+                       , frame :: { padding :: Pixels
+                                  , width :: Pixels
+                                  , contents :: a
+                                  }
+                       | r
+                       }
+          -> Map ChrId { size :: Bp
+                       , frame :: (ReadyFrame a)
+                       | r }
+addHeight h fs = map f fs
+  where f entry = entry { frame = Record.insert (SProxy :: SProxy "height") h entry.frame }
   csv <- _.response <$> Affjax.get url
   let parsed :: _
       parsed = CSV.runParser csv CSV.defaultParsers.fileHeaded
