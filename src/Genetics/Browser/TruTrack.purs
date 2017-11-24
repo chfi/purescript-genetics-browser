@@ -1,5 +1,6 @@
 module Genetics.Browser.TruTrack where
 
+import Color.Scheme.Clrs
 import Prelude
 
 import Color (Color)
@@ -11,19 +12,23 @@ import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Control.Monad.Reader (class MonadReader, Reader, ReaderT(..), ask, runReader, runReaderT)
 import Control.MonadPlus (guard)
+import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array ((:))
 import Data.Array as Array
 import Data.Distributive (distribute)
 import Data.Either (Either, Either(..))
 import Data.Filterable (class Filterable, filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, for_, length, maximum, minimum, sum)
+import Data.Lens ((^?))
+import Data.Lens.Index (ix)
 import Data.List (List(..), mapMaybe)
+import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe, isJust)
 import Data.Monoid (mempty)
 import Data.Monoid.Additive (Additive(..))
-import Data.Newtype (ala, alaF, unwrap)
+import Data.Newtype (ala, alaF, over, under, unwrap, wrap)
 import Data.NonEmpty (foldl1, fromNonEmpty)
 import Data.NonEmpty as NE
 import Data.Ord.Max (Max(..))
@@ -32,10 +37,11 @@ import Data.Record.Unsafe (unsafeSet)
 import Data.Symbol (SProxy(..))
 import Data.Traversable (class Traversable, scanl, traverse, traverse_)
 import Data.Tuple (Tuple(..), fst, snd, uncurry)
-import Data.Unfoldable (unfoldr)
+import Data.Unfoldable (singleton, unfoldr)
 import Debug.Trace (trace)
+import Debug.Trace as Debug
 import Genetics.Browser.DataSource (DataSource)
-import Genetics.Browser.Types (Bp(..), BpPerPixel(..), Chr, ChrId(..), Point, Range, Pos, bpToPixels)
+import Genetics.Browser.Types (Bp(..), BpPerPixel(..), Chr, ChrId(..), Point, Pos, Range, _ChrId, bpToPixels)
 import Genetics.Browser.UI.Native (getScreenSize)
 import Genetics.Browser.UI.Native.View as View
 import Genetics.Browser.View (View, Pixels)
@@ -43,7 +49,7 @@ import Global (readFloat, readInt)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, Context2D, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth)
 import Graphics.Canvas as C
-import Graphics.Drawing (Drawing, circle, fillColor, filled, outlineColor, outlined, translate)
+import Graphics.Drawing (Drawing, circle, fillColor, filled, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Math as Math
 import Network.HTTP.Affjax as Affjax
@@ -58,21 +64,6 @@ type Frame a = { padding :: Pixels, width :: Pixels, contents :: a }
 type ChrCtx r = Map ChrId (Record r)
 
 type ChrFrames r a = ChrCtx (frame :: Frame a | r)
-
-chrIdsEq :: forall a b.
-            Map ChrId a
-         -> Map ChrId b
-         -> Boolean
-chrIdsEq a b = (Map.keys a) == (Map.keys b)
-
-chrIdsSub :: forall a b.
-             Map ChrId a
-          -> Map ChrId b
-          -> Boolean
-chrIdsSub a b = setA `Map.isSubmap` setB
-  where setA = map (const unit) a
-        setB = map (const unit) b
-
 
 totalSize :: forall r.
              ChrCtx (size :: Bp | r)
@@ -124,65 +115,48 @@ mkGwasRenderer {min, max} = do
   let renderer f = do
         size <- _.size <$> Map.lookup f.chrId ctx
         color <- _.color <$> Map.lookup f.chrId ctx
-
-        let r = 1.0
-            x = (unwrap $ f.pos / size) - r
-            y = (f.score - min / max - min) - r
+        let r = 2.2
+            x = unwrap $ f.pos / size
+            y = 1.0 - ((f.score - min) / (max - min))
             c = circle x y r
             out = outlined (outlineColor color) c
             fill = filled (fillColor color) c
             drawing = out <> fill
+
         point <- normPoint {x, y}
         pure { drawing, point }
 
   pure renderer
 
-                  , point :: a -> Normalized Point
-                  }
-
 
 -- A single Frame that contains all data that is required to draw it
-type ReadyFrame r a = { width :: Pixels
-                      , padding :: Pixels
-                      , height :: Pixels
-                      , frame :: Frame (Array a) | r}
+type ReadyFrame a = { width :: Pixels
+                    , padding :: Pixels
+                    , height :: Pixels
+                    , contents :: a }
 
 
-drawFrame :: forall a r.
+drawFrame :: forall a.
              PureRenderer a
-          -> ReadyFrame r a
+          -> ReadyFrame (Array a)
           -> Drawing
-drawFrame r {width, padding, height, frame} = foldMap draw' frame.contents
+drawFrame r {width, padding, height, contents} = foldMap draw' contents
   where draw' a = case r a of
-          Nothing -> mempty
+          Nothing -> Debug.trace "drawing empty!" $ const mempty
           Just {drawing, point} ->
             let {x,y} = nPointToFrame (width - padding * 2.0) height $ point
-            in translate (x + padding) y drawing
+            in Debug.trace "drawing full :)" $ const $ translate (x + padding) y drawing
 
 
 -- Draw a collection of ReadyFrames, lined up one after another
-drawFrames :: forall a r.
-              Array (ReadyFrame r a)
+drawFrames :: forall a.
+              Array (ReadyFrame (Array a))
            -> PureRenderer a
            -> Drawing
 drawFrames frames r = fold drawings
-  where os = framesOffsets frames
+  where os = Array.cons 0.0 (framesOffsets frames) -- add 0.0 since scanl in framesOffsets doesn't include seed
         drawings = Array.zipWith (\o -> translate o 0.0) os
                      $ map (drawFrame r) frames
-
-
-renderFrames :: forall f a r.
-                Foldable f
-             => Filterable f
-             => f ChrId
-             -> Map ChrId (ReadyFrame r a)
-             -> PureRenderer a
-             -> Context2D
-             -> Eff _ Unit
-renderFrames ids chrFs r ctx = Drawing.render ctx drawing
-  where drawing = drawFrames fs r
-        fs = Array.fromFoldable $ filterMap (\chrId -> Map.lookup chrId chrFs) ids
-
 
 
 framesOffsets :: forall f r.
