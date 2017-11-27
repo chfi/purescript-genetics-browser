@@ -19,7 +19,7 @@ import Data.Distributive (distribute)
 import Data.Either (Either, Either(..))
 import Data.Filterable (class Filterable, filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, for_, length, maximum, minimum, sum)
-import Data.Lens ((^?))
+import Data.Lens (Fold', Prism', Getter', preview, re, (^?))
 import Data.Lens.Index (ix)
 import Data.List (List(..), mapMaybe)
 import Data.List as List
@@ -272,44 +272,39 @@ addHeight h fs = map f fs
   where f entry = entry { frame = Record.insert (SProxy :: SProxy "height") h entry.frame }
 
 
-fetchGemmaJSON :: String
-               -> Aff _ (Array (GWASFeature ()))
-fetchGemmaJSON url = do
+
+fetchJSON :: forall a.
+             (Json -> Maybe a)
+          -> String
+          -> Aff _ (Array a)
+fetchJSON p url = do
   json <- _.response <$> Affjax.get url
 
-  let f :: Json -> Maybe {score :: Number, pos :: Bp, chrId :: ChrId }
-      f j = do
-            obj <- j ^? _Object
-            pos <- Bp <$> obj ^? ix "min" <<< _Number
-            pValue <- readFloat <$> obj ^? ix "pValue" <<< _String
-            -- chrId <- ChrId <$> obj ^? ix "segment" <<< _String
-            let score = (-1.0) * (Math.log pValue / Math.log 10.0)
-            let chrId = ChrId "11"
-            pure {pos, score, chrId}
-
-  case traverse f =<< json ^? _Array of
-    Nothing -> throwError $ error "Failed to parse JSON features"
-    Just fs -> pure $ fs
+  case json ^? _Array of
+    Nothing -> throwError $ error "Parse error: JSON is not an array"
+    Just as -> case traverse p as of
+      Nothing -> throwError $ error "Failed to parse JSON features"
+      Just fs -> pure $ fs
 
 
-fetchGemmaCSV :: String
-              -> Aff _ (List (GWASFeature ()))
-fetchGemmaCSV url = do
-  csv <- _.response <$> Affjax.get url
+gemmaJSONParse :: Json -> Maybe (GWASFeature ())
+gemmaJSONParse j = do
+  obj <- j ^? _Object
+  chrId <- ChrId <$> obj ^? ix "chr" <<< _String
+  pos   <- Bp    <$> obj ^? ix "ps"  <<< _Number
+  score <-           obj ^? ix "af"  <<< _Number
+  pure {pos, score, chrId}
 
-  let parsed :: _
-      parsed = CSV.runParser csv CSV.defaultParsers.fileHeaded
-      parseEntry :: Map String String -> Maybe _
-      parseEntry m = do
-        chrId <- ChrId <$> Map.lookup "chr" m
-        pos <- Bp <<< readFloat <$> Map.lookup "ps" m
-        score <- readFloat <$> Map.lookup "af" m
-        pure { chrId, pos, score }
+fetchGemmaJSON = fetchJSON gemmaJSONParse
 
 
-  case parsed of
-    Left err -> throwError $ error "error parsing csv"
-    Right p  -> pure $ mapMaybe parseEntry p
+type GeneRow' r = ( geneID :: String
+                  , desc :: String
+                  , start :: Bp
+                  , end :: Bp
+                  , name :: String | r )
+
+type Gene' r = Record (GeneRow' r)
 
 
 
@@ -322,22 +317,18 @@ findRenderer rs (Tuple s a) = do
 
 
 
-drawMulti :: forall f a.
-             Foldable f
-          => { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
-          -> Array ChrId
-          -> Map String (PureRenderer a)
-          -> Map ChrId (Tuple String (f a))
-          -> Array ChrId
-          -> Drawing
-drawMulti {w,h,p,y} allChrs renderers dat chrs =
-  let features :: Map ChrId (Tuple String (Array a))
-      features = (map <<< map) Array.fromFoldable
-                 $ Map.filterKeys (\k -> k `Array.elem` chrs) dat
+geneJSONParse :: Json -> Maybe (Gene' ())
+geneJSONParse j = do
+  obj <- j ^? _Object
+  geneID  <- obj ^? ix "Gene stable ID" <<< _String
+  desc  <- obj ^? ix "Gene description" <<< _String
+  name  <- obj ^? ix "Gene name" <<< _String
+  start <- Bp    <$> obj ^? ix "Gene start (bp)"  <<< _Number
+  end   <- Bp    <$> obj ^? ix "Gene end (bp)"  <<< _Number
+  pure {geneID, desc, name, start, end}
 
-      readyFrames :: Map ChrId { size :: Bp, frame :: ReadyFrame (Tuple String (Array a)) }
-      -- readyFrames :: _
-      readyFrames = addHeight h $ chrFrames w p features
+fetchGene'JSON :: String -> Aff _ (Array (Gene' ()))
+fetchGene'JSON = fetchJSON geneJSONParse
 
       -- needed since the Ord instance on ChrId isn't necessarily correct
       comp (Tuple x _) (Tuple y _ ) = compareChrId allChrs x y
