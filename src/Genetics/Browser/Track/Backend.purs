@@ -28,7 +28,7 @@ import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe, isJust)
 import Data.Monoid (mempty)
 import Data.Monoid.Additive (Additive(..))
-import Data.Newtype (ala, alaF, over, under, unwrap, wrap)
+import Data.Newtype (class Newtype, ala, alaF, over, under, unwrap, wrap)
 import Data.NonEmpty (foldl1, fromNonEmpty)
 import Data.NonEmpty as NE
 import Data.Ord.Max (Max(..))
@@ -76,6 +76,8 @@ totalSize chrCtx = alaF Additive foldMap _.size chrCtx
 
 
 newtype Normalized a = Normalized a
+
+derive instance newtypeNormalized :: Newtype (Normalized a) _
 
 normalizePoint :: { width :: Number
                   , height :: Number }
@@ -386,6 +388,30 @@ mkGeneRenderer = do
   pure renderer
 
 
+shiftRendererScore :: forall rf.
+                          RowLacks "score" rf
+                       => Number
+                       -> { min :: Number, max :: Number }
+                       -> PureRenderer (Record rf)
+                       -> PureRenderer (Record (score :: Number | rf))
+shiftRendererScore dist s render f = do
+  {drawing, point} <- render (Record.delete (SProxy :: SProxy "score") f)
+  let {x,y} = unwrap point
+      y' = min (y + f.score - dist) 1.0
+  point' <- normPoint {x, y: y'}
+  pure {drawing, point: point'}
+
+
+findRenderer :: forall a.
+                Map String (PureRenderer a)
+             -> PureRenderer (Tuple String a)
+findRenderer rs (Tuple s a) = do
+  renderer <- Map.lookup s rs
+  renderer a
+
+
+
+{-
 drawGeneric :: forall f a.
                Foldable f
             => { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
@@ -406,40 +432,64 @@ drawGeneric {w,h,p,y} allChrs renderer dat chrs =
       comp (Tuple x _) (Tuple y _ ) = compareChrId allChrs x y
 
       toDraw :: Array (ReadyFrame (Array a))
-      toDraw = _.frame <<< snd <$> (Array.sortBy comp $ Map.toUnfoldable readyFrames)
+      -- toDraw = _.frame <<< snd <$> (Array.sortBy comp $ Map.toUnfoldable readyFrames)
+      toDraw = _.frame <<< snd <$> ((\chr -> Map.lookup chr readyFrames) <$> chrs
 
   in drawFrames toDraw renderer
+-}
 
 
+drawGenes :: forall r.
+             { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
+          -> { min :: Number, max :: Number }
+          -> List (Gene r)
+          -> Array ChrId
+          -> Drawing
+drawGenes {w,h,p,y} s genes chrs =
+  let features :: Map ChrId (Array _)
+      features = map Array.fromFoldable
+                 $ Map.filterKeys (\k -> k `Array.elem` chrs)
+                 $ groupToChrs genes
+
+      readyFrames :: Map ChrId { size :: Bp, frame :: ReadyFrame (Array _) }
+      readyFrames = addHeight h $ chrFrames w p features
+
+      comp (Tuple x _) (Tuple y _ ) = compareChrId mouseChrIds x y
+      toDraw :: Array (ReadyFrame (Array _))
+      toDraw = _.frame <<< snd <$> (Array.sortBy comp $ Map.toUnfoldable readyFrames)
+
+      renderer' :: PureRenderer (Gene r)
+      renderer' = mkGeneRenderer readyFrames
+
+  in translate 0.0 (h-y) $ scale 1.0 (-1.0) $ drawFrames toDraw renderer'
 
 
-
-drawGemma :: Pixels -> Pixels -> Pixels -> Pixels
+drawGemma :: forall r.
+             { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
           -> { min :: Number, max :: Number }
           -> Array ChrId
-          -> List (GWASFeature ())
+          -> List (GWASFeature r)
           -> Drawing
-drawGemma w h p y s chrs gemma =
-  let features :: Map ChrId (Array (GWASFeature ()))
+drawGemma {w,h,p,y} s chrs gemma =
+  let features :: Map ChrId (Array (GWASFeature r))
       features = map Array.fromFoldable
                  $ Map.filterKeys (\k -> k `Array.elem` chrs)
                  $ groupToChrs gemma
 
-      readyFrames :: Map ChrId { size :: Bp, frame :: ReadyFrame (Array (GWASFeature ())) }
+      readyFrames :: Map ChrId { size :: Bp, frame :: ReadyFrame (Array (GWASFeature r)) }
       readyFrames = addHeight h $ chrFrames w p features
 
       comp (Tuple x _) (Tuple y _ ) = compareChrId mouseChrIds x y
-      toDraw :: Array (ReadyFrame (Array (GWASFeature ())))
+      toDraw :: Array (ReadyFrame (Array (GWASFeature r)))
       toDraw = _.frame <<< snd <$> (Array.sortBy comp $ Map.toUnfoldable readyFrames)
 
-      colors' = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
-                  readyFrames mouseColors
+      colorsCtx = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
+                    readyFrames mouseColors
 
-      renderer' :: PureRenderer (GWASFeature ())
-      renderer' = mkGwasRenderer s colors'
+      renderer' :: PureRenderer (GWASFeature r)
+      renderer' = mkGwasRenderer s colorsCtx
 
-  -- pure $ translate 0.0 (-y) $ drawFrames toDraw renderer'
-  in drawFrames toDraw renderer'
+  in translate 0.0 (h-y) $ scale 1.0 (-1.0) $ drawFrames toDraw renderer'
 
 
 
