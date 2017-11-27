@@ -3,7 +3,7 @@ module Genetics.Browser.Track.Backend where
 import Color.Scheme.Clrs
 import Prelude
 
-import Color (Color)
+import Color (Color, black)
 import Control.Monad.Aff (Aff, launchAff)
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
@@ -52,8 +52,9 @@ import Global (readFloat, readInt)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, Context2D, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth)
 import Graphics.Canvas as C
-import Graphics.Drawing (Drawing, circle, fillColor, filled, outlineColor, outlined, rectangle, translate)
+import Graphics.Drawing (Drawing, circle, fillColor, filled, outlineColor, outlined, rectangle, scale, translate)
 import Graphics.Drawing as Drawing
+import Graphics.Drawing.Font (bold, font, sansSerif)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
 import Partial.Unsafe (unsafePartial)
@@ -135,7 +136,7 @@ mkGwasRenderer {min, max} = do
         color <- _.color <$> Map.lookup f.chrId ctx
         let r = 2.2
             x = unwrap $ f.pos / size
-            y = 1.0 - ((f.score - min) / (max - min))
+            y = (f.score - min) / (max - min)
             c = circle x y r
             out = outlined (outlineColor color) c
             fill = filled (fillColor color) c
@@ -307,13 +308,14 @@ type GeneRow' r = ( geneID :: String
 type Gene' r = Record (GeneRow' r)
 
 
+type GeneRow r = ( geneID :: String
+                 , desc :: String
+                 , start :: Bp
+                 , end :: Bp
+                 , name :: String
+                 , chrId :: ChrId | r )
 
-findRenderer :: forall a.
-                Map String (PureRenderer a)
-             -> PureRenderer (Tuple String a)
-findRenderer rs (Tuple s a) = do
-  renderer <- Map.lookup s rs
-  renderer a
+type Gene r = Record (GeneRow r)
 
 
 
@@ -330,24 +332,58 @@ geneJSONParse j = do
 fetchGene'JSON :: String -> Aff _ (Array (Gene' ()))
 fetchGene'JSON = fetchJSON geneJSONParse
 
-      -- needed since the Ord instance on ChrId isn't necessarily correct
-      comp (Tuple x _) (Tuple y _ ) = compareChrId allChrs x y
 
-      toDraw :: Array (ReadyFrame (Tuple String (Array a)))
-      toDraw = _.frame <<< snd <$> (Array.sortBy comp $ Map.toUnfoldable readyFrames)
+geneFetchChrId :: forall r.
+                  RowLacks "chrId" (GeneRow' r)
+               => Gene' r
+               -> Aff _ (Gene r)
+geneFetchChrId gene = do
+  let url = "https://rest.ensembl.org/lookup/id/" <>
+            gene.geneID <> "?content-type=application/json"
 
-      -- r :: PureRenderer (Tuple String a)
-      -- r = findRenderer renderers
-      r :: PureRenderer (Tuple String a)
-      r (Tuple s a) =  do
-            renderer <- Map.lookup s renderers
-            renderer a
+  res <- _.response <$> Affjax.get url
 
-  -- TODO fix this; (Tuple String (Array a)) -> Array (Tuple String a)
-  -- in unsafeCoerce unit
-  in drawFrames toDraw $ findRenderer renderers
+  let chrId :: _
+      chrId = do
+        obj <- res ^? _Object
+        ChrId <$> obj ^? ix "seq_region_name" <<< _String
+
+  case chrId of
+    Nothing  -> throwError $ error $ "Could not find chrId for gene " <> gene.geneID
+    Just chr -> pure $ Record.insert (SProxy :: SProxy "chrId") chr gene
 
 
+fetchGeneJSON :: String -> Aff _ (Array (Gene ()))
+fetchGeneJSON url = traverse geneFetchChrId =<< fetchJSON geneJSONParse url
+
+
+mkGeneRenderer :: forall m rf rctx.
+                  MonadReader (ChrCtx (size :: Bp | rctx)) m
+               => m (PureRenderer (Gene rf))
+mkGeneRenderer = do
+  ctx <- ask
+
+  let font' = font sansSerif 12 mempty
+  let renderer f = do
+        size <- _.size <$> Map.lookup f.chrId ctx
+        let rad = 20.0
+            lHand = unwrap $ f.start / size
+            rHand = unwrap $ f.end / size
+            w = (rHand - lHand) * unwrap size
+            x = lHand + (rHand - lHand)
+            y = 0.5
+            rect = rectangle lHand (y - rad/2.0) w (rad/2.0)
+            out = outlined (outlineColor red) rect
+            fill = filled (fillColor maroon) rect
+            -- the canvas is flipped so y-axis increases upward, need to flip the text too
+            text' = scale 1.0 (-1.0)
+                    $ Drawing.text font' x (y-0.25) (fillColor black) f.desc
+            drawing = out <> fill <> text'
+
+        point <- normPoint {x, y}
+        pure { drawing, point }
+
+  pure renderer
 
 
 drawGeneric :: forall f a.
