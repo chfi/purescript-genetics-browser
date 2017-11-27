@@ -25,6 +25,7 @@ import Data.Lens.Index (ix)
 import Data.List (List(..), (:))
 import Data.List as List
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
+import Data.Monoid (mempty)
 import Data.Newtype (over, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Traversable (traverse, traverse_)
@@ -33,7 +34,7 @@ import Debug.Trace (traceShow)
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Backend (GWASFeature, drawGemma, fetchGemmaCSV, mouseChrIds)
+import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawGemma, drawGenes, fetchGemmaJSON, fetchGene'JSON, geneFetchChrId, mouseChrIds)
 import Genetics.Browser.Types (ChrId(..))
 import Genetics.Browser.View (Pixels)
 import Global as Global
@@ -200,16 +201,24 @@ chrsArrayEvent :: Event (ZipperRange ChrId)
 chrsArrayEvent = map (Array.fromFoldable <<< _.focus)
 
 
-gemmaDrawingEvent :: { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
+gemmaDrawingEvent :: forall r.
+                     { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
                   -> { min :: Number, max :: Number }
-                  -> List (GWASFeature ())
+                  -> List (GWASFeature r)
                   -> Event (Array ChrId)
                   -> Event Drawing
-gemmaDrawingEvent {w,h,p,y} s gemma evChrs = drawing <$> evChrs
-  where drawing chrs = drawGemma w h p y s chrs gemma
+gemmaDrawingEvent pos s gemma evChrs = drawing <$> evChrs
+  where drawing chrs = drawGemma pos s chrs gemma
 
+geneDrawingEvent :: forall r.
+                    { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
+                 -> { min :: Number, max :: Number }
+                 -> List (Gene r)
+                 -> Event (Array ChrId)
+                 -> Event Drawing
+geneDrawingEvent pos s genes evChrs = drawing <$> evChrs
+  where drawing chrs = drawGenes pos s genes chrs
 
-foreign import effEvent :: forall eff. Unit -> { fun :: Eff eff Unit, ev :: Event Unit }
 
 
 
@@ -232,21 +241,39 @@ main = launchAff do
 
       chrIds = mouseChrIds
 
-  gwasData <- fetchGemmaCSV "./gwas.csv"
+  gwasData <- List.fromFoldable <$> fetchGemmaJSON "./gwas.json"
 
-  let sizes = {w, h, p: 4.0, y: 0.0}
-      score = {min: 0.0, max: 0.4}
+  liftEff $ log $ "parsed " <> show (length gwasData :: Int)
+
+  let sizes = {w, h, p: 4.0, y: 10.0}
+      score = {min: 0.1, max: 0.45}
 
   let viewEvent = chrsArrayEvent $ chrZREvent mouseChrIds btnUpdateView
 
-  let ev = gemmaDrawingEvent sizes score gwasData viewEvent
-      bg = filled (fillColor white) $ rectangle 0.0 0.0 w h
 
-  _ <- liftEff $ Event.subscribe viewEvent
+  genes' <- fetchGene'JSON "./sample_genes.json"
+  for_ genes' \gene -> liftEff do
+    log $ "Gene: " <> gene.geneID
+
+  liftEff $ log "fetching chrIds"
+  genes <- List.fromFoldable <$> traverse geneFetchChrId genes'
+  for_ genes \gene -> liftEff do
+    log $ "Gene: " <> gene.geneID
+    log $ "ChrId: " <> show gene.chrId
+    log $ "Start: " <> show gene.start <> "\tEnd: " <> show gene.end
+
+  let ev' :: Event Drawing
+      ev' = (gemmaDrawingEvent sizes score gwasData viewEvent) <>
+            (geneDrawingEvent sizes score genes viewEvent) <|> (pure mempty)
+
+  let bg = filled (fillColor white) $ rectangle 0.0 0.0 w h
+
+  void $ liftEff $ Event.subscribe viewEvent
        (\arr -> do
            let l = fromMaybe "N/A" $ show <$> Array.head arr
                r = fromMaybe "N/A" $ show <$> Array.last arr
            setViewUI $ show arr)
 
-
-  liftEff $ Event.subscribe ev (\d -> Drawing.render ctx (bg <> d))
+  -- TODO combine drawings by using layers -- keep the latest drawing per-layer until it gets updated
+  liftEff $ log "drawing1"
+  void $ liftEff $ Event.subscribe ev' (\d -> Drawing.render ctx (bg <> d))
