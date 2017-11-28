@@ -34,7 +34,7 @@ import Debug.Trace (traceShow)
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawGemma, drawGenes, fetchGemmaJSON, fetchGene'JSON, geneFetchChrId, mouseChrIds)
+import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawGemma, drawGenes, fetchGemmaJSON, fetchGene'JSON, fetchGeneJSON, geneFetchChrId, mouseChrIds)
 import Genetics.Browser.Types (ChrId(..))
 import Genetics.Browser.View (Pixels)
 import Global as Global
@@ -208,7 +208,7 @@ gemmaDrawingEvent :: forall r.
                   -> Event (Array ChrId)
                   -> Event Drawing
 gemmaDrawingEvent pos s gemma evChrs = drawing <$> evChrs
-  where drawing chrs = drawGemma pos s chrs gemma
+  where drawing chrs = drawGemma pos s gemma chrs
 
 geneDrawingEvent :: forall r.
                     { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
@@ -217,8 +217,16 @@ geneDrawingEvent :: forall r.
                  -> Event (Array ChrId)
                  -> Event Drawing
 geneDrawingEvent pos s genes evChrs = drawing <$> evChrs
-  where drawing chrs = drawGenes pos s genes chrs
+  where drawing chrs = drawGenes pos genes chrs
 
+
+-- geneDrawingEvent' :: forall r.
+--                      { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
+--                   -> { min :: Number, max :: Number }
+--                   -> Event (List (Gene r))
+--                   -> Event (Array ChrId)
+--                   -> Event Drawing
+-- geneDrawingEvent' pos s evGenes evChrs = drawGenes pos s <$> evGenes <*> evChrs
 
 
 

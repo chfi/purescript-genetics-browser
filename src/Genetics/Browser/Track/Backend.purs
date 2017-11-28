@@ -221,7 +221,8 @@ groupToChrs = foldl (\chrs r@{chrId} -> Map.alter (add r) chrId chrs ) mempty
 
 
 chrFrames :: forall a.
-             Pixels
+             _
+          -> Pixels
           -> Pixels
           -> Map ChrId a
           -> Map ChrId { size :: Bp
@@ -230,8 +231,11 @@ chrFrames :: forall a.
                                   , contents :: a
                                   }
                        }
-chrFrames w p as = createFrames w p chrCtx' as
-  where chrCtx' = Map.filterKeys (\k -> k `Map.member` as) mouseChrCtx
+chrFrames ctx w p as = createFrames w p chrCtx' as
+  where chrCtx' = Map.filterKeys (\k -> k `Map.member` as) ctx
+
+
+mouseChrFrames = chrFrames mouseChrCtx
 
 
 addHeight :: forall a r.
@@ -404,86 +408,49 @@ findRenderer rs (Tuple s a) = do
 
 
 
-{-
-drawGeneric :: forall f a.
-               Foldable f
-            => { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
-            -> Array ChrId
-            -> PureRenderer a
-            -> Map ChrId (f a)
-            -> Array ChrId
-            -> Drawing
-drawGeneric {w,h,p,y} allChrs renderer dat chrs =
+drawData :: forall f a.
+            Foldable f
+         => { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
+         -> PureRenderer a
+         -> Map ChrId (f a)
+         -> Array ChrId
+         -> Drawing
+drawData {w,h,p,y} renderer dat chrs =
   let features :: Map ChrId (Array a)
       features = map Array.fromFoldable
                  $ Map.filterKeys (\k -> k `Array.elem` chrs) dat
 
       readyFrames :: Map ChrId { size :: Bp, frame :: ReadyFrame (Array a) }
-      readyFrames = addHeight h $ chrFrames w p features
-
-      -- needed since the Ord instance on ChrId isn't necessarily correct
-      comp (Tuple x _) (Tuple y _ ) = compareChrId allChrs x y
+      readyFrames = addHeight h $ mouseChrFrames w p features
 
       toDraw :: Array (ReadyFrame (Array a))
-      -- toDraw = _.frame <<< snd <$> (Array.sortBy comp $ Map.toUnfoldable readyFrames)
-      toDraw = _.frame <<< snd <$> ((\chr -> Map.lookup chr readyFrames) <$> chrs
+      toDraw = _.frame  <$> (filterMap (\chr -> Map.lookup chr readyFrames) chrs)
 
-  in drawFrames toDraw renderer
--}
+  in translate 0.0 (h-y) $ scale 1.0 (-1.0) $ drawFrames toDraw renderer
 
 
 drawGenes :: forall r.
-             { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
-          -> { min :: Number, max :: Number }
+             { w :: Number, h :: Number
+             , p :: Number, y :: Number }
           -> List (Gene r)
           -> Array ChrId
           -> Drawing
-drawGenes {w,h,p,y} s genes chrs =
-  let features :: Map ChrId (Array _)
-      features = map Array.fromFoldable
-                 $ Map.filterKeys (\k -> k `Array.elem` chrs)
-                 $ groupToChrs genes
-
-      readyFrames :: Map ChrId { size :: Bp, frame :: ReadyFrame (Array _) }
-      readyFrames = addHeight h $ chrFrames w p features
-
-      comp (Tuple x _) (Tuple y _ ) = compareChrId mouseChrIds x y
-      toDraw :: Array (ReadyFrame (Array _))
-      toDraw = _.frame <<< snd <$> (Array.sortBy comp $ Map.toUnfoldable readyFrames)
-
-      renderer' :: PureRenderer (Gene r)
-      renderer' = mkGeneRenderer readyFrames
-
-  in translate 0.0 (h-y) $ scale 1.0 (-1.0) $ drawFrames toDraw renderer'
+drawGenes pos dat chrs = drawData pos renderer (groupToChrs dat) chrs
+  where renderer = mkGeneRenderer mouseChrCtx
 
 
 drawGemma :: forall r.
-             { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
+             { w :: Number, h :: Number
+             , p :: Number, y :: Number }
           -> { min :: Number, max :: Number }
-          -> Array ChrId
           -> List (GWASFeature r)
+          -> Array ChrId
           -> Drawing
-drawGemma {w,h,p,y} s chrs gemma =
-  let features :: Map ChrId (Array (GWASFeature r))
-      features = map Array.fromFoldable
-                 $ Map.filterKeys (\k -> k `Array.elem` chrs)
-                 $ groupToChrs gemma
-
-      readyFrames :: Map ChrId { size :: Bp, frame :: ReadyFrame (Array (GWASFeature r)) }
-      readyFrames = addHeight h $ chrFrames w p features
-
-      comp (Tuple x _) (Tuple y _ ) = compareChrId mouseChrIds x y
-      toDraw :: Array (ReadyFrame (Array (GWASFeature r)))
-      toDraw = _.frame <<< snd <$> (Array.sortBy comp $ Map.toUnfoldable readyFrames)
-
-      colorsCtx = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
-                    readyFrames mouseColors
-
-      renderer' :: PureRenderer (GWASFeature r)
-      renderer' = mkGwasRenderer s colorsCtx
-
-  in translate 0.0 (h-y) $ scale 1.0 (-1.0) $ drawFrames toDraw renderer'
-
+drawGemma pos s dat chrs = drawData pos renderer (groupToChrs dat) chrs
+  where colorsCtx = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
+                    mouseChrCtx mouseColors
+        renderer :: PureRenderer (GWASFeature r)
+        renderer = mkGwasRenderer s colorsCtx
 
 
 mouseChrIds :: Array ChrId
