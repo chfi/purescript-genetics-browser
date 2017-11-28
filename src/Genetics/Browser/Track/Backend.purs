@@ -82,19 +82,26 @@ type PureRenderer a = a -> Maybe { drawing :: Drawing
                                  }
 
 
--- If both renderers work on exactly the same data point,
--- there's no canonical way of picking between the results,
--- so we just pick the first
-catRenderers :: forall a.
-                PureRenderer a
-             -> PureRenderer a
-             -> PureRenderer a
-catRenderers r1 r2 = \x -> case r1 x, r2 x of
-  Nothing, Nothing -> Nothing
-  Just y, _ -> pure y
-  _, Just y -> pure y
+tagRenderer :: forall a sym r1 r2.
+               RowCons sym a r1 r2
+            => IsSymbol sym
+            => SProxy sym
+            -> PureRenderer a
+            -> PureRenderer (Variant r2)
+tagRenderer sym renderer var = do
+  feature <- Variant.prj sym var
+  renderer feature
 
 
+combineRenderers :: forall r1 r2 r3.
+                    Union r1 r2 r3
+                 => Contractable r3 r1
+                 => Contractable r3 r2
+                 => PureRenderer (Variant r1)
+                 -> PureRenderer (Variant r2)
+                 -> PureRenderer (Variant r3)
+combineRenderers r1 r2 var = (Variant.contract var >>= r1) <|>
+                             (Variant.contract var >>= r2)
 
 
 type GWASFeature r = { score :: Number
@@ -451,6 +458,23 @@ drawGemma pos s dat chrs = drawData pos renderer (groupToChrs dat) chrs
                     mouseChrCtx mouseColors
         renderer :: PureRenderer (GWASFeature r)
         renderer = mkGwasRenderer s colorsCtx
+
+
+drawBoth :: forall r.
+            { w :: Number, h :: Number
+            , p :: Number, y :: Number }
+         -> { min :: Number, max :: Number }
+         -> Map ChrId (List (Variant ("Gene" :: Gene (), "GWAS" :: GWASFeature ())))
+         -> Array ChrId
+         -> Drawing
+drawBoth pos s dat chrs = drawData pos renderer dat chrs
+  where geneR :: PureRenderer (Variant ("Gene" :: Gene ()))
+        geneR = tagRenderer (SProxy :: SProxy "Gene") $ mkGeneRenderer mouseChrCtx
+        gemmaR :: PureRenderer (Variant ("GWAS" :: GWASFeature ()))
+        gemmaR = tagRenderer (SProxy :: SProxy "GWAS") $ mkGwasRenderer s colorsCtx
+        colorsCtx = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
+                    mouseChrCtx mouseColors
+        renderer = combineRenderers geneR gemmaR
 
 
 mouseChrIds :: Array ChrId
