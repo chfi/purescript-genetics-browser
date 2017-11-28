@@ -1,65 +1,40 @@
 module Genetics.Browser.Track.Backend where
 
-import Color.Scheme.Clrs
 import Prelude
 
 import Color (Color, black)
-import Control.Monad.Aff (Aff, launchAff)
-import Control.Monad.Eff (Eff, foreachE)
-import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
+import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive, orange, purple, red, teal, yellow)
+import Control.Alt ((<|>))
+import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Exception (error)
-import Control.Monad.Error.Class (class MonadError, throwError)
-import Control.Monad.Reader (class MonadReader, Reader, ReaderT(..), ask, runReader, runReaderT)
-import Control.MonadPlus (guard)
+import Control.Monad.Error.Class (throwError)
+import Control.Monad.Reader (class MonadReader, ask)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
-import Data.Array ((:))
 import Data.Array as Array
-import Data.Distributive (distribute)
-import Data.Either (Either, Either(..))
-import Data.Filterable (class Filterable, filterMap)
-import Data.Foldable (class Foldable, fold, foldMap, foldl, for_, length, maximum, minimum, sum)
-import Data.Lens (Fold', Prism', Getter', preview, re, (^?))
+import Data.Filterable (filterMap)
+import Data.Foldable (class Foldable, fold, foldMap, foldl)
+import Data.Lens ((^?))
 import Data.Lens.Index (ix)
-import Data.List (List(..), mapMaybe)
-import Data.List as List
+import Data.List (List(..))
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..), fromJust, fromMaybe, isJust)
+import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
 import Data.Monoid (mempty)
 import Data.Monoid.Additive (Additive(..))
-import Data.Newtype (class Newtype, ala, alaF, over, under, unwrap, wrap)
-import Data.NonEmpty (foldl1, fromNonEmpty)
-import Data.NonEmpty as NE
-import Data.Ord.Max (Max(..))
-import Data.Ordering (Ordering(..))
+import Data.Newtype (class Newtype, alaF, unwrap)
 import Data.Record as Record
-import Data.Record.Unsafe (unsafeSet)
 import Data.Symbol (SProxy(..))
-import Data.Traversable (class Traversable, scanl, traverse, traverse_)
-import Data.Tuple (Tuple(..), fst, snd, uncurry)
-import Data.Unfoldable (singleton, unfoldr)
-import Data.Variant (Variant)
+import Data.Traversable (class Traversable, scanl, traverse)
+import Data.Tuple (Tuple(Tuple), snd, uncurry)
+import Data.Unfoldable (singleton)
+import Data.Variant (class Contractable, Variant)
 import Data.Variant as Variant
-import Debug.Trace (trace)
-import Debug.Trace as Debug
-import Genetics.Browser.DataSource (DataSource)
-import Genetics.Browser.Types (Bp(..), BpPerPixel(..), Chr, ChrId(..), Point, Pos, Range, _ChrId, bpToPixels)
-import Genetics.Browser.UI.Native (getScreenSize)
-import Genetics.Browser.UI.Native.View as View
-import Genetics.Browser.View (View, Pixels)
-import Global (readFloat, readInt)
-import Global.Unsafe (unsafeStringify)
-import Graphics.Canvas (CanvasElement, Context2D, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth)
-import Graphics.Canvas as C
+import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
+import Genetics.Browser.View (Pixels)
 import Graphics.Drawing (Drawing, circle, fillColor, filled, outlineColor, outlined, rectangle, scale, translate)
 import Graphics.Drawing as Drawing
-import Graphics.Drawing.Font (bold, font, sansSerif)
-import Math as Math
+import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
-import Partial.Unsafe (unsafePartial)
-import Text.Parsing.CSV as CSV
-import Text.Parsing.Parser as CSV
 import Type.Prelude (class IsSymbol, class RowLacks)
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -321,18 +296,32 @@ type Gene r = Record (GeneRow r)
 
 
 
-geneJSONParse :: Json -> Maybe (Gene' ())
-geneJSONParse j = do
-  obj <- j ^? _Object
-  geneID  <- obj ^? ix "Gene stable ID" <<< _String
-  desc  <- obj ^? ix "Gene description" <<< _String
-  name  <- obj ^? ix "Gene name" <<< _String
-  start <- Bp    <$> obj ^? ix "Gene start (bp)"  <<< _Number
-  end   <- Bp    <$> obj ^? ix "Gene end (bp)"  <<< _Number
+gene'JSONParse :: Json -> Maybe (Gene' ())
+gene'JSONParse j = do
+  obj    <- j ^? _Object
+  geneID <- obj ^? ix "Gene stable ID" <<< _String
+  desc   <- obj ^? ix "Gene description" <<< _String
+  name   <- obj ^? ix "Gene name" <<< _String
+  start  <- Bp    <$> obj ^? ix "Gene start (bp)"  <<< _Number
+  end    <- Bp    <$> obj ^? ix "Gene end (bp)"  <<< _Number
   pure {geneID, desc, name, start, end}
 
+
+
+geneJSONParse :: Json -> Maybe (Gene ())
+geneJSONParse j = do
+  obj    <- j ^? _Object
+  geneID <- obj ^? ix "Gene stable ID" <<< _String
+  desc   <- obj ^? ix "Gene description" <<< _String
+  name   <- obj ^? ix "Gene name" <<< _String
+  start  <- Bp    <$> obj ^? ix "Gene start (bp)"  <<< _Number
+  end    <- Bp    <$> obj ^? ix "Gene end (bp)"  <<< _Number
+  chrId  <- ChrId <$> obj ^? ix "ChrId" <<< _String
+  pure {geneID, desc, name, start, end, chrId}
+
+
 fetchGene'JSON :: String -> Aff _ (Array (Gene' ()))
-fetchGene'JSON = fetchJSON geneJSONParse
+fetchGene'JSON = fetchJSON gene'JSONParse
 
 
 geneFetchChrId :: forall r.
@@ -340,7 +329,7 @@ geneFetchChrId :: forall r.
                => Gene' r
                -> Aff _ (Gene r)
 geneFetchChrId gene = do
-  let url = "https://rest.ensembl.org/lookup/id/" <>
+  let url = "http://rest.ensembl.org/lookup/id/" <>
             gene.geneID <> "?content-type=application/json"
 
   res <- _.response <$> Affjax.get url
@@ -355,8 +344,12 @@ geneFetchChrId gene = do
     Just chr -> pure $ Record.insert (SProxy :: SProxy "chrId") chr gene
 
 
+fetchGeneJSONEnsembl :: String -> Aff _ (Array (Gene ()))
+fetchGeneJSONEnsembl url = traverse geneFetchChrId =<< fetchJSON gene'JSONParse url
+
+
 fetchGeneJSON :: String -> Aff _ (Array (Gene ()))
-fetchGeneJSON url = traverse geneFetchChrId =<< fetchJSON geneJSONParse url
+fetchGeneJSON = fetchJSON geneJSONParse
 
 
 mkGeneRenderer :: forall m rf rctx.
@@ -518,12 +511,6 @@ mouseChrIds =
             , (ChrId "Y")
             ]
 
-compareChrId :: Array ChrId -> (ChrId -> ChrId -> Ordering)
-compareChrId chrs x y = fromMaybe EQ do
-  x <- Array.elemIndex x chrs
-  y <- Array.elemIndex y chrs
-  pure $ x `compare` y
-
 mouseChrs :: Map ChrId Bp
 mouseChrs = Map.fromFoldable $ Array.zip mouseChrIds $
             [ (Bp 195471971.0)
@@ -549,7 +536,7 @@ mouseChrs = Map.fromFoldable $ Array.zip mouseChrIds $
             , (Bp 9174469.0)
             ]
 
-mouseColors :: _
+mouseColors :: ChrCtx (color :: Color)
 mouseColors = Map.fromFoldable $ Array.zip mouseChrIds $ map (\x -> {color: x})
               [ navy, blue, aqua, teal, olive
               , green, lime, yellow, orange, red

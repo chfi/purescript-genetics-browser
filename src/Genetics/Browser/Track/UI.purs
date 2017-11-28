@@ -251,16 +251,16 @@ main = launchAff do
   let viewEvent = chrsArrayEvent $ chrZREvent mouseChrIds btnUpdateView
 
 
-  genes' <- fetchGene'JSON "./sample_genes.json"
-  for_ genes' \gene -> liftEff do
-    log $ "Gene: " <> gene.geneID
+  genes <- List.fromFoldable <$> fetchGeneJSON "./sample_genes_chr.json"
+  -- for_ genes' \gene -> liftEff do
+  --   log $ "Gene: " <> gene.geneID
 
-  liftEff $ log "fetching chrIds"
-  genes <- List.fromFoldable <$> traverse geneFetchChrId genes'
-  for_ genes \gene -> liftEff do
-    log $ "Gene: " <> gene.geneID
-    log $ "ChrId: " <> show gene.chrId
-    log $ "Start: " <> show gene.start <> "\tEnd: " <> show gene.end
+  -- liftEff $ log "fetching chrIds"
+  -- genes <- List.fromFoldable <$> traverse geneFetchChrId genes'
+  -- for_ genes \gene -> liftEff do
+  --   log $ "Gene: " <> gene.geneID
+  --   log $ "ChrId: " <> show gene.chrId
+  --   log $ "Start: " <> show gene.start <> "\tEnd: " <> show gene.end
 
   let ev' :: Event Drawing
       ev' = (gemmaDrawingEvent sizes score gwasData viewEvent) <>
