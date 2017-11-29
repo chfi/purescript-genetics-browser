@@ -140,27 +140,38 @@ type ReadyFrame a = { width :: Pixels
                     , contents :: a }
 
 
-drawFrame :: forall a.
-             PureRenderer a
-          -> ReadyFrame (Array a)
-          -> Drawing
-drawFrame r {width, padding, height, contents} = foldMap draw' contents
-  where draw' a = case r a of
-          Nothing -> mempty
-          Just {drawing, point} ->
+pureRender :: forall f a.
+              Filterable f
+           => PureRenderer a
+           -> f a
+           -> f { drawing :: Drawing, point :: Normalized Point }
+pureRender r as = filterMap r as
+
+
+
+-- TODO simplify these two functions by extracting `padding` and `height` to another argument;
+-- after all, only `width` changes per frame
+drawPureFrame :: forall f r.
+                 Foldable f
+              => f { drawing :: Drawing, point :: Normalized Point | r }
+              -> { width :: Pixels, padding :: Pixels, height :: Pixels }
+              -> Drawing
+drawPureFrame fs { width, padding, height } = foldMap render' fs
+  where render' {drawing, point} =
             let {x,y} = nPointToFrame (width - padding * 2.0) height $ point
             in translate (x + padding) y drawing
 
 
--- Draw a collection of ReadyFrames, lined up one after another
-drawFrames :: forall a.
-              Array (ReadyFrame (Array a))
-           -> PureRenderer a
-           -> Drawing
-drawFrames frames r = fold drawings
-  where os = Array.cons 0.0 (framesOffsets frames) -- add 0.0 since scanl in framesOffsets doesn't include seed
-        drawings = Array.zipWith (\o -> translate o 0.0) os
-                     $ map (drawFrame r) frames
+-- Draw a collection of , lined up one after another
+drawPureFrames :: forall a.
+                  Array (Tuple (Array { drawing :: Drawing, point :: Normalized Point })
+                               { width :: Pixels, padding :: Pixels, height :: Pixels })
+               -> Drawing
+drawPureFrames frames = fold $ Array.zipWith (\o d -> translate o 0.0 d) os drawings'
+  where os = Array.cons 0.0 (framesOffsets $ snd <$> frames) -- add 0.0 since scanl in framesOffsets doesn't include seed
+        drawings' = map (uncurry drawPureFrame) frames
+
+
 
 
 framesOffsets :: forall f r.
@@ -218,13 +229,16 @@ zipMapsWith :: forall k a b c.
             -> Map k c
 zipMapsWith f a b = uncurry f <$> zipMaps a b
 
-groupToChrs :: forall r.
-               List { chrId :: ChrId | r }
-            -> Map ChrId (List { chrId :: ChrId | r })
+groupToChrs :: forall a f rData.
+               Monoid (f {chrId :: ChrId | rData})
+            => Foldable f
+            => Applicative f
+            => f { chrId :: ChrId | rData }
+            -> Map ChrId (f { chrId :: ChrId | rData })
 groupToChrs = foldl (\chrs r@{chrId} -> Map.alter (add r) chrId chrs ) mempty
-  where add x Nothing   = Just $ singleton x
-        add x (Just xs) = Just $ Cons x xs
-
+  where add :: { chrId :: ChrId | rData } -> Maybe _ -> Maybe _
+        add x Nothing   = Just $ pure x
+        add x (Just xs) = Just $ pure x <> xs
 
 
 chrFrames :: forall a.
@@ -436,6 +450,7 @@ drawData {w,h,p,y} renderer dat chrs =
   in translate 0.0 (h-y) $ scale 1.0 (-1.0) $ drawFrames toDraw renderer
 
 
+{-
 drawGenes :: forall r.
              { w :: Number, h :: Number
              , p :: Number, y :: Number }
@@ -475,6 +490,7 @@ drawBoth pos s dat chrs = drawData pos renderer dat chrs
         colorsCtx = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
                     mouseChrCtx mouseColors
         renderer = combineRenderers geneR gemmaR
+-}
 
 
 mouseChrIds :: Array ChrId
