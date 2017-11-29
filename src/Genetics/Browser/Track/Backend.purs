@@ -11,22 +11,26 @@ import Control.Monad.Error.Class (throwError)
 import Control.Monad.Reader (class MonadReader, ask)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
-import Data.Filterable (filterMap)
-import Data.Foldable (class Foldable, fold, foldMap, foldl)
+import Data.Filterable (class Filterable, filterMap)
+import Data.Foldable (class Foldable, fold, foldMap, foldl, maximum)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.List (List(..))
+import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
-import Data.Monoid (mempty)
+import Data.Monoid (class Monoid, mempty)
 import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (class Newtype, alaF, unwrap)
+import Data.Ord.Max (Max(..))
 import Data.Record as Record
+import Data.Semigroup.Foldable (foldMap1)
 import Data.Symbol (SProxy(..))
 import Data.Traversable (class Traversable, scanl, traverse)
-import Data.Tuple (Tuple(Tuple), snd, uncurry)
-import Data.Unfoldable (singleton)
+import Data.Tuple (Tuple(Tuple), fst, snd, uncurry)
+import Data.Unfoldable (class Unfoldable, singleton)
+import Data.Unfoldable as Unfoldable
 import Data.Variant (class Contractable, Variant)
 import Data.Variant as Variant
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
@@ -88,9 +92,7 @@ tagRenderer :: forall a sym r1 r2.
             => SProxy sym
             -> PureRenderer a
             -> PureRenderer (Variant r2)
-tagRenderer sym renderer var = do
-  feature <- Variant.prj sym var
-  renderer feature
+tagRenderer sym renderer var = Variant.prj sym var >>= renderer
 
 
 combineRenderers :: forall r1 r2 r3.
@@ -202,6 +204,9 @@ createFrames totalWidth padding sizes as = zipMapsWith zippy sizes as
         mkFrame' {size} a = { padding, width: mkWidth size, contents: a }
         zippy r a = insertFrame (mkFrame' r a) r
 
+
+
+
 intersection :: forall k a b.
                 Ord k
              => Map k a
@@ -298,6 +303,9 @@ gemmaJSONParse j = do
   score <-           obj ^? ix "af"  <<< _Number
   pure {pos, score, chrId}
 
+
+
+fetchGemmaJSON :: String -> Aff _ (Array (GWASFeature ()))
 fetchGemmaJSON = fetchJSON gemmaJSONParse
 
 
@@ -406,26 +414,42 @@ mkGeneRenderer = do
   pure renderer
 
 
-shiftRendererScore :: forall rf.
-                          RowLacks "score" rf
-                       => Number
-                       -> { min :: Number, max :: Number }
-                       -> PureRenderer (Record rf)
-                       -> PureRenderer (Record (score :: Number | rf))
-shiftRendererScore dist s render f = do
-  {drawing, point} <- render (Record.delete (SProxy :: SProxy "score") f)
+shiftRendererMinY :: forall rf.
+                      RowLacks "minY" rf
+                   => Number
+                   -> { min :: Number, max :: Number }
+                   -> PureRenderer (Record rf)
+                   -> PureRenderer (Record (minY :: Number | rf))
+shiftRendererMinY dist s render f = do
+  {drawing, point} <- render (Record.delete (SProxy :: SProxy "minY") f)
   let {x,y} = unwrap point
-      y' = min (y + f.score - dist) 1.0
+      normY = (s.max - f.minY) / (s.max - s.min)
+      y' = min (y + normY - dist) 1.0
   point' <- normPoint {x, y: y'}
   pure {drawing, point: point'}
 
 
-findRenderer :: forall a.
-                Map String (PureRenderer a)
-             -> PureRenderer (Tuple String a)
-findRenderer rs (Tuple s a) = do
-  renderer <- Map.lookup s rs
-  renderer a
+bumpedGeneRenderer :: forall rf.
+                      RowLacks "minY" (GeneRow rf)
+                   => { min :: Number, max :: Number }
+                   -> PureRenderer (Gene rf)
+                   -> PureRenderer (Gene (minY :: Number | rf))
+bumpedGeneRenderer s = shiftRendererMinY 0.05 s
+
+
+bumpGenes :: forall rGene rGWAS.
+             RowLacks "minY" (GeneRow rGene)
+          => Map ChrId (List (GWASFeature rGWAS))
+          -> Map ChrId (List (Gene rGene))
+          -> Map ChrId (List (Gene (minY :: Number | rGene)))
+bumpGenes = zipMapsWith (map <<< bumpGene)
+  where maxScoreIn :: Bp -> Bp -> List (GWASFeature rGWAS) -> Number
+        maxScoreIn l r gwas = fromMaybe 0.5 $ maximum
+                              $ map (\g -> if g.pos >= l && g.pos <= r
+                                           then g.score else 0.0) gwas
+        bumpGene :: List (GWASFeature rGWAS) -> Gene rGene -> Gene (minY :: Number | rGene)
+        bumpGene l g = let minY = maxScoreIn g.start g.end l
+                       in Record.insert (SProxy :: SProxy "minY") minY g
 
 
 
