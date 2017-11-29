@@ -474,6 +474,37 @@ drawData {w,h,p,y} renderer dat chrs =
   in translate 0.0 (h-y) $ scale 1.0 (-1.0) $ drawFrames toDraw renderer
 
 
+
+-- Draw data by rendering it only once
+drawData' :: forall f a r.
+             Foldable f
+          => Filterable f
+          -- NOTE! the width is the canvas width, not frame. Same w/ yOffset
+          => { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
+          -> Map ChrId { size :: Bp | r}
+          -> PureRenderer a
+          -> Map ChrId (f a)
+          -> Array ChrId
+          -> Drawing
+drawData' frameBox chrCtx renderer dat chrs = translate 0.0 (frameBox.height - frameBox.yOffset)
+                                                $ scale 1.0 (-1.0)
+                                                $ drawPureFrames (frames chrs)
+  -- TODO add a traceAny statement here to make sure it only runs once
+  where drawings :: Map ChrId (f {drawing :: Drawing, point :: _})
+        drawings = map (pureRender renderer) dat
+
+        mkFrame :: Bp -> ChrId -> Maybe {width :: _, height :: _, padding :: _}
+        mkFrame total chr = do
+          {size} <- Map.lookup chr chrCtx
+          let width = (unwrap $ size / total) * frameBox.width
+          pure { height: frameBox.height, padding: frameBox.padding, width }
+
+        mkFrames :: Array ChrId -> Array { width :: _, height :: _, padding :: _ }
+        mkFrames = filterMap (mkFrame $ totalSize chrCtx)
+
+        frames :: Array ChrId -> Array (Tuple (Array _) (_))
+        frames chrs' = Array.zip (filterMap (\c -> Array.fromFoldable <$> Map.lookup c drawings) chrs')
+                                 (mkFrames chrs')
 {-
 drawGenes :: forall r.
              { w :: Number, h :: Number
