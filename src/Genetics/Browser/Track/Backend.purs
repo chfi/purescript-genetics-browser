@@ -414,6 +414,41 @@ mkGeneRenderer = do
   pure renderer
 
 
+
+
+{-
+What is needed is a way to get the score for some other thing
+at or close to the annotation.
+
+Maybe we can use the `point` property of the renderers.
+In fact, that is the only thing we need to modify.
+However, modifying that becomes tricky -- where do we do it,
+and how do we keep track of it so that it's reversible?
+
+THIS IS HOW:
+"Render" everything once, at start. Then just use those Drawings and Normalized Points
+when the chr view changes, zooms, etc. For now we can assume that we can just wait
+a few seconds at start; later we can show the mid-steps.
+Using this data (plus some sort of Shape usable for collision detection and/or some
+provided "bumping" rules) we can iterate the track until everything is where it
+should be.
+That could even use Event's `fix` function to show the bumping take place...
+
+
+There's one problem -- the horizontal interval a glyph covers is
+a function of the BpPerPixels scale. I.e. even though each feature is always
+drawn using the same Drawing and Normalized Point, the /relative horizontal/
+positioning of glyphs is a function of:
+
+the Drawings, Normalized Points, Collision Shapes in the neighborhood, and
+the /current/ BpPerPixels in the chromosome.
+
+However, it should be a pretty basic function. Linear, even.
+
+
+Anyway, this is going to be tricky enough to not attack as a first attempt;
+get something that works with what we've got right now, first.
+-}
 shiftRendererMinY :: forall rf.
                       RowLacks "minY" rf
                    => Number
@@ -452,26 +487,79 @@ bumpGenes = zipMapsWith (map <<< bumpGene)
                        in Record.insert (SProxy :: SProxy "minY") minY g
 
 
+getDataDemo :: { gwas :: String
+               , genes :: String }
+            -> Aff _ { gwas  :: Map ChrId (List (GWASFeature ()       ))
+                     , genes :: Map ChrId (List (Gene (minY :: Number)))
+                     }
+getDataDemo urls = do
+  gwas <- fetchGemmaJSON urls.gwas
+  genes' <- fetchGeneJSON urls.genes
+  -- Divide data by chromosomes
+  let gwasChr :: Map ChrId (List (GWASFeature ()))
+      gwasChr = List.fromFoldable <$> groupToChrs gwas
+  let genesChr :: Map ChrId (List (Gene ()))
+      genesChr = List.fromFoldable <$> groupToChrs genes'
+  let bumpedGenes :: Map ChrId (List (Gene (minY :: Number)))
+      bumpedGenes = bumpGenes gwasChr genesChr
 
-drawData :: forall f a.
+  pure { gwas: gwasChr, genes: bumpedGenes }
+
+
+renderersDemo :: { min :: Number, max :: Number }
+              -> { gwas  :: PureRenderer (GWASFeature ()       )
+                 , genes :: PureRenderer (Gene (minY :: Number)) }
+renderersDemo s = { gwas, genes }
+  where colorsCtx = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
+                      mouseChrCtx mouseColors
+        gwas :: PureRenderer (GWASFeature ())
+        gwas = mkGwasRenderer s colorsCtx
+
+        genes :: PureRenderer (Gene (minY :: Number))
+        genes = bumpedGeneRenderer s $ mkGeneRenderer mouseChrCtx
+
+
+
+drawDemo :: forall f.
             Foldable f
-         => { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
-         -> PureRenderer a
-         -> Map ChrId (f a)
+         => Filterable f
+         => { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
+         -> { min :: Number, max :: Number }
+         -> { gwas :: Map ChrId (f (GWASFeature ()))
+            , genes :: Map ChrId (f (Gene (minY :: Number))) }
          -> Array ChrId
          -> Drawing
-drawData {w,h,p,y} renderer dat chrs =
-  let features :: Map ChrId (Array a)
-      features = map Array.fromFoldable
-                 $ Map.filterKeys (\k -> k `Array.elem` chrs) dat
+drawDemo f s {gwas, genes} chrs = (drawData' f mouseChrCtx renderers.gwas gwas chrs) <>
+                                  (drawData' f mouseChrCtx renderers.genes genes chrs)
+  where renderers = renderersDemo s
 
-      readyFrames :: Map ChrId { size :: Bp, frame :: ReadyFrame (Array a) }
-      readyFrames = addHeight h $ mouseChrFrames w p features
 
-      toDraw :: Array (ReadyFrame (Array a))
-      toDraw = _.frame  <$> (filterMap (\chr -> Map.lookup chr readyFrames) chrs)
 
-  in translate 0.0 (h-y) $ scale 1.0 (-1.0) $ drawFrames toDraw renderer
+
+
+{-
+The only way _this_ function would work (without a ridiculous number
+of type annotations, if then) would be if the `r` row contains *all*
+intermediate types.
+
+But then it could work. No idea if it's in any way reasonable
+or useful even if it does work, tho :) :) :)
+
+
+Actually, it might work kind of nice if Variant.onMatch is used.
+Then we'd just have to provide a record where each field corresponds
+to a function modifying the respective data depending on one of the
+possible data types; the function would itself use Variant.onMatch
+since each type of data should be able to interact with every other
+type of data.
+-}
+
+pipeline :: forall r.
+            List (List (Variant r) -> List (Variant r))
+         -> Map ChrId (List (Variant r))
+         -> Map ChrId (List (Variant r))
+pipeline = unsafeCoerce unit
+
 
 
 
