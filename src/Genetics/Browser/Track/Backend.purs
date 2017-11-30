@@ -33,6 +33,7 @@ import Data.Unfoldable (class Unfoldable, singleton)
 import Data.Unfoldable as Unfoldable
 import Data.Variant (class Contractable, Variant)
 import Data.Variant as Variant
+import Debug.Trace as Debug
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
 import Genetics.Browser.View (Pixels)
 import Graphics.Drawing (Drawing, circle, fillColor, filled, outlineColor, outlined, rectangle, scale, translate)
@@ -81,9 +82,52 @@ nPointToFrame w h (Normalized p) = {x: p.x * w, y: p.y * h}
 -- and the whole track height in y = (0.0, 1.0).
 -- It can fail if the given feature for some reason cannot be rendered,
 -- either because the feature lacks information, or because the context lacks something.
+
 type PureRenderer a = a -> Maybe { drawing :: Drawing
                                  , point   :: Normalized Point
                                  }
+
+
+-- Drawings are not entirely pure. They can depend on the width of the
+-- frame, if they something that spans across a range of the genome.
+-- So, the `drawing` field should really have type
+--   Pixels -> Drawing
+-- where the `Pixels` is the width of the frame. Renderers already
+-- have access to the chr size when created, so the width is all that's needed.
+type PureRenderer' a = a -> Maybe { drawing :: Pixels -> Drawing
+                                  , point   :: Normalized Point
+                                  }
+
+
+mkGeneRenderer' :: forall m rf rctx.
+                   MonadReader (ChrCtx (size :: Bp | rctx)) m
+                => m (PureRenderer' (Gene rf))
+mkGeneRenderer' = do
+  ctx <- ask
+
+  let font' = font sansSerif 12 mempty
+  let renderer f = do
+        size <- _.size <$> Map.lookup f.chrId ctx
+        let rad = 20.0
+            lHand = unwrap $ f.start / size
+            rHand = unwrap $ f.end / size
+            w = (rHand - lHand) * unwrap size
+            x = lHand + (rHand - lHand)
+            y = 0.0
+            rect = rectangle lHand (y - rad/2.0) w (rad/2.0)
+            out = outlined (outlineColor red) rect
+            fill = filled (fillColor maroon) rect
+            -- the canvas is flipped so y-axis increases upward, need to flip the text too
+            text' = scale 1.0 (-1.0)
+                    $ Drawing.text font' x (y-0.25) (fillColor black) f.desc
+            drawing = out <> fill <> text'
+
+        point <- normPoint {x, y}
+        pure { drawing, point }
+
+  pure $ unsafeCoerce unit
+
+
 
 
 tagRenderer :: forall a sym r1 r2.
@@ -397,9 +441,9 @@ mkGeneRenderer = do
         let rad = 20.0
             lHand = unwrap $ f.start / size
             rHand = unwrap $ f.end / size
-            w = (rHand - lHand) * unwrap size
+            w = (rHand - lHand)
             x = lHand + (rHand - lHand)
-            y = 0.5
+            y = 0.0
             rect = rectangle lHand (y - rad/2.0) w (rad/2.0)
             out = outlined (outlineColor red) rect
             fill = filled (fillColor maroon) rect
@@ -459,7 +503,9 @@ shiftRendererMinY dist s render f = do
   {drawing, point} <- render (Record.delete (SProxy :: SProxy "minY") f)
   let {x,y} = unwrap point
       normY = (s.max - f.minY) / (s.max - s.min)
-      y' = min (y + normY - dist) 1.0
+      y' = min (normY - dist) 1.0
+
+  Debug.trace (show f.minY) \_ -> pure unit
   point' <- normPoint {x, y: y'}
   pure {drawing, point: point'}
 
@@ -523,13 +569,13 @@ renderersDemo s = { gwas, genes }
 drawDemo :: forall f.
             Foldable f
          => Filterable f
-         => { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
-         -> { min :: Number, max :: Number }
+         => { min :: Number, max :: Number }
+         -> { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
          -> { gwas :: Map ChrId (f (GWASFeature ()))
             , genes :: Map ChrId (f (Gene (minY :: Number))) }
          -> Array ChrId
          -> Drawing
-drawDemo f s {gwas, genes} chrs = (drawData' f mouseChrCtx renderers.gwas gwas chrs) <>
+drawDemo s f {gwas, genes} chrs = (drawData' f mouseChrCtx renderers.gwas gwas chrs) <>
                                   (drawData' f mouseChrCtx renderers.genes genes chrs)
   where renderers = renderersDemo s
 
