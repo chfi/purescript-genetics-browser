@@ -24,6 +24,7 @@ import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.List (List(..), (:))
 import Data.List as List
+import Data.Map (Map)
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Monoid (mempty)
 import Data.Newtype (over, unwrap, wrap)
@@ -34,7 +35,7 @@ import Debug.Trace (traceShow)
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawGemma, drawGenes, fetchGemmaJSON, fetchGene'JSON, fetchGeneJSON, geneFetchChrId, mouseChrIds)
+import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawDemo, getDataDemo, mouseChrIds)
 import Genetics.Browser.Types (ChrId(..))
 import Genetics.Browser.View (Pixels)
 import Global as Global
@@ -201,33 +202,14 @@ chrsArrayEvent :: Event (ZipperRange ChrId)
 chrsArrayEvent = map (Array.fromFoldable <<< _.focus)
 
 
-gemmaDrawingEvent :: forall r.
-                     { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
-                  -> { min :: Number, max :: Number }
-                  -> List (GWASFeature r)
-                  -> Event (Array ChrId)
-                  -> Event Drawing
-gemmaDrawingEvent pos s gemma evChrs = drawing <$> evChrs
-  where drawing chrs = drawGemma pos s gemma chrs
 
-geneDrawingEvent :: forall r.
-                    { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
-                 -> { min :: Number, max :: Number }
-                 -> List (Gene r)
-                 -> Event (Array ChrId)
-                 -> Event Drawing
-geneDrawingEvent pos s genes evChrs = drawing <$> evChrs
-  where drawing chrs = drawGenes pos genes chrs
-
-
--- geneDrawingEvent' :: forall r.
---                      { w :: Pixels, h :: Pixels, p :: Pixels, y :: Pixels }
---                   -> { min :: Number, max :: Number }
---                   -> Event (List (Gene r))
---                   -> Event (Array ChrId)
---                   -> Event Drawing
--- geneDrawingEvent' pos s evGenes evChrs = drawGenes pos s <$> evGenes <*> evChrs
-
+drawingEvent :: { min :: Number, max :: Number }
+             -> { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
+             -> { gwas  :: Map ChrId (List _)
+                , genes :: Map ChrId (List _) }
+             -> Event (Array ChrId)
+             -> Event (Drawing)
+drawingEvent s box dat chrs = drawDemo s box dat <$> chrs
 
 
 
@@ -249,39 +231,22 @@ main = launchAff do
 
       chrIds = mouseChrIds
 
-  gwasData <- List.fromFoldable <$> fetchGemmaJSON "./gwas.json"
-
-  liftEff $ log $ "parsed " <> show (length gwasData :: Int)
-
-  let sizes = {w, h, p: 4.0, y: 10.0}
-      score = {min: 0.1, max: 0.45}
 
   let viewEvent = chrsArrayEvent $ chrZREvent mouseChrIds btnUpdateView
-
-
-  genes <- List.fromFoldable <$> fetchGeneJSON "./sample_genes_chr.json"
-  -- for_ genes' \gene -> liftEff do
-  --   log $ "Gene: " <> gene.geneID
-
-  -- liftEff $ log "fetching chrIds"
-  -- genes <- List.fromFoldable <$> traverse geneFetchChrId genes'
-  -- for_ genes \gene -> liftEff do
-  --   log $ "Gene: " <> gene.geneID
-  --   log $ "ChrId: " <> show gene.chrId
-  --   log $ "Start: " <> show gene.start <> "\tEnd: " <> show gene.end
-
-  let ev' :: Event Drawing
-      ev' = (gemmaDrawingEvent sizes score gwasData viewEvent) <>
-            (geneDrawingEvent sizes score genes viewEvent) <|> (pure mempty)
-
-  let bg = filled (fillColor white) $ rectangle 0.0 0.0 w h
 
   void $ liftEff $ Event.subscribe viewEvent
        (\arr -> do
            let l = fromMaybe "N/A" $ show <$> Array.head arr
                r = fromMaybe "N/A" $ show <$> Array.last arr
-           setViewUI $ show arr)
+           setViewUI $ l <> "\tto\t" <> r)
 
-  -- TODO combine drawings by using layers -- keep the latest drawing per-layer until it gets updated
-  liftEff $ log "drawing1"
+  dat <- getDataDemo { gwas: "./gwas.json"
+                     , genes: "./sample_genes_chr.json" }
+
+  let sizes = {width: w, height: h, padding: 4.0, yOffset: 10.0}
+      score = {min: 0.1, max: 0.45}
+
+  let ev' = drawingEvent score sizes dat viewEvent
+      bg = filled (fillColor white) $ rectangle 0.0 0.0 w h
+
   void $ liftEff $ Event.subscribe ev' (\d -> Drawing.render ctx (bg <> d))
