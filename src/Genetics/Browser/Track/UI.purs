@@ -176,7 +176,7 @@ btnZoom = const Out <$> buttonEvent "zoomOut" <|>
           const In  <$> buttonEvent "zoomIn"
 
 btnUpdateView :: Event UpdateView
-btnUpdateView = btnScroll <|> btnZoom
+btnUpdateView = btnScroll <|> btnZoom <|> (const NoOp <$> buttonEvent "redraw")
 
 
 

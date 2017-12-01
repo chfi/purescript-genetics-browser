@@ -44,7 +44,8 @@
     "purescript-behaviors": "^6.0.0",
     "purescript-csv": "^2.0.0",
     "purescript-lists": "^4.11.0",
-    "purescript-drawing": "^3.0.0"
+    "purescript-drawing": "^3.0.0",
+    "purescript-memoize": "^4.0.1"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0",
