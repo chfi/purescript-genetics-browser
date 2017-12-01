@@ -12,7 +12,7 @@ import Control.Monad.Reader (class MonadReader, ask)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
 import Data.Filterable (class Filterable, filterMap)
-import Data.Foldable (class Foldable, fold, foldMap, foldl, maximum)
+import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum, sum)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.List (List(..))
@@ -213,7 +213,7 @@ drawPureFrames :: forall a.
                   Array (Tuple (Array { drawing :: Drawing, point :: Normalized Point })
                                { width :: Pixels, padding :: Pixels, height :: Pixels })
                -> Drawing
-drawPureFrames frames = fold $ Array.zipWith (\o d -> translate o 0.0 d) os drawings'
+drawPureFrames frames = fold $ Array.zipWith (\o -> translate o 0.0) os drawings'
   where os = Array.cons 0.0 (framesOffsets $ snd <$> frames) -- add 0.0 since scanl in framesOffsets doesn't include seed
         drawings' = map (uncurry drawPureFrame) frames
 
@@ -560,10 +560,9 @@ shiftRendererMinY :: forall rf.
 shiftRendererMinY dist s render f = do
   {drawing, point} <- render (Record.delete (SProxy :: SProxy "minY") f)
   let {x,y} = unwrap point
-      normY = (s.max - f.minY) / (s.max - s.min)
-      y' = min (normY - dist) 1.0
+      normY = (f.minY - s.min) / (s.max - s.min)
+      y' = min (normY + dist) (1.0 - dist / 2.0)
 
-  Debug.trace (show f.minY) \_ -> pure unit
   point' <- normPoint {x, y: y'}
   pure {drawing, point: point'}
 
@@ -664,7 +663,10 @@ pipeline :: forall r.
 pipeline = unsafeCoerce unit
 
 
-
+-- TODO PROBLEM! This doesn't take potentially empty chrs into account,
+-- since it only indexes into the provided Map ChrId.
+-- Solve by producing empty drawings for lookups that are Nothing, in the frames
+-- helper function below, or something like that.
 
 -- Draw data by rendering it only once
 drawData' :: forall f a r.
@@ -684,14 +686,17 @@ drawData' frameBox chrCtx renderer dat chrs = translate 0.0 (frameBox.height - f
   where drawings :: Map ChrId (f {drawing :: Drawing, point :: _})
         drawings = map (pureRender renderer) dat
 
-        mkFrame :: Bp -> ChrId -> Maybe {width :: _, height :: _, padding :: _}
-        mkFrame total chr = do
+        mkFrame :: ChrId -> Maybe {width :: _, height :: _, padding :: _}
+        mkFrame chr = do
           {size} <- Map.lookup chr chrCtx
-          let width = (unwrap $ size / total) * frameBox.width
+          let total = sum $ filterMap (\c -> _.size <$> Map.lookup c chrCtx) chrs
+              -- width = unsafeCoerce unit
+              width = (unwrap $ size / total) * frameBox.width
+          -- Debug.trace (show width) \_ -> pure unit
           pure { height: frameBox.height, padding: frameBox.padding, width }
 
         mkFrames :: Array ChrId -> Array { width :: _, height :: _, padding :: _ }
-        mkFrames = filterMap (mkFrame $ totalSize chrCtx)
+        mkFrames = filterMap mkFrame
 
         frames :: Array ChrId -> Array (Tuple (Array _) (_))
         frames chrs' = Array.zip (filterMap (\c -> Array.fromFoldable <$> Map.lookup c drawings) chrs')
