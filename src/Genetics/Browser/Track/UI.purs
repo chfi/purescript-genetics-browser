@@ -206,10 +206,12 @@ chrsArrayEvent = map (Array.fromFoldable <<< _.focus)
 drawingEvent :: { min :: Number, max :: Number }
              -> { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
              -> { gwas  :: Map ChrId (List _)
-                , genes :: Map ChrId (List _) }
+                , annots :: Map ChrId (List _) }
              -> Event (Array ChrId)
              -> Event (Drawing)
-drawingEvent s box dat chrs = drawDemo s box dat <$> chrs
+drawingEvent s box dat = let dd = drawDemo s box dat
+                         in map dd
+  -- where dd = drawDemo s box dat
 
 
 
@@ -241,7 +243,10 @@ main = launchAff do
            setViewUI $ l <> "\tto\t" <> r)
 
   dat <- getDataDemo { gwas: "./gwas.json"
-                     , genes: "./sample_genes_chr.json" }
+                     , annots: "./sample_genes_chr.json" }
+
+  liftEff $ log $ show $ Map.keys dat.gwas
+  liftEff $ log $ show $ Map.keys dat.annots
 
   let sizes = {width: w, height: h, padding: 4.0, yOffset: 10.0}
       score = {min: 0.1, max: 0.45}

@@ -460,6 +460,64 @@ mkGeneRenderer = do
 
 
 
+type AnnotRow r = ( geneID :: String
+                  , desc :: String
+                  , pos :: Bp
+                  , name :: String
+                  , chrId :: ChrId | r )
+
+type Annot r = Record (AnnotRow r)
+
+
+mkAnnotRenderer :: forall m rf rctx.
+                   MonadReader (ChrCtx (size :: Bp | rctx)) m
+                => m (PureRenderer (Annot rf))
+mkAnnotRenderer = do
+  ctx <- ask
+
+  let font' = font sansSerif 12 mempty
+
+  let renderer f = do
+        size <- _.size <$> Map.lookup f.chrId ctx
+
+        let rad = 5.0
+            x = unwrap $ f.pos / size
+            y = 0.0
+            c = circle x y rad
+            out  = outlined (outlineColor red) c
+            fill = filled   (fillColor maroon) c
+            -- the canvas is flipped so y-axis increases upward, need to flip the text too
+            text' = scale 1.0 (-1.0)
+                    $ Drawing.text font' x (y+5.0) (fillColor black) f.name
+            drawing = out <> fill <> text'
+
+        point <- normPoint {x, y}
+        pure { drawing, point }
+
+  pure renderer
+
+
+
+fetchAnnotJSON :: String -> Aff _ (Array (Annot ()))
+fetchAnnotJSON str = map toAnnot <$> fetchJSON geneJSONParse str
+  where toAnnot :: Gene () -> Annot ()
+        toAnnot gene = { geneID: gene.geneID
+                       , desc: gene.desc
+                       , pos: gene.start
+                       , name: gene.name
+                       , chrId: gene.chrId }
+
+
+
+bumpedAnnotRenderer :: forall rf.
+                      RowLacks "minY" (AnnotRow rf)
+                   => { min :: Number, max :: Number }
+                   -> PureRenderer (Annot rf)
+                   -> PureRenderer (Annot (minY :: Number | rf))
+bumpedAnnotRenderer s = shiftRendererMinY 0.05 s
+
+
+
 {-
 What is needed is a way to get the score for some other thing
 at or close to the annotation.
@@ -515,54 +573,55 @@ bumpedGeneRenderer :: forall rf.
                    => { min :: Number, max :: Number }
                    -> PureRenderer (Gene rf)
                    -> PureRenderer (Gene (minY :: Number | rf))
-bumpedGeneRenderer s = shiftRendererMinY 0.05 s
+bumpedGeneRenderer s = shiftRendererMinY 0.25 s
 
 
-bumpGenes :: forall rGene rGWAS.
-             RowLacks "minY" (GeneRow rGene)
-          => Map ChrId (List (GWASFeature rGWAS))
-          -> Map ChrId (List (Gene rGene))
-          -> Map ChrId (List (Gene (minY :: Number | rGene)))
-bumpGenes = zipMapsWith (map <<< bumpGene)
+bumpAnnots :: forall rAnnot rGWAS.
+             RowLacks "minY" (AnnotRow rAnnot)
+          => Bp
+          -> Map ChrId (List (GWASFeature rGWAS))
+          -> Map ChrId (List (Annot rAnnot))
+          -> Map ChrId (List (Annot (minY :: Number | rAnnot)))
+bumpAnnots radius = zipMapsWith (map <<< bumpAnnot)
   where maxScoreIn :: Bp -> Bp -> List (GWASFeature rGWAS) -> Number
         maxScoreIn l r gwas = fromMaybe 0.5 $ maximum
                               $ map (\g -> if g.pos >= l && g.pos <= r
                                            then g.score else 0.0) gwas
-        bumpGene :: List (GWASFeature rGWAS) -> Gene rGene -> Gene (minY :: Number | rGene)
-        bumpGene l g = let minY = maxScoreIn g.start g.end l
+        bumpAnnot :: List (GWASFeature rGWAS) -> Annot rAnnot -> Annot (minY :: Number | rAnnot)
+        bumpAnnot l g = let minY = maxScoreIn (g.pos - radius) (g.pos + radius) l
                        in Record.insert (SProxy :: SProxy "minY") minY g
 
 
 getDataDemo :: { gwas :: String
-               , genes :: String }
+               , annots :: String }
             -> Aff _ { gwas  :: Map ChrId (List (GWASFeature ()       ))
-                     , genes :: Map ChrId (List (Gene (minY :: Number)))
+                     , annots :: Map ChrId (List (Annot (minY :: Number)))
                      }
 getDataDemo urls = do
   gwas <- fetchGemmaJSON urls.gwas
-  genes' <- fetchGeneJSON urls.genes
+  annots' <- fetchAnnotJSON urls.annots
   -- Divide data by chromosomes
   let gwasChr :: Map ChrId (List (GWASFeature ()))
       gwasChr = List.fromFoldable <$> groupToChrs gwas
-  let genesChr :: Map ChrId (List (Gene ()))
-      genesChr = List.fromFoldable <$> groupToChrs genes'
-  let bumpedGenes :: Map ChrId (List (Gene (minY :: Number)))
-      bumpedGenes = bumpGenes gwasChr genesChr
+  let annotsChr :: Map ChrId (List (Annot ()))
+      annotsChr = List.fromFoldable <$> groupToChrs annots'
+  let bumpedAnnots :: Map ChrId (List (Annot (minY :: Number)))
+      bumpedAnnots = bumpAnnots (Bp 100000.0) gwasChr annotsChr
 
-  pure { gwas: gwasChr, genes: bumpedGenes }
+  pure { gwas: gwasChr, annots: bumpedAnnots }
 
 
 renderersDemo :: { min :: Number, max :: Number }
               -> { gwas  :: PureRenderer (GWASFeature ()       )
-                 , genes :: PureRenderer (Gene (minY :: Number)) }
-renderersDemo s = { gwas, genes }
+                 , annots :: PureRenderer (Annot (minY :: Number)) }
+renderersDemo s = Debug.trace "making renderers!" \_ -> { gwas, annots }
   where colorsCtx = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
                       mouseChrCtx mouseColors
         gwas :: PureRenderer (GWASFeature ())
         gwas = mkGwasRenderer s colorsCtx
 
-        genes :: PureRenderer (Gene (minY :: Number))
-        genes = bumpedGeneRenderer s $ mkGeneRenderer mouseChrCtx
+        annots :: PureRenderer (Annot (minY :: Number))
+        annots = bumpedAnnotRenderer s $ mkAnnotRenderer mouseChrCtx
 
 
 
@@ -572,14 +631,12 @@ drawDemo :: forall f.
          => { min :: Number, max :: Number }
          -> { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
          -> { gwas :: Map ChrId (f (GWASFeature ()))
-            , genes :: Map ChrId (f (Gene (minY :: Number))) }
+            , annots :: Map ChrId (f (Annot (minY :: Number))) }
          -> Array ChrId
          -> Drawing
-drawDemo s f {gwas, genes} chrs = (drawData' f mouseChrCtx renderers.gwas gwas chrs) <>
-                                  (drawData' f mouseChrCtx renderers.genes genes chrs)
-  where renderers = renderersDemo s
-
-
+drawDemo s = let renderers = renderersDemo s
+             in \f {gwas, annots} chrs -> (drawData' f mouseChrCtx renderers.gwas gwas chrs) <>
+                                          (drawData' f mouseChrCtx renderers.annots annots chrs)
 
 
 
