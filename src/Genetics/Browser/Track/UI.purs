@@ -196,11 +196,9 @@ chrZREvent :: Array ChrId
            -> Event (ZipperRange ChrId)
 chrZREvent chrs uv = Event.fold mkFoldView uv (unfocusArray chrs)
 
-
 chrsArrayEvent :: Event (ZipperRange ChrId)
                -> Event (Array ChrId)
 chrsArrayEvent = map (Array.fromFoldable <<< _.focus)
-
 
 
 drawingEvent :: { min :: Number, max :: Number }
@@ -211,8 +209,6 @@ drawingEvent :: { min :: Number, max :: Number }
              -> Event (Drawing)
 drawingEvent s box dat = let dd = drawDemo s box dat
                          in map dd
-  -- where dd = drawDemo s box dat
-
 
 
 main :: Eff _ _
@@ -244,9 +240,6 @@ main = launchAff do
 
   dat <- getDataDemo { gwas: "./gwas.json"
                      , annots: "./sample_genes_chr.json" }
-
-  liftEff $ log $ show $ Map.keys dat.gwas
-  liftEff $ log $ show $ Map.keys dat.annots
 
   let sizes = {width: w, height: h, padding: 4.0, yOffset: 10.0}
       score = {min: 0.1, max: 0.45}

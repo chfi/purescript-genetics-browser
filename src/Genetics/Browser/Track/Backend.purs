@@ -10,12 +10,13 @@ import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Reader (class MonadReader, ask)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
+import Data.Array ((:))
 import Data.Array as Array
 import Data.Filterable (class Filterable, filterMap)
-import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum, sum)
+import Data.Foldable (class Foldable, fold, foldMap, foldl, maximum, sum)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
-import Data.List (List(..))
+import Data.List (List)
 import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
@@ -23,31 +24,24 @@ import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (class Newtype, alaF, unwrap)
-import Data.Ord.Max (Max(..))
 import Data.Record as Record
-import Data.Semigroup.Foldable (foldMap1)
 import Data.Symbol (SProxy(..))
-import Data.Traversable (class Traversable, scanl, traverse)
-import Data.Tuple (Tuple(Tuple), fst, snd, uncurry)
-import Data.Unfoldable (class Unfoldable, singleton)
-import Data.Unfoldable as Unfoldable
+import Data.Traversable (scanl, traverse)
+import Data.Tuple (Tuple, snd, uncurry)
 import Data.Variant (class Contractable, Variant)
 import Data.Variant as Variant
-import Debug.Trace as Debug
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
 import Genetics.Browser.View (Pixels)
-import Graphics.Drawing (Drawing, circle, fillColor, filled, outlineColor, outlined, rectangle, scale, translate)
+import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, scale, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class IsSymbol, class RowLacks)
-import Unsafe.Coerce (unsafeCoerce)
+
 
 type Frame a = { padding :: Pixels, width :: Pixels, contents :: a }
 
 type ChrCtx r = Map ChrId (Record r)
-
-type ChrFrames r a = ChrCtx (frame :: Frame a | r)
 
 totalSize :: forall r.
              ChrCtx (size :: Bp | r)
@@ -99,37 +93,6 @@ type PureRenderer' a = a -> Maybe { drawing :: Pixels -> Drawing
                                   }
 
 
-mkGeneRenderer' :: forall m rf rctx.
-                   MonadReader (ChrCtx (size :: Bp | rctx)) m
-                => m (PureRenderer' (Gene rf))
-mkGeneRenderer' = do
-  ctx <- ask
-
-  let font' = font sansSerif 12 mempty
-  let renderer f = do
-        size <- _.size <$> Map.lookup f.chrId ctx
-        let rad = 20.0
-            lHand = unwrap $ f.start / size
-            rHand = unwrap $ f.end / size
-            w = (rHand - lHand) * unwrap size
-            x = lHand + (rHand - lHand)
-            y = 0.0
-            rect = rectangle lHand (y - rad/2.0) w (rad/2.0)
-            out = outlined (outlineColor red) rect
-            fill = filled (fillColor maroon) rect
-            -- the canvas is flipped so y-axis increases upward, need to flip the text too
-            text' = scale 1.0 (-1.0)
-                    $ Drawing.text font' x (y-0.25) (fillColor black) f.desc
-            drawing = out <> fill <> text'
-
-        point <- normPoint {x, y}
-        pure { drawing, point }
-
-  pure $ unsafeCoerce unit
-
-
-
-
 tagRenderer :: forall a sym r1 r2.
                RowCons sym a r1 r2
             => IsSymbol sym
@@ -178,21 +141,12 @@ mkGwasRenderer {min, max} = do
   pure renderer
 
 
-
--- A single Frame that contains all data that is required to draw it
-type ReadyFrame a = { width :: Pixels
-                    , padding :: Pixels
-                    , height :: Pixels
-                    , contents :: a }
-
-
 pureRender :: forall f a.
               Filterable f
            => PureRenderer a
            -> f a
            -> f { drawing :: Drawing, point :: Normalized Point }
 pureRender r as = filterMap r as
-
 
 
 -- TODO simplify these two functions by extracting `padding` and `height` to another argument;
@@ -214,41 +168,31 @@ drawPureFrames :: forall a.
                                { width :: Pixels, padding :: Pixels, height :: Pixels })
                -> Drawing
 drawPureFrames frames = fold $ Array.zipWith (\o -> translate o 0.0) os drawings'
-  where os = Array.cons 0.0 (framesOffsets $ snd <$> frames) -- add 0.0 since scanl in framesOffsets doesn't include seed
+  where os = framesOffsets $ snd <$> frames
         drawings' = map (uncurry drawPureFrame) frames
 
 
+framesOffsets :: forall r.
+                 Array { width :: Pixels | r }
+              -> Array Pixels
+framesOffsets fs = 0.0 : scanl (\o {width} -> width + o) 0.0 fs
+    -- add 0.0 since scanl in framesOffsets doesn't include seed
 
 
-framesOffsets :: forall f r.
-                 Traversable f
-              => f { width :: Pixels | r }
-              -> f Pixels
-framesOffsets fs = scanl (\o {width} -> width + o) 0.0 fs
+shiftRendererMinY :: forall rf.
+                      RowLacks "minY" rf
+                   => Number
+                   -> { min :: Number, max :: Number }
+                   -> PureRenderer (Record rf)
+                   -> PureRenderer (Record (minY :: Number | rf))
+shiftRendererMinY dist s render f = do
+  {drawing, point} <- render (Record.delete (SProxy :: SProxy "minY") f)
+  let {x,y} = unwrap point
+      normY = (f.minY - s.min) / (s.max - s.min)
+      y' = min (normY + dist) 0.95
 
-
-insertFrame :: forall r a.
-               RowLacks "frame" r
-            => a
-            -> { | r }
-            -> { frame :: a | r }
-insertFrame = Record.insert (SProxy :: SProxy "frame")
-
-
-createFrames :: forall r a.
-                RowLacks "frame" (size :: Bp | r)
-             => Pixels
-             -> Pixels
-             -> Map ChrId {size :: Bp | r}
-             -> Map ChrId a
-             -> Map ChrId { size :: Bp, frame :: Frame a | r }
-createFrames totalWidth padding sizes as = zipMapsWith zippy sizes as
-  where ts = totalSize sizes
-        mkWidth size = (unwrap $ size / ts) * totalWidth
-        mkFrame' {size} a = { padding, width: mkWidth size, contents: a }
-        zippy r a = insertFrame (mkFrame' r a) r
-
-
+  point' <- normPoint {x, y: y'}
+  pure {drawing, point: point'}
 
 
 intersection :: forall k a b.
@@ -278,6 +222,7 @@ zipMapsWith :: forall k a b c.
             -> Map k c
 zipMapsWith f a b = uncurry f <$> zipMaps a b
 
+
 groupToChrs :: forall a f rData.
                Monoid (f {chrId :: ChrId | rData})
             => Foldable f
@@ -285,44 +230,8 @@ groupToChrs :: forall a f rData.
             => f { chrId :: ChrId | rData }
             -> Map ChrId (f { chrId :: ChrId | rData })
 groupToChrs = foldl (\chrs r@{chrId} -> Map.alter (add r) chrId chrs ) mempty
-  where add :: { chrId :: ChrId | rData } -> Maybe _ -> Maybe _
-        add x Nothing   = Just $ pure x
+  where add x Nothing   = Just $ pure x
         add x (Just xs) = Just $ pure x <> xs
-
-
-chrFrames :: forall a.
-             _
-          -> Pixels
-          -> Pixels
-          -> Map ChrId a
-          -> Map ChrId { size :: Bp
-                       , frame :: { padding :: Pixels
-                                  , width :: Pixels
-                                  , contents :: a
-                                  }
-                       }
-chrFrames ctx w p as = createFrames w p chrCtx' as
-  where chrCtx' = Map.filterKeys (\k -> k `Map.member` as) ctx
-
-
-mouseChrFrames = chrFrames mouseChrCtx
-
-
-addHeight :: forall a r.
-             Pixels
-          -> Map ChrId { size :: Bp
-                       , frame :: { padding :: Pixels
-                                  , width :: Pixels
-                                  , contents :: a
-                                  }
-                       | r
-                       }
-          -> Map ChrId { size :: Bp
-                       , frame :: (ReadyFrame a)
-                       | r }
-addHeight h fs = map f fs
-  where f entry = entry { frame = Record.insert (SProxy :: SProxy "height") h entry.frame }
-
 
 
 fetchJSON :: forall a.
@@ -348,18 +257,8 @@ gemmaJSONParse j = do
   pure {pos, score, chrId}
 
 
-
 fetchGemmaJSON :: String -> Aff _ (Array (GWASFeature ()))
 fetchGemmaJSON = fetchJSON gemmaJSONParse
-
-
-type GeneRow' r = ( geneID :: String
-                  , desc :: String
-                  , start :: Bp
-                  , end :: Bp
-                  , name :: String | r )
-
-type Gene' r = Record (GeneRow' r)
 
 
 type GeneRow r = ( geneID :: String
@@ -370,18 +269,6 @@ type GeneRow r = ( geneID :: String
                  , chrId :: ChrId | r )
 
 type Gene r = Record (GeneRow r)
-
-
-
-gene'JSONParse :: Json -> Maybe (Gene' ())
-gene'JSONParse j = do
-  obj    <- j ^? _Object
-  geneID <- obj ^? ix "Gene stable ID" <<< _String
-  desc   <- obj ^? ix "Gene description" <<< _String
-  name   <- obj ^? ix "Gene name" <<< _String
-  start  <- Bp    <$> obj ^? ix "Gene start (bp)"  <<< _Number
-  end    <- Bp    <$> obj ^? ix "Gene end (bp)"  <<< _Number
-  pure {geneID, desc, name, start, end}
 
 
 
@@ -397,67 +284,8 @@ geneJSONParse j = do
   pure {geneID, desc, name, start, end, chrId}
 
 
-fetchGene'JSON :: String -> Aff _ (Array (Gene' ()))
-fetchGene'JSON = fetchJSON gene'JSONParse
-
-
-geneFetchChrId :: forall r.
-                  RowLacks "chrId" (GeneRow' r)
-               => Gene' r
-               -> Aff _ (Gene r)
-geneFetchChrId gene = do
-  let url = "http://rest.ensembl.org/lookup/id/" <>
-            gene.geneID <> "?content-type=application/json"
-
-  res <- _.response <$> Affjax.get url
-
-  let chrId :: _
-      chrId = do
-        obj <- res ^? _Object
-        ChrId <$> obj ^? ix "seq_region_name" <<< _String
-
-  case chrId of
-    Nothing  -> throwError $ error $ "Could not find chrId for gene " <> gene.geneID
-    Just chr -> pure $ Record.insert (SProxy :: SProxy "chrId") chr gene
-
-
-fetchGeneJSONEnsembl :: String -> Aff _ (Array (Gene ()))
-fetchGeneJSONEnsembl url = traverse geneFetchChrId =<< fetchJSON gene'JSONParse url
-
-
 fetchGeneJSON :: String -> Aff _ (Array (Gene ()))
 fetchGeneJSON = fetchJSON geneJSONParse
-
-
-mkGeneRenderer :: forall m rf rctx.
-                  MonadReader (ChrCtx (size :: Bp | rctx)) m
-               => m (PureRenderer (Gene rf))
-mkGeneRenderer = do
-  ctx <- ask
-
-  let font' = font sansSerif 12 mempty
-  let renderer f = do
-        size <- _.size <$> Map.lookup f.chrId ctx
-        let rad = 20.0
-            lHand = unwrap $ f.start / size
-            rHand = unwrap $ f.end / size
-            w = (rHand - lHand)
-            x = lHand + (rHand - lHand)
-            y = 0.0
-            rect = rectangle lHand (y - rad/2.0) w (rad/2.0)
-            out = outlined (outlineColor red) rect
-            fill = filled (fillColor maroon) rect
-            -- the canvas is flipped so y-axis increases upward, need to flip the text too
-            text' = scale 1.0 (-1.0)
-                    $ Drawing.text font' x (y-0.25) (fillColor black) f.desc
-            drawing = out <> fill <> text'
-
-        point <- normPoint {x, y}
-        pure { drawing, point }
-
-  pure renderer
-
-
 
 
 type AnnotRow r = ( geneID :: String
@@ -474,9 +302,7 @@ mkAnnotRenderer :: forall m rf rctx.
                 => m (PureRenderer (Annot rf))
 mkAnnotRenderer = do
   ctx <- ask
-
   let font' = font sansSerif 12 mempty
-
   let renderer f = do
         size <- _.size <$> Map.lookup f.chrId ctx
 
@@ -484,17 +310,18 @@ mkAnnotRenderer = do
             x = unwrap $ f.pos / size
             y = 0.0
             c = circle x y rad
-            out  = outlined (outlineColor red) c
-            fill = filled   (fillColor maroon) c
+            out  = outlined (outlineColor maroon <> lineWidth 3.0) c
+            fill = filled   (fillColor red) c
             -- the canvas is flipped so y-axis increases upward, need to flip the text too
             text' = scale 1.0 (-1.0)
-                    $ Drawing.text font' x (y+5.0) (fillColor black) f.name
+                    $ Drawing.text font' (x+5.0) (y-5.0) (fillColor black) f.name
             drawing = out <> fill <> text'
 
         point <- normPoint {x, y}
         pure { drawing, point }
 
   pure renderer
+
 
 
 
@@ -507,72 +334,6 @@ fetchAnnotJSON str = map toAnnot <$> fetchJSON geneJSONParse str
                        , name: gene.name
                        , chrId: gene.chrId }
 
-
-
-bumpedAnnotRenderer :: forall rf.
-                      RowLacks "minY" (AnnotRow rf)
-                   => { min :: Number, max :: Number }
-                   -> PureRenderer (Annot rf)
-                   -> PureRenderer (Annot (minY :: Number | rf))
-bumpedAnnotRenderer s = shiftRendererMinY 0.05 s
-
-
-
-{-
-What is needed is a way to get the score for some other thing
-at or close to the annotation.
-
-Maybe we can use the `point` property of the renderers.
-In fact, that is the only thing we need to modify.
-However, modifying that becomes tricky -- where do we do it,
-and how do we keep track of it so that it's reversible?
-
-THIS IS HOW:
-"Render" everything once, at start. Then just use those Drawings and Normalized Points
-when the chr view changes, zooms, etc. For now we can assume that we can just wait
-a few seconds at start; later we can show the mid-steps.
-Using this data (plus some sort of Shape usable for collision detection and/or some
-provided "bumping" rules) we can iterate the track until everything is where it
-should be.
-That could even use Event's `fix` function to show the bumping take place...
-
-
-There's one problem -- the horizontal interval a glyph covers is
-a function of the BpPerPixels scale. I.e. even though each feature is always
-drawn using the same Drawing and Normalized Point, the /relative horizontal/
-positioning of glyphs is a function of:
-
-the Drawings, Normalized Points, Collision Shapes in the neighborhood, and
-the /current/ BpPerPixels in the chromosome.
-
-However, it should be a pretty basic function. Linear, even.
-
-
-Anyway, this is going to be tricky enough to not attack as a first attempt;
-get something that works with what we've got right now, first.
--}
-shiftRendererMinY :: forall rf.
-                      RowLacks "minY" rf
-                   => Number
-                   -> { min :: Number, max :: Number }
-                   -> PureRenderer (Record rf)
-                   -> PureRenderer (Record (minY :: Number | rf))
-shiftRendererMinY dist s render f = do
-  {drawing, point} <- render (Record.delete (SProxy :: SProxy "minY") f)
-  let {x,y} = unwrap point
-      normY = (f.minY - s.min) / (s.max - s.min)
-      y' = min (normY + dist) (1.0 - dist / 2.0)
-
-  point' <- normPoint {x, y: y'}
-  pure {drawing, point: point'}
-
-
-bumpedGeneRenderer :: forall rf.
-                      RowLacks "minY" (GeneRow rf)
-                   => { min :: Number, max :: Number }
-                   -> PureRenderer (Gene rf)
-                   -> PureRenderer (Gene (minY :: Number | rf))
-bumpedGeneRenderer s = shiftRendererMinY 0.25 s
 
 
 bumpAnnots :: forall rAnnot rGWAS.
@@ -605,23 +366,23 @@ getDataDemo urls = do
   let annotsChr :: Map ChrId (List (Annot ()))
       annotsChr = List.fromFoldable <$> groupToChrs annots'
   let bumpedAnnots :: Map ChrId (List (Annot (minY :: Number)))
-      bumpedAnnots = bumpAnnots (Bp 100000.0) gwasChr annotsChr
+      bumpedAnnots = bumpAnnots (Bp 1000000.0) gwasChr annotsChr
 
   pure { gwas: gwasChr, annots: bumpedAnnots }
+
 
 
 renderersDemo :: { min :: Number, max :: Number }
               -> { gwas  :: PureRenderer (GWASFeature ()       )
                  , annots :: PureRenderer (Annot (minY :: Number)) }
-renderersDemo s = Debug.trace "making renderers!" \_ -> { gwas, annots }
+renderersDemo s = { gwas, annots }
   where colorsCtx = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
                       mouseChrCtx mouseColors
         gwas :: PureRenderer (GWASFeature ())
         gwas = mkGwasRenderer s colorsCtx
 
         annots :: PureRenderer (Annot (minY :: Number))
-        annots = bumpedAnnotRenderer s $ mkAnnotRenderer mouseChrCtx
-
+        annots = shiftRendererMinY 0.16 s $ mkAnnotRenderer mouseChrCtx
 
 
 drawDemo :: forall f.
@@ -733,7 +494,3 @@ mouseColors = Map.fromFoldable $ Array.zip mouseChrIds $ map (\x -> {color: x})
 
 mouseChrCtx :: ChrCtx (size :: Bp)
 mouseChrCtx = map (\size -> { size }) mouseChrs
-
-
-mouseChrSize :: Bp -> ChrId -> Bp
-mouseChrSize def chr = fromMaybe def $ Map.lookup chr mouseChrs
