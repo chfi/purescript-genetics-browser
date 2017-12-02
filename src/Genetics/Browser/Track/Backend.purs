@@ -639,34 +639,6 @@ drawDemo s = let renderers = renderersDemo s
 
 
 
-{-
-The only way _this_ function would work (without a ridiculous number
-of type annotations, if then) would be if the `r` row contains *all*
-intermediate types.
-
-But then it could work. No idea if it's in any way reasonable
-or useful even if it does work, tho :) :) :)
-
-
-Actually, it might work kind of nice if Variant.onMatch is used.
-Then we'd just have to provide a record where each field corresponds
-to a function modifying the respective data depending on one of the
-possible data types; the function would itself use Variant.onMatch
-since each type of data should be able to interact with every other
-type of data.
--}
-
-pipeline :: forall r.
-            List (List (Variant r) -> List (Variant r))
-         -> Map ChrId (List (Variant r))
-         -> Map ChrId (List (Variant r))
-pipeline = unsafeCoerce unit
-
-
--- TODO PROBLEM! This doesn't take potentially empty chrs into account,
--- since it only indexes into the provided Map ChrId.
--- Solve by producing empty drawings for lookups that are Nothing, in the frames
--- helper function below, or something like that.
 
 -- Draw data by rendering it only once
 drawData' :: forall f a r.
@@ -699,7 +671,7 @@ drawData' frameBox chrCtx renderer dat chrs = translate 0.0 (frameBox.height - f
         mkFrames = filterMap mkFrame
 
         frames :: Array ChrId -> Array (Tuple (Array _) (_))
-        frames chrs' = Array.zip (filterMap (\c -> Array.fromFoldable <$> Map.lookup c drawings) chrs')
+        frames chrs' = Array.zip (map (\c -> fromMaybe [] <$> Map.lookup c drawings) chrs')
                                  (mkFrames chrs')
 {-
 drawGenes :: forall r.
