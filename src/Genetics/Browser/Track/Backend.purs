@@ -633,87 +633,43 @@ drawDemo :: forall f.
             , annots :: Map ChrId (f (Annot (minY :: Number))) }
          -> Array ChrId
          -> Drawing
-drawDemo s = let renderers = renderersDemo s
-             in \f {gwas, annots} chrs -> (drawData' f mouseChrCtx renderers.gwas gwas chrs) <>
-                                          (drawData' f mouseChrCtx renderers.annots annots chrs)
-
-
+drawDemo s f {gwas, annots} =
+  let renderers = renderersDemo s
+      drawGwas   = drawData f mouseChrCtx renderers.gwas   gwas
+      drawAnnots = drawData f mouseChrCtx renderers.annots annots
+  in \chrs -> (drawGwas chrs) <> (drawAnnots chrs)
 
 
 -- Draw data by rendering it only once
-drawData' :: forall f a r.
-             Foldable f
-          => Filterable f
-          -- NOTE! the width is the canvas width, not frame. Same w/ yOffset
-          => { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
-          -> Map ChrId { size :: Bp | r}
-          -> PureRenderer a
-          -> Map ChrId (f a)
-          -> Array ChrId
-          -> Drawing
-drawData' frameBox chrCtx renderer dat chrs = translate 0.0 (frameBox.height - frameBox.yOffset)
-                                                $ scale 1.0 (-1.0)
-                                                $ drawPureFrames (frames chrs)
-  -- TODO add a traceAny statement here to make sure it only runs once
-  where drawings :: Map ChrId (f {drawing :: Drawing, point :: _})
-        drawings = map (pureRender renderer) dat
-
-        mkFrame :: ChrId -> Maybe {width :: _, height :: _, padding :: _}
-        mkFrame chr = do
-          {size} <- Map.lookup chr chrCtx
-          let total = sum $ filterMap (\c -> _.size <$> Map.lookup c chrCtx) chrs
-              -- width = unsafeCoerce unit
-              width = (unwrap $ size / total) * frameBox.width
-          -- Debug.trace (show width) \_ -> pure unit
-          pure { height: frameBox.height, padding: frameBox.padding, width }
-
-        mkFrames :: Array ChrId -> Array { width :: _, height :: _, padding :: _ }
-        mkFrames = filterMap mkFrame
-
-        frames :: Array ChrId -> Array (Tuple (Array _) (_))
-        frames chrs' = Array.zip (map (\c -> fromMaybe [] <$> Map.lookup c drawings) chrs')
-                                 (mkFrames chrs')
-{-
-drawGenes :: forall r.
-             { w :: Number, h :: Number
-             , p :: Number, y :: Number }
-          -> List (Gene r)
-          -> Array ChrId
-          -> Drawing
-drawGenes pos dat chrs = drawData pos renderer (groupToChrs dat) chrs
-  where renderer = mkGeneRenderer mouseChrCtx
-
-
-drawGemma :: forall r.
-             { w :: Number, h :: Number
-             , p :: Number, y :: Number }
-          -> { min :: Number, max :: Number }
-          -> List (GWASFeature r)
-          -> Array ChrId
-          -> Drawing
-drawGemma pos s dat chrs = drawData pos renderer (groupToChrs dat) chrs
-  where colorsCtx = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
-                    mouseChrCtx mouseColors
-        renderer :: PureRenderer (GWASFeature r)
-        renderer = mkGwasRenderer s colorsCtx
-
-
-drawBoth :: forall r.
-            { w :: Number, h :: Number
-            , p :: Number, y :: Number }
-         -> { min :: Number, max :: Number }
-         -> Map ChrId (List (Variant ("Gene" :: Gene (), "GWAS" :: GWASFeature ())))
+drawData :: forall f a r.
+            Foldable f
+         => Filterable f
+         -- NOTE! the width is the canvas width, not frame. Same w/ yOffset
+         => { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
+         -> Map ChrId { size :: Bp | r}
+         -> PureRenderer a
+         -> Map ChrId (f a)
          -> Array ChrId
          -> Drawing
-drawBoth pos s dat chrs = drawData pos renderer dat chrs
-  where geneR :: PureRenderer (Variant ("Gene" :: Gene ()))
-        geneR = tagRenderer (SProxy :: SProxy "Gene") $ mkGeneRenderer mouseChrCtx
-        gemmaR :: PureRenderer (Variant ("GWAS" :: GWASFeature ()))
-        gemmaR = tagRenderer (SProxy :: SProxy "GWAS") $ mkGwasRenderer s colorsCtx
-        colorsCtx = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
-                    mouseChrCtx mouseColors
-        renderer = combineRenderers geneR gemmaR
--}
+drawData frameBox chrCtx renderer dat =
+  let drawings :: Map ChrId (Array {drawing :: Drawing, point :: _})
+      drawings = map (Array.fromFoldable <<< pureRender renderer) dat
+
+      mkFrame :: Array ChrId -> ChrId -> Maybe {width :: _, height :: _, padding :: _}
+      mkFrame chrs' chr = do
+        {size} <- Map.lookup chr chrCtx
+        let total = sum $ filterMap (\c -> _.size <$> Map.lookup c chrCtx) chrs'
+            width = (unwrap $ size / total) * frameBox.width
+        pure { height: frameBox.height, padding: frameBox.padding, width }
+
+      frames :: Array ChrId -> Array (Tuple (Array _) (_))
+      frames chrs' = Array.zip (map (\c -> fromMaybe [] $ Map.lookup c drawings) chrs')
+                               (filterMap (mkFrame chrs') chrs')
+
+  in \chrs -> translate 0.0 (frameBox.height - frameBox.yOffset)
+                $ scale 1.0 (-1.0)
+                $ drawPureFrames (frames chrs)
+
 
 
 mouseChrIds :: Array ChrId
