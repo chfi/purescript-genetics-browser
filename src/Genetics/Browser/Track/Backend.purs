@@ -314,7 +314,7 @@ mkAnnotRenderer = do
             fill = filled   (fillColor red) c
             -- the canvas is flipped so y-axis increases upward, need to flip the text too
             text' = scale 1.0 (-1.0)
-                    $ Drawing.text font' (x+5.0) (y-5.0) (fillColor black) f.name
+                    $ Drawing.text font' (x+7.5) (y+2.5) (fillColor black) f.name
             drawing = out <> fill <> text'
 
         point <- normPoint {x, y}
@@ -382,23 +382,41 @@ renderersDemo s = { gwas, annots }
         gwas = mkGwasRenderer s colorsCtx
 
         annots :: PureRenderer (Annot (minY :: Number))
-        annots = shiftRendererMinY 0.16 s $ mkAnnotRenderer mouseChrCtx
+        annots = shiftRendererMinY 0.06 s $ mkAnnotRenderer mouseChrCtx
+
+
+ruler :: forall r.
+         { min :: Number, max :: Number }
+      -> Number
+      -> Color
+      -> { width :: Pixels, height :: Pixels, yOffset :: Pixels | r}
+      -> Drawing
+ruler {min, max} val color f = outlined outline rulerDrawing
+  where normY = (val - min) / (max - min)
+        y = f.height - (normY * f.height + f.yOffset)
+        outline = outlineColor color
+        rulerDrawing = Drawing.path [{x: 0.0, y}, {x: f.width, y}]
+
+
+
 
 
 drawDemo :: forall f.
             Foldable f
          => Filterable f
          => { min :: Number, max :: Number }
+         -> Number
          -> { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
          -> { gwas :: Map ChrId (f (GWASFeature ()))
             , annots :: Map ChrId (f (Annot (minY :: Number))) }
          -> Array ChrId
          -> Drawing
-drawDemo s f {gwas, annots} =
+drawDemo s sig f {gwas, annots} =
   let renderers = renderersDemo s
+      ruler' = ruler s sig red
       drawGwas   = drawData f mouseChrCtx renderers.gwas   gwas
       drawAnnots = drawData f mouseChrCtx renderers.annots annots
-  in \chrs -> (drawGwas chrs) <> (drawAnnots chrs)
+  in \chrs -> (drawGwas chrs) <> (drawAnnots chrs) <> ruler' f
 
 
 -- Draw data by rendering it only once
@@ -421,7 +439,7 @@ drawData frameBox chrCtx renderer dat =
         {size} <- Map.lookup chr chrCtx
         let total = sum $ filterMap (\c -> _.size <$> Map.lookup c chrCtx) chrs'
             width = (unwrap $ size / total) * frameBox.width
-        pure { height: frameBox.height, padding: frameBox.padding, width }
+        pure { height: frameBox.height - frameBox.yOffset, padding: frameBox.padding, width }
 
       frames :: Array ChrId -> Array (Tuple (Array _) (_))
       frames chrs' = Array.zip (map (\c -> fromMaybe [] $ Map.lookup c drawings) chrs')

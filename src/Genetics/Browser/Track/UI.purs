@@ -207,7 +207,7 @@ drawingEvent :: { min :: Number, max :: Number }
                 , annots :: Map ChrId (List _) }
              -> Event (Array ChrId)
              -> Event (Drawing)
-drawingEvent s box dat = let dd = drawDemo s box dat
+drawingEvent s box dat = let dd = drawDemo s 0.25 box dat
                          in map dd
 
 
