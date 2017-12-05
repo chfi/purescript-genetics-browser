@@ -12,6 +12,7 @@ import Control.Monad.Reader (class MonadReader, ask)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array ((:))
 import Data.Array as Array
+import Data.BigInt (BigInt)
 import Data.Filterable (class Filterable, filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, maximum, sum)
 import Data.Lens ((^?))
@@ -24,6 +25,8 @@ import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (class Newtype, alaF, unwrap)
+import Data.Ord.Max (Max(..))
+import Data.Ratio (Ratio)
 import Data.Record as Record
 import Data.Symbol (SProxy(..))
 import Data.Traversable (scanl, traverse)
@@ -37,6 +40,33 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class IsSymbol, class RowLacks)
+
+
+
+
+-- This type represents a point on the *browser*, not the *genome*.
+-- It includes spaces between chromosomes, for example.
+newtype BrowserPoint = BrowserPoint (Ratio BigInt)
+
+derive instance eqBrowserPoint :: Eq BrowserPoint
+derive instance ordBrowserPoint :: Ord BrowserPoint
+derive instance newtypeBrowserPoint :: Newtype BrowserPoint _
+
+-- To map a BrowserPoint to a point on the genome, we need to know
+-- the intervals of the chromosomes, and their respective sizes.
+-- I.e. we need to "invert" the Frames.
+-- To simplify that we should simplify Frames, decoupling the concept of width from height.
+-- Then produce a function
+{-
+  x in [0.0, 1.0] -> Tuple ChrId Bp
+-}
+-- So extract the `frames` function from `drawData'` (again).
+-- Or, well
+-- the drawData' function should grow to handle events on glyphs,
+-- which will involve this type of thing as well.
+
+-- toGenome :: BrowserPoint -> ChrCtx
+
 
 
 type Frame a = { padding :: Pixels, width :: Pixels, contents :: a }

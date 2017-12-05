@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "description": "Genetics network browser written in Purescript",
   "dependencies": {
+    "big-integer": "^1.6.26",
     "cytoscape": "^3.1.1",
     "end-of-stream": "^1.4.0",
     "ipfs-api": "^14.1.2"

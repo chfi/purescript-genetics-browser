@@ -18,25 +18,28 @@ import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Filterable (class Filterable, filter, filterMap)
 import Data.Filterable as Filterable
-import Data.Foldable (class Foldable, for_, length)
+import Data.Foldable (class Foldable, foldMap, for_, length, maximum, maximumBy, sum)
 import Data.Int (round)
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.List (List(..), (:))
 import Data.List as List
 import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Monoid (mempty)
-import Data.Newtype (over, unwrap, wrap)
+import Data.Newtype (ala, alaF, over, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
+import Data.Ord.Max (Max(..))
+import Data.Semigroup.Foldable (foldMap1)
 import Data.Traversable (traverse, traverse_)
-import Data.Tuple (Tuple(..), snd)
+import Data.Tuple (Tuple(..), fst, snd)
 import Debug.Trace (traceShow)
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
 import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawDemo, getDataDemo, mouseChrIds)
-import Genetics.Browser.Types (ChrId(..))
+import Genetics.Browser.Types (Bp(..), ChrId(..))
 import Genetics.Browser.View (Pixels)
 import Global as Global
 import Global.Unsafe (unsafeStringify)
@@ -239,10 +242,10 @@ main = launchAff do
            setViewUI $ l <> "\tto\t" <> r)
 
   dat <- getDataDemo { gwas: "./gwas.json"
-                     , annots: "./sample_genes_chr.json" }
+                     , annots: "./annots_fake.json" }
 
-  let sizes = {width: w, height: h, padding: 4.0, yOffset: 10.0}
-      score = {min: 0.1, max: 0.45}
+  let sizes = {width: w, height: h, padding: 10.0, yOffset: 5.0}
+      score = {min: 0.125, max: 0.42}
 
   let ev' = drawingEvent score sizes dat viewEvent
       bg = filled (fillColor white) $ rectangle 0.0 0.0 w h

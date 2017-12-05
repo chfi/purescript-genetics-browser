@@ -127,3 +127,12 @@ bpToPixels (BpPerPixel s) (Bp p) = p / s
 
 pixelsToBp :: BpPerPixel -> Number -> Bp
 pixelsToBp (BpPerPixel s) p = Bp $ p * s
+-- Describes a number of `a`s per `b` -- `b` is a phantom type;
+-- we always assume `b` is 1 in whatever unit it represents.
+data UnitRatio a b = UnitRatio a
+
+instance eqUnitRatio :: (Eq a) => Eq (UnitRatio a b) where
+  eq (UnitRatio a) (UnitRatio b) = a == b
+
+instance ordUnitRatio :: (Ord a) => Ord (UnitRatio a b) where
+  compare (UnitRatio a) (UnitRatio b) = compare a b
