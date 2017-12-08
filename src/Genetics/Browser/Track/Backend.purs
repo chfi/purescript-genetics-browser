@@ -13,8 +13,10 @@ import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array ((:))
 import Data.Array as Array
 import Data.BigInt (BigInt)
+import Data.BigInt as BigInt
 import Data.Filterable (class Filterable, filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, maximum, sum)
+import Data.Int as Int
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
@@ -24,13 +26,13 @@ import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Monoid.Additive (Additive(..))
-import Data.Newtype (class Newtype, alaF, unwrap)
+import Data.Newtype (class Newtype, ala, alaF, unwrap)
 import Data.Ord.Max (Max(..))
-import Data.Ratio (Ratio)
+import Data.Ratio (Ratio(..), denominator, numerator, (%))
 import Data.Record as Record
 import Data.Symbol (SProxy(..))
 import Data.Traversable (scanl, traverse)
-import Data.Tuple (Tuple, snd, uncurry)
+import Data.Tuple (Tuple(..), fst, snd, uncurry)
 import Data.Variant (class Contractable, Variant)
 import Data.Variant as Variant
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
@@ -40,6 +42,7 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class IsSymbol, class RowLacks)
+import Unsafe.Coerce (unsafeCoerce)
 
 
 
@@ -51,6 +54,80 @@ newtype BrowserPoint = BrowserPoint (Ratio BigInt)
 derive instance eqBrowserPoint :: Eq BrowserPoint
 derive instance ordBrowserPoint :: Ord BrowserPoint
 derive instance newtypeBrowserPoint :: Newtype BrowserPoint _
+
+
+
+newtype CoordSystem = CoordSystem { genLength :: BigInt
+                                  , toGenome :: Ratio BigInt -> Maybe (Tuple ChrId Bp)
+                                  , toGlobal :: Tuple ChrId Bp -> Maybe (Ratio BigInt)
+                                  , frames :: Array (Tuple ChrId
+                                                     { start :: Ratio BigInt
+                                                     , end :: Ratio BigInt
+                                                     })
+                                  }
+
+toBigInt :: Bp -> BigInt
+toBigInt (Bp x) = BigInt.fromInt $ Int.round $ x
+
+
+chrIntervals :: Array (Tuple ChrId Bp)
+             -> Array (Tuple ChrId (Tuple BigInt BigInt))
+chrIntervals chrs = case Array.uncons chrs of
+  Nothing -> []
+  Just {head, tail} ->
+    let first = Tuple (toBigInt (Bp 0.0)) (toBigInt (snd head))
+        g :: Tuple BigInt BigInt -> Bp -> Tuple BigInt BigInt
+        g (Tuple start end) size = (Tuple end (end+(toBigInt size)))
+        (Tuple ids sizes) = Array.unzip chrs
+    in Array.zip ids (Array.cons first $ scanl g first sizes)
+
+
+toBp :: Ratio BigInt -> Ratio BigInt -> Ratio BigInt -> Bp -> Bp
+toBp start end pos bp =
+  let norm = (pos - start) - (end - start)
+      norm' = (BigInt.toNumber $ numerator norm) / (BigInt.toNumber $ denominator norm)
+  in (Bp norm') * bp
+
+
+frameToGenome :: Array (Tuple ChrId { start :: Ratio BigInt
+                                    , end :: Ratio BigInt })
+         -> Ratio BigInt
+         -> Maybe (Tuple ChrId Bp)
+frameToGenome frames r = do
+  chr <- Array.find (\(Tuple _ {start, end}) -> start <= r && r <= end) frames
+
+  let chr' :: _
+      chr' = chr
+
+  pure $ unsafeCoerce unit
+
+
+-- toGlobal :: Tuple ChrId Bp -> Maybe (Ratio BigInt)
+-- toGlobal = unsafeCoerce unit
+
+
+mkCoordSystem :: forall f.
+                 Functor f
+              => Foldable f
+              => f (Tuple ChrId Bp)
+              -> CoordSystem
+mkCoordSystem chrs = CoordSystem { genLength, toGenome, toGlobal, frames }
+  where genLength :: BigInt
+        genLength = Additive `ala` foldMap $ map (toBigInt <<< snd) chrs
+
+        frames :: Array (Tuple ChrId {start :: Ratio BigInt, end :: Ratio BigInt})
+        frames = map (\(Tuple s e) -> {start: s % genLength, end: e % genLength})
+                   <$> (chrIntervals $ Array.fromFoldable chrs)
+
+        toGenome :: Ratio BigInt -> Maybe (Tuple ChrId Bp)
+        toGenome r = unsafeCoerce unit
+
+        toGlobal :: Tuple ChrId Bp -> Maybe (Ratio BigInt)
+        toGlobal = unsafeCoerce unit
+
+
+-- testin :: List _ -> _
+-- testin = Additive `ala` foldMap
 
 -- To map a BrowserPoint to a point on the genome, we need to know
 -- the intervals of the chromosomes, and their respective sizes.

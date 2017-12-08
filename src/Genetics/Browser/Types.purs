@@ -25,7 +25,7 @@ import Data.Foreign.Class (class Decode, class Encode)
 import Data.Lens (iso)
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Types (Iso')
-import Data.Newtype (class Newtype, unwrap)
+import Data.Newtype (class Newtype, unwrap, wrap)
 -- import Genetics.Browser.Units (Bp(..), ChrId(..))
 
 type Point = { x :: Number, y :: Number}
@@ -127,6 +127,11 @@ bpToPixels (BpPerPixel s) (Bp p) = p / s
 
 pixelsToBp :: BpPerPixel -> Number -> Bp
 pixelsToBp (BpPerPixel s) p = Bp $ p * s
+
+
+-- newtype BpScale = BpScale (Ratio BigInt BigInt)
+
+
 -- Describes a number of `a`s per `b` -- `b` is a phantom type;
 -- we always assume `b` is 1 in whatever unit it represents.
 data UnitRatio a b = UnitRatio a
@@ -136,3 +141,29 @@ instance eqUnitRatio :: (Eq a) => Eq (UnitRatio a b) where
 
 instance ordUnitRatio :: (Ord a) => Ord (UnitRatio a b) where
   compare (UnitRatio a) (UnitRatio b) = compare a b
+
+type BpPerPixel' = UnitRatio Number Bp
+
+
+-- revUnit :: forall a b.
+--            Newtype a Number
+--         => Newtype b Number
+--         => UnitRatio a b -> UnitRatio b a
+-- revUnit (UnitRatio a) = UnitRatio b
+--   where
+
+unitToNumer :: forall a b.
+             Newtype a Number
+          => Newtype b Number
+          => UnitRatio a b -> b -> a
+unitToNumer (UnitRatio a) b = wrap $ (unwrap a) * (unwrap b)
+
+
+unitToDenom :: forall a b.
+             Newtype a Number
+          => Newtype b Number
+          => UnitRatio a b -> a -> b
+unitToDenom (UnitRatio a) b = wrap $ (unwrap a) * (unwrap b)
+
+-- unitToDenom :: forall a. UnitRatio a b -> a -> b
+-- unitToDenom (UnitRatio a) =
