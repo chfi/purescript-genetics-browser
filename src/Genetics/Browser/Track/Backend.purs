@@ -16,8 +16,9 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Filterable (class Filterable, filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, maximum, sum)
+import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens ((^?))
+import Data.Lens (united, (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -29,6 +30,7 @@ import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (class Newtype, ala, alaF, unwrap)
 import Data.Ord.Max (Max(..))
 import Data.Ratio (Ratio(..), denominator, numerator, (%))
+import Data.Ratio as Ratio
 import Data.Record as Record
 import Data.Symbol (SProxy(..))
 import Data.Traversable (scanl, traverse)
@@ -54,6 +56,69 @@ newtype BrowserPoint = BrowserPoint (Ratio BigInt)
 derive instance eqBrowserPoint :: Eq BrowserPoint
 derive instance ordBrowserPoint :: Ord BrowserPoint
 derive instance newtypeBrowserPoint :: Newtype BrowserPoint _
+
+
+
+inRange :: forall c.
+              Ord c
+           => c
+           -> Tuple c c
+           -> Boolean
+inRange c (Tuple l r) = l <= c && c <= r
+
+
+
+ivals :: forall i c.
+         Eq i
+      => Ord c
+      => EuclideanRing c
+      => Array (Tuple i c)
+      -> { toLocal  :: Ratio c   -> Maybe (Tuple i c)
+         , toGlobal  :: Tuple i c -> Maybe (Ratio c)
+         , intervals :: Array (Tuple i (Tuple (Ratio c) (Ratio c)))
+         }
+ivals frames = { toLocal, toGlobal, intervals }
+  where (Tuple is sizes) = Array.unzip frames
+        normalized :: Array (Ratio c)
+        normalized = let total = sum sizes in map (_ % total) sizes
+        intervals = Array.zip is
+                      $ Array.zip (zero `Array.cons` normalized) normalized
+        toLocal :: Ratio c -> Maybe (Tuple i c)
+        toLocal r = do
+          -- xx <-
+          (Tuple i (Tuple start end)) <- Array.find (inRange r <<< snd) intervals
+          (Tuple _ size) <- Array.find ((==) i <<< fst) frames
+
+
+          -- TODO this might be totally messed up
+          -- r' should be possible to round to the final value safely
+
+          -- Needs testing!!!
+          let r' :: Ratio c
+              r' = ((r - start) / (end - start)) * (size % one)
+              n = Ratio.numerator r'
+              d = Ratio.denominator r'
+
+          pure $ Tuple i (n / d)
+
+        toGlobal :: Tuple i c -> Maybe (Ratio c)
+        toGlobal (Tuple i c) = do
+
+          (Tuple _ (Tuple sR eR)) <- Array.find ((==) i <<< fst) intervals
+
+          (Tuple _ size) <- Array.find ((==) i <<< fst) frames
+
+              -- I'm not sure what's going on here
+              -- also needs testing...
+          let iLenR :: _
+              iLenR = eR - sR   -- the proportion of the interval to the entire browser
+              iLenR' = one / iLenR -- scaling from interval to browser
+              r = c % size -- the given point in interval-local coordinates
+              r' = r % iLenR'  --- and in global coordinates
+
+          pure $ (c % size) * (one / eR - sR)
+
+
 
 
 
