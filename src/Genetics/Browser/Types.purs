@@ -21,11 +21,18 @@ module Genetics.Browser.Types
 
 import Prelude
 
+import Control.Alternative (empty)
+import Data.Array as Array
+import Data.BigInt (BigInt)
 import Data.Foreign.Class (class Decode, class Encode)
-import Data.Lens (iso)
+import Data.Lens (Iso', Prism', APrism', iso, prism')
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Types (Iso')
+import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.Ratio (Ratio, (%))
+import Data.Ratio as Ratio
+import Data.Tuple (Tuple(..))
 -- import Genetics.Browser.Units (Bp(..), ChrId(..))
 
 type Point = { x :: Number, y :: Number}
@@ -145,25 +152,88 @@ instance ordUnitRatio :: (Ord a) => Ord (UnitRatio a b) where
 type BpPerPixel' = UnitRatio Number Bp
 
 
--- revUnit :: forall a b.
---            Newtype a Number
---         => Newtype b Number
---         => UnitRatio a b -> UnitRatio b a
--- revUnit (UnitRatio a) = UnitRatio b
---   where
 
-unitToNumer :: forall a b.
-             Newtype a Number
-          => Newtype b Number
-          => UnitRatio a b -> b -> a
-unitToNumer (UnitRatio a) b = wrap $ (unwrap a) * (unwrap b)
+-- pretty much all my problems appear to be solved by this type. nice
+data Local f c = Local c c (Ratio c)
+data BrowserWide c = BrowserWide
+
+toGlobal :: forall f c.
+            Ord c
+         => EuclideanRing c
+         => Local f c
+         -> Maybe c
+toGlobal (Local l r p) =
+  let p' = p * ((r - l) % one)
+  in if Ratio.denominator p' == one
+        then pure $ Ratio.numerator p'
+        else Nothing
+
+toLocal :: forall f c.
+           Ord c
+        => EuclideanRing c
+        => c
+        -> Tuple c c
+        -> Local f c
+toLocal c (Tuple l r) = Local l r $ (c - l) % (r - l)
 
 
-unitToDenom :: forall a b.
-             Newtype a Number
-          => Newtype b Number
-          => UnitRatio a b -> a -> b
-unitToDenom (UnitRatio a) b = wrap $ (unwrap a) * (unwrap b)
 
--- unitToDenom :: forall a. UnitRatio a b -> a -> b
--- unitToDenom (UnitRatio a) =
+
+
+data InInterval
+data InChr
+
+type IntervalLocal = Local InInterval BigInt
+type ChrLocal = Local InChr Bp
+
+
+viewToFrame :: forall i.
+               CoordinateSystem i BigInt
+            -> IntervalLocal
+            -> Maybe (Tuple i IntervalLocal)
+viewToFrame cs@(CoordinateSystem s) (Local l r p) = do
+  bp <- toGlobal (Local l r p)
+  (Tuple i {start, end}) <- findInterval cs bp
+  pure $ Tuple i $ toLocal bp (Tuple start end)
+
+
+viewToChr :: forall i.
+             CoordinateSystem i BigInt
+          -> IntervalLocal
+          -> Maybe (Tuple i ChrLocal)
+viewToChr cs@(CoordinateSystem s) (Local l r p) = do
+  bp <- toGlobal (Local l r p)
+
+  (Tuple i {start, end}) <- findInterval cs bp
+
+  pure $ Tuple i $ toLocal bp' (Tuple l' r')
+
+  empty
+  -- pure $ Tuple i $ toLocal bp (Tuple start end)
+
+
+
+type Interval c = {start :: c, end :: c}
+
+-- problem with this rep is padding.
+-- becomes more difficult to go Interval <-> Chr then,
+-- as they're not actually equal!
+newtype CoordinateSystem i c =
+  CoordinateSystem
+    { intervals :: Array (Tuple i {start :: c, end :: c})
+    , size :: c
+    , padding :: c
+    }
+
+
+findInterval :: forall i c.
+                Ord c
+             => CoordinateSystem i c
+             -> c
+             -> Maybe (Tuple i {start :: c, end :: c})
+findInterval (CoordinateSystem s) p =
+  Array.find (\(Tuple i {start, end}) -> start <= p && p <= end) s.intervals
+
+
+derive instance newtypeCoordinateSystem :: Newtype (CoordinateSystem i c) _
+-- derive instance functorCoordinateSystem :: Functor (CoordinateSystem i)
