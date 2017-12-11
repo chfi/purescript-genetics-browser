@@ -238,7 +238,9 @@ viewToGlobal :: Tuple BrowserX BrowserX
              -> ViewX
              -> BrowserX
 viewToGlobal (Tuple (BX l) (BX r)) (ViewX p) =
-  let p' = p * ((r - l) % one)
+  let r' = r % one
+      l' = l % one
+      p' = (p * (r' - l')) + l'
   in BX $ (Ratio.numerator p') / (Ratio.denominator p')
 
 
