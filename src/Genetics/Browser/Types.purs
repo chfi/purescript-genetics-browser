@@ -17,14 +17,32 @@ module Genetics.Browser.Types
        , bpToPixels
        , pixelsToBp
        , Chr
+       , ChrInterval
+       , BrowserPoint(..)
+       , LocalPoint(..)
+       , IntervalPoint
+       , Interval(..)
+       , CoordSys(..)
+       , mkCoordSys
+       , findInterval
+       , intervalToGlobal
+       , globalToInterval
+       , canvasToView
+       , globalToFrame
+       , intervalToChr
+       , frameToChr
        ) where
 
 import Prelude
 
 import Control.Alternative (empty)
+import Control.MonadPlus (guard)
 import Data.Array as Array
 import Data.BigInt (BigInt)
+import Data.BigInt as BigInt
+import Data.Foldable (length, sum)
 import Data.Foreign.Class (class Decode, class Encode)
+import Data.Int as Int
 import Data.Lens (Iso', Prism', APrism', iso, prism')
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Types (Iso')
@@ -32,7 +50,8 @@ import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Ratio (Ratio, (%))
 import Data.Ratio as Ratio
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), fst, snd)
+import Unsafe.Coerce (unsafeCoerce)
 -- import Genetics.Browser.Units (Bp(..), ChrId(..))
 
 type Point = { x :: Number, y :: Number}
@@ -154,86 +173,163 @@ type BpPerPixel' = UnitRatio Number Bp
 
 
 -- pretty much all my problems appear to be solved by this type. nice
-data Local f c = Local c c (Ratio c)
-data BrowserWide c = BrowserWide
+-- data Local f c = Local c c (Ratio c)
+-- data BrowserWide c = BrowserWide
 
-toGlobal :: forall f c.
-            Ord c
-         => EuclideanRing c
-         => Local f c
-         -> Maybe c
-toGlobal (Local l r p) =
-  let p' = p * ((r - l) % one)
-  in if Ratio.denominator p' == one
-        then pure $ Ratio.numerator p'
-        else Nothing
+-- toGlobal :: forall f c.
+--             Ord c
+--          => EuclideanRing c
+--          => Local f c
+--          -> Maybe c
+-- toGlobal (Local l r p) =
+--   let p' = p * ((r - l) % one)
+--   in if Ratio.denominator p' == one
+--         then pure $ Ratio.numerator p'
+--         else Nothing
 
-toLocal :: forall f c.
-           Ord c
-        => EuclideanRing c
-        => c
-        -> Tuple c c
-        -> Local f c
-toLocal c (Tuple l r) = Local l r $ (c - l) % (r - l)
-
-
+-- toLocal :: forall f c.
+--            Ord c
+--         => EuclideanRing c
+--         => c
+--         -> Tuple c c
+--         -> Local f c
+-- toLocal c (Tuple l r) = Local l r $ (c - l) % (r - l)
 
 
 
-data InInterval
-data InChr
 
-type IntervalLocal = Local InInterval BigInt
-type ChrLocal = Local InChr Bp
+-- The global coordinate system works by taking the sum of the chromosome sizes;
+-- we represent it using a BigInt
+newtype BrowserPoint = BPoint BigInt
 
-
-viewToFrame :: forall i.
-               CoordinateSystem i BigInt
-            -> IntervalLocal
-            -> Maybe (Tuple i IntervalLocal)
-viewToFrame cs@(CoordinateSystem s) (Local l r p) = do
-  bp <- toGlobal (Local l r p)
-  (Tuple i {start, end}) <- findInterval cs bp
-  pure $ Tuple i $ toLocal bp (Tuple start end)
-
-
-viewToChr :: forall i.
-             CoordinateSystem i BigInt
-          -> IntervalLocal
-          -> Maybe (Tuple i ChrLocal)
-viewToChr cs@(CoordinateSystem s) (Local l r p) = do
-  bp <- toGlobal (Local l r p)
-
-  (Tuple i {start, end}) <- findInterval cs bp
-
-  pure $ Tuple i $ toLocal bp' (Tuple l' r')
-
-  empty
-  -- pure $ Tuple i $ toLocal bp (Tuple start end)
+derive instance eqBrowserPoint :: Eq BrowserPoint
+derive instance ordBrowserPoint :: Ord BrowserPoint
+derive instance newtypeBrowserPoint :: Newtype BrowserPoint _
 
 
 
-type Interval c = {start :: c, end :: c}
+-- Subsets of the global coordinate system are defined by some interval,
+--
 
--- problem with this rep is padding.
--- becomes more difficult to go Interval <-> Chr then,
--- as they're not actually equal!
-newtype CoordinateSystem i c =
-  CoordinateSystem
-    { intervals :: Array (Tuple i {start :: c, end :: c})
-    , size :: c
-    , padding :: c
-    }
+data Interval c = Interval c c
+
+inInterval :: forall c.
+              Ord c
+           => c
+           -> Interval c
+           -> Boolean
+inInterval p (Interval l r) = l <= p && p <= r
+
+-- clunky but works for now
+data LocalPoint c = Local (Interval c) (Ratio BigInt)
+
+-- for now we just assume that the given point is in the interval...
+globalToInterval :: forall a c.
+                    Newtype c BigInt
+                 => Interval c
+                 -> c
+                 -> LocalPoint c
+globalToInterval iv@(Interval l r) p =
+  let l' = unwrap l
+      r' = unwrap r
+      p' = ((unwrap p) - l') % (r' - l')
+  in Local iv p'
+
+
+intervalToGlobal :: forall c.
+                    Newtype c BigInt
+                 => LocalPoint c
+                 -> c
+intervalToGlobal (Local (Interval l r) p) =
+  let r' = (unwrap r) % one
+      l' = (unwrap l) % one
+      p' = (p * (r' - l')) + l'
+  in wrap $ (Ratio.numerator p') / (Ratio.denominator p')
+
+
+type IntervalPoint = LocalPoint BrowserPoint
+
+
+type ChrInterval c = { interval :: Interval c, chrSize :: Bp }
+
+newtype CoordSys i c =
+  CoordSys { size :: c
+           , padding :: c
+           -- , intervals :: Array (Tuple i (Interval c))
+           , intervals :: Array (Tuple i (ChrInterval c))
+           }
+
+
+
+
+-- TODO need to make sure the padding is correctly applied/removed
+mkCoordSys :: forall i c.
+              Array (Tuple i BigInt)
+           -> BigInt
+           -> CoordSys i BrowserPoint
+mkCoordSys chrs padding = CoordSys { size, padding: wrap padding, intervals }
+  where (Tuple ids sizes) = Array.unzip chrs
+        os = map BPoint $ Array.scanl (\x y -> padding + x + y) zero sizes
+        ivals = Array.zipWith Interval (wrap zero `Array.cons` os) os
+        intervals = Array.zip ids $
+                    Array.zipWith (\i s -> {interval: i, chrSize:(Bp $ BigInt.toNumber s)}) ivals sizes
+        size = wrap $ (sum sizes) + (length sizes * padding)
+
 
 
 findInterval :: forall i c.
                 Ord c
-             => CoordinateSystem i c
+             => CoordSys i c
              -> c
-             -> Maybe (Tuple i {start :: c, end :: c})
-findInterval (CoordinateSystem s) p =
-  Array.find (\(Tuple i {start, end}) -> start <= p && p <= end) s.intervals
+             -> Maybe (Tuple i (ChrInterval c))
+findInterval (CoordSys s) p =
+  Array.find (\(Tuple i iv) -> p `inInterval` iv.interval) s.intervals
 
 
-derive instance newtypeCoordinateSystem :: Newtype (CoordinateSystem i c) _
--- derive instance functorCoordinateSystem :: Functor (CoordinateSystem i)
+
+canvasToView :: forall r.
+                { width :: Number | r }
+             -> Number
+             -> Ratio BigInt
+canvasToView {width} x = x' % w'
+  where w' = BigInt.fromInt $ Int.round width
+        x' = BigInt.fromInt $ Int.round x
+
+
+
+globalToFrame :: forall i c.
+                 Eq i
+              => CoordSys i BrowserPoint
+              -> BrowserPoint
+              -> Maybe (Tuple i IntervalPoint)
+globalToFrame cs bp@(BPoint p) = do
+  (Tuple i iv) <- findInterval cs bp
+  pure $ Tuple i $ globalToInterval iv.interval bp
+
+
+
+
+
+intervalToChr :: BrowserPoint
+              -> IntervalPoint
+              -> Bp
+              -> Maybe Bp
+intervalToChr padding (Local (Interval l r) p) chrSize = do
+  let padR = (unwrap padding) % (unwrap r - unwrap l)
+  -- guard $ p >= padR && p <= one - padR
+  let p' = p - padR
+      bp = Bp $ (BigInt.toNumber $ Ratio.numerator p') / (BigInt.toNumber $ Ratio.denominator p')
+
+  -- TODO it's dumb that Bp is still a Number newtype
+  pure $ bp * chrSize
+
+
+
+frameToChr :: forall i c.
+              Eq i
+           => CoordSys i BrowserPoint
+           -> Tuple i IntervalPoint
+           -> Maybe Bp
+frameToChr (CoordSys s) (Tuple i lp) = do
+  iv <- snd <$> Array.find ((==) i <<< fst) s.intervals
+  intervalToChr s.padding lp iv.chrSize
