@@ -45,7 +45,7 @@ import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
 import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawDemo, getDataDemo, mouseChrIds)
-import Genetics.Browser.Types (Bp(..), ChrId(..), Point)
+import Genetics.Browser.Types (Bp(..), BrowserPoint(..), ChrId(..), CoordSys(..), Interval(..), IntervalPoint, LocalPoint(..), Point, canvasToView, frameToChr, globalToFrame, intervalToGlobal, mkCoordSys)
 import Genetics.Browser.View (Pixels)
 import Global as Global
 import Global.Unsafe (unsafeStringify)
@@ -220,116 +220,70 @@ drawingEvent s box dat = let dd = drawDemo s 0.25 box dat
                          in map dd
 
 
-newtype CanvasX = CX Number
 
-
-newtype ViewX = ViewX (Ratio BigInt)
-
-canvasToView :: Pixels
-             -> CanvasX
-             -> ViewX
-canvasToView w (CX x) = ViewX $ x' % w'
-  where w' = BigInt.fromInt $ Int.round w
-        x' = BigInt.fromInt $ Int.round x
-
-newtype BrowserX = BX BigInt
-
-viewToGlobal :: Tuple BrowserX BrowserX
-             -> ViewX
-             -> BrowserX
-viewToGlobal (Tuple (BX l) (BX r)) (ViewX p) =
-  let r' = r % one
-      l' = l % one
-      p' = (p * (r' - l')) + l'
-  in BX $ (Ratio.numerator p') / (Ratio.denominator p')
-
-
-
--- findInterval :: Array (Tuple ChrId (Tuple BigInt BigInt))
-
-findInterval :: Array (Tuple ChrId (Tuple BigInt BigInt))
-             -> BigInt
-             -> Maybe (Tuple ChrId (Tuple BigInt BigInt))
-findInterval ivals p =
-  Array.find (\(Tuple i (Tuple l r)) -> l <= p && p <= r) intervals
-
-
--- this could be done in a more generic manner by extracting the view interval
--- using the applicative on (->)
-globalToFrame :: Array (Tuple ChrId (Tuple BigInt BigInt))
-              -> BrowserX
-              -> Maybe (Tuple ChrId ViewX)
-globalToFrame ivals (BX p) = do
-  (Tuple i (Tuple l r)) <- findInterval ivals p
-
-  pure $ Tuple i $ ViewX $ (p - l) % (r - l)
-
-
-frameToChr :: Array (Tuple ChrId BigInt)
-           -> Tuple ChrId ViewX
-           -> Maybe (Tuple ChrId BigInt)
-frameToChr chrs (Tuple i (ViewX x)) = do
-  (Tuple _ size) <- Array.find ((==) i <<< fst) chrs
-  let x' = x * (size % one)
-  pure $ Tuple i $ Ratio.numerator x'
-
-
-
-
-chrsToView :: Array (Tuple ChrId (Tuple BigInt BigInt))
+chrsToView :: CoordSys ChrId BrowserPoint
            -> Array ChrId
-           -> Tuple BrowserX BrowserX
-chrsToView chrs view = fromMaybe (Tuple (BX zero) (BX one)) $ do
+           -> Interval BrowserPoint
+chrsToView (CoordSys csys) view = fromMaybe (Interval (BPoint zero) (BPoint one)) $ do
   f <- Array.head view
   l <- Array.last view
-  (Tuple _ (Tuple start _)) <- Array.find ((==) f <<< fst) chrs
-  (Tuple _ (Tuple _ end)) <- Array.find ((==) l <<< fst) chrs
+  (Tuple _ ivS) <- Array.find ((==) f <<< fst) csys.intervals
+  (Tuple _ ivE) <- Array.find ((==) l <<< fst) csys.intervals
 
-  pure $ Tuple (BX start) (BX end)
+  let (Interval start _) = ivS.interval
+      (Interval _   end) = ivE.interval
+
+  pure $ Interval start end
 
 
-viewRange :: Array (Tuple ChrId (Tuple BigInt BigInt))
+
+viewRange :: CoordSys ChrId BrowserPoint
           -> Event (Array ChrId)
-          -> Event (Tuple BrowserX BrowserX)
+          -> Event (Interval BrowserPoint)
 viewRange chrs = map (chrsToView chrs)
 
 
 clickEvent :: forall r.
               CanvasElement
-           -> Event CanvasX
-clickEvent el = (CX <<< _.x)<$> canvasEvent "mousedown" el
+           -> Event Pixels
+clickEvent el = (_.x) <$> canvasEvent "mousedown" el
 
 
 viewClick :: forall r.
              { width :: Pixels | r}
-          -> Event CanvasX
-          -> Event ViewX
-viewClick {width} = map (canvasToView width)
+          -> Event Pixels
+          -> Event (Ratio BigInt)
+viewClick w = map (canvasToView w)
 
 
-globalClick :: Event (Tuple BrowserX BrowserX)
-            -> Event ViewX
-            -> Event BrowserX
-globalClick vs vx = viewToGlobal <$> vs <*> vx
+globalClick :: Event (Interval BrowserPoint)
+            -> Event (Ratio BigInt)
+            -> Event BrowserPoint
+globalClick vs vx = (\iv r -> intervalToGlobal $ Local iv r) <$> vs <*> vx
 
 
-frameClick :: Array (Tuple ChrId (Tuple BigInt BigInt))
-           -> Event BrowserX
-           -- -> Event ViewX
-           -> Event (Maybe (Tuple ChrId ViewX))
-frameClick ivals = map (globalToFrame ivals)
-
-
-
-chrClick :: Array (Tuple ChrId BigInt)
-         -> Event (Maybe (Tuple ChrId ViewX))
-         -> Event (Maybe (Tuple ChrId BigInt))
-chrClick chrs ev = (frameToChr chrs =<< _) <$> ev
+frameClick :: CoordSys ChrId BrowserPoint
+           -> Event BrowserPoint
+           -> Event (Maybe (Tuple ChrId IntervalPoint))
+frameClick csys = map (globalToFrame csys)
 
 
 
-showView :: Tuple BrowserX BrowserX -> String
-showView (Tuple (BX l) (BX r)) = "< " <> show l <> " -- " <> show r <> " >"
+chrClick :: CoordSys ChrId BrowserPoint
+         -> Event (Maybe (Tuple ChrId IntervalPoint))
+         -> Event (Maybe (Tuple ChrId Bp))
+chrClick csys ev = f <$> ev
+  where f x = do
+          p@(Tuple i _) <- x
+          Tuple i <$> frameToChr csys p
+
+
+
+showView :: Interval BrowserPoint -> String
+showView (Interval (BPoint l) (BPoint r)) = "< " <> BigInt.toString l <> " -- " <> BigInt.toString r <> " >"
+
+showLP :: IntervalPoint -> String
+showLP (Local iv p) = "Interval: " <> showView iv <> ";\t" <> show p
 
 
 
@@ -355,23 +309,23 @@ main = launchAff do
   let viewEvent :: Event (Array ChrId)
       viewEvent = chrsArrayEvent $ chrZREvent mouseChrIds btnUpdateView
 
-      viewEv' :: Event (Tuple BrowserX BrowserX)
-      viewEv' = viewRange intervals viewEvent
+      viewEv' :: Event (Interval BrowserPoint)
+      viewEv' = viewRange coordSys viewEvent
 
-      click :: Event CanvasX
+      click :: Event Pixels
       click = clickEvent canvas
 
-      vClick :: Event ViewX
+      vClick :: Event (Ratio BigInt)
       vClick = viewClick {width: w} click
 
-      gClick :: Event BrowserX
+      gClick :: Event BrowserPoint
       gClick = globalClick viewEv' vClick
 
-      fClick :: Event (Maybe (Tuple ChrId ViewX))
-      fClick = frameClick intervals gClick
+      fClick :: Event (Maybe _)
+      fClick = frameClick coordSys gClick
 
-      cClick :: Event (Maybe (Tuple ChrId BigInt))
-      cClick = chrClick mouseChrSizes fClick
+      cClick :: Event (Maybe _)
+      cClick = chrClick coordSys fClick
 
       clickEvs :: Event { view :: _
                         , canvasClick :: _
@@ -384,26 +338,19 @@ main = launchAff do
                  <$> viewEv' <*> click <*> vClick
                  <*> gClick <*> fClick <*> cClick
 
-      showVX :: ViewX -> String
-      showVX (ViewX x) = (BigInt.toString $ Ratio.numerator   x) <> "/"
-                      <> (BigInt.toString $ Ratio.denominator x)
-
 
 
   void $ liftEff $ Event.subscribe clickEvs
        (\ev -> do
-           let sC (CX x)    = "<p>Canvas click: " <> show x <> "</p>"
-               sV x         = "<p>View click: " <> showVX x <> "</p>"
-               sG (BX x)    = "<p>Global click: " <> BigInt.toString x <> "</p>"
-               sF :: _
-               sF = show <<< (map <<< map) showVX
-               sChr :: _
-               sChr = show <<< (map <<< map) BigInt.toString
+           let sF (Just (Tuple chr i)) = "Frame: " <> show chr <> showLP i
+               sF Nothing = "No Frame"
+               sChr (Just (Tuple chr bp)) = "Chr: " <> show chr <> "\t" <> show (unwrap bp)
+               sChr Nothing = "No Chr"
 
            setViewUI $ "<p>" <> showView ev.view <> "</p>"
-                    <> sC ev.canvasClick
-                    <> sV ev.vClick
-                    <> sG ev.gClick
+                    <> "<p>" <> "Canvas click:" <> show ev.canvasClick <> "</p>"
+                    <> "<p>" <> "View click:" <> show ev.vClick <> "</p>"
+                    <> "<p>" <> "Global click:" <> show (unwrap ev.gClick) <> "</p>"
                     <> "<p>Frame click: " <> sF ev.fClick <> "</p>"
                     <> "<p>Chr click: " <> sChr ev.cClick <> "</p>"
            )
@@ -422,6 +369,7 @@ main = launchAff do
 
 
 
+coordSys = mkCoordSys mouseChrSizes (BigInt.fromInt 2000000)
 
 mouseChrSizes :: Array (Tuple ChrId BigInt)
 mouseChrSizes =
@@ -447,18 +395,3 @@ mouseChrSizes =
             , Tuple (ChrId "X")   (unsafePartial $ fromJust $ BigInt.fromString "17103129")
             , Tuple (ChrId "Y")   (unsafePartial $ fromJust $ BigInt.fromString "9174469")
             ]
-
-
-
-intervals :: Array (Tuple ChrId (Tuple BigInt BigInt))
-intervals = Array.zip ids $ Array.zip (zero `Array.cons` os) os
-  where (Tuple ids sizes) = Array.unzip mouseChrSizes
-        os = Array.scanl (+) zero sizes
-
-
-
--- mkIntervals :: Array BigInt
---             -> Array (Tuple BigInt BigInt)
--- mkIntervals bps = Array.zip (zero `Array.cons` os) os
---   where os :: Array BigInt
---         os = Array.scanl (+) zero bps
