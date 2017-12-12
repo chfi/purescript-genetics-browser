@@ -1,56 +1,61 @@
-module Genetics.Browser.Types
-       ( Point
-       , Pos
-       , Range
-       , Bp(..)
-       , MBp(..)
-       , class HCoordinate
-       , bp
-       , mbp
-       , _Bp
-       , _MBp
-       , _BpMBp
-       , ChrId(..)
-       , _ChrId
-       , toScreen
-       , BpPerPixel(..)
-       , bpToPixels
-       , pixelsToBp
-       , Chr
-       , ChrInterval
-       , BrowserPoint(..)
-       , LocalPoint(..)
-       , IntervalPoint
-       , Interval(..)
-       , CoordSys(..)
-       , mkCoordSys
-       , findInterval
-       , intervalToGlobal
-       , globalToInterval
-       , canvasToView
-       , globalToFrame
-       , intervalToChr
-       , frameToChr
-       ) where
+module Genetics.Browser.Types where
+       -- ( Point
+       -- , Pos
+       -- , Range
+       -- , Bp(..)
+       -- , MBp(..)
+       -- , class HCoordinate
+       -- , bp
+       -- , mbp
+       -- , _Bp
+       -- , _MBp
+       -- , _BpMBp
+       -- , ChrId(..)
+       -- , _ChrId
+       -- , toScreen
+       -- , BpPerPixel(..)
+       -- , bpToPixels
+       -- , pixelsToBp
+       -- , Chr
+       -- , ChrInterval
+       -- , BrowserPoint(..)
+       -- , LocalPoint(..)
+       -- , IntervalPoint
+       -- , Interval(..)
+       -- , CoordSys(..)
+       -- , mkCoordSys
+       -- , findInterval
+       -- , localToGlobal
+       -- , globalToLocal
+       -- , canvasToView
+       -- , globalToFrame
+       -- , intervalToChr
+       -- , frameToChr
+       -- , intervalSize
+       -- , canvasToBrowserOffset
+       -- ) where
 
 import Prelude
 
 import Control.Alternative (empty)
 import Control.MonadPlus (guard)
 import Data.Array as Array
+import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Foldable (length, sum)
 import Data.Foreign.Class (class Decode, class Encode)
 import Data.Int as Int
-import Data.Lens (Iso', Prism', APrism', iso, prism')
+import Data.Lens (APrism', Iso', Lens', Prism', iso, lens, prism', takeBoth, (^.))
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Types (Iso')
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.Profunctor.Choice (fanin)
+import Data.Profunctor.Strong (fanout, splitStrong)
 import Data.Ratio (Ratio, (%))
 import Data.Ratio as Ratio
-import Data.Tuple (Tuple(..), fst, snd)
+import Data.Tuple (Tuple(..), fst, snd, uncurry)
 import Unsafe.Coerce (unsafeCoerce)
 -- import Genetics.Browser.Units (Bp(..), ChrId(..))
 
@@ -220,31 +225,88 @@ inInterval :: forall c.
            -> Boolean
 inInterval p (Interval l r) = l <= p && p <= r
 
+_iL :: forall c. Lens' (Interval c) c
+_iL = lens (\(Interval l _) -> l) (\(Interval _ r) l -> Interval l r)
+
+
+_iR :: forall c. Lens' (Interval c) c
+_iR = lens (\(Interval _ r) -> r) (\(Interval l _) r -> Interval l r)
+
 -- clunky but works for now
 data LocalPoint c = Local (Interval c) (Ratio BigInt)
 
+_lIv :: forall c. Lens' (LocalPoint c) (Interval c)
+_lIv = lens (\(Local i _) -> i) (\(Local _ p) i -> Local i p)
+
+_lP :: forall c. Lens' (LocalPoint c) (Ratio BigInt)
+_lP = lens (\(Local _ p) -> p) (\(Local i _) p -> Local i p)
+
+
+
+-- TODO This is dumb and bad
+unitRatioToNumber :: Ratio BigInt
+                  -> Number
+unitRatioToNumber r =
+  let n = (Ratio.numerator r)
+      d = (Ratio.denominator r)
+  in (BigInt.toNumber n) / (BigInt.toNumber d)
+
+
+
 -- for now we just assume that the given point is in the interval...
-globalToInterval :: forall a c.
-                    Newtype c BigInt
-                 => Interval c
-                 -> c
-                 -> LocalPoint c
-globalToInterval iv@(Interval l r) p =
+globalToLocal :: forall a c.
+                 Newtype c BigInt
+              => Interval c
+              -> c
+              -> LocalPoint c
+globalToLocal iv@(Interval l r) p =
   let l' = unwrap l
       r' = unwrap r
       p' = ((unwrap p) - l') % (r' - l')
   in Local iv p'
 
 
-intervalToGlobal :: forall c.
-                    Newtype c BigInt
-                 => LocalPoint c
-                 -> c
-intervalToGlobal (Local (Interval l r) p) =
+localToGlobal :: forall c.
+                 Newtype c BigInt
+              => LocalPoint c
+              -> c
+localToGlobal (Local (Interval l r) p) =
   let r' = (unwrap r) % one
       l' = (unwrap l) % one
       p' = (p * (r' - l')) + l'
   in wrap $ (Ratio.numerator p') / (Ratio.denominator p')
+
+
+intervalSize :: forall c a.
+                Newtype c a
+             => Ring a
+             => Interval c
+             -> a
+intervalSize (Interval l r) = (unwrap r) - (unwrap l)
+
+
+-- | Transform a point in some interval A to the same point in interval B
+seenFrom :: forall a b c.
+            Newtype c BigInt
+         => Newtype b BigInt
+         => LocalPoint c
+         -> Interval b
+         -> LocalPoint b
+seenFrom p i =
+  let p' = unwrap $ localToGlobal p
+  in globalToLocal i (wrap p')
+
+
+intervalSeenFrom :: forall a b c.
+                    Newtype c BigInt
+                 => Newtype b BigInt
+                 => Interval c
+                 -> Interval b
+                 -> Interval (Ratio BigInt)
+intervalSeenFrom (Interval l r) i2 =
+  let pl = globalToLocal i2 (wrap $ unwrap l)
+      pr = globalToLocal i2 (wrap $ unwrap r)
+  in Interval (pl^._lP) (pr^._lP)
 
 
 type IntervalPoint = LocalPoint BrowserPoint
@@ -286,6 +348,40 @@ findInterval (CoordSys s) p =
   Array.find (\(Tuple i iv) -> p `inInterval` iv.interval) s.intervals
 
 
+intervals :: forall i c.
+             Ord i
+          => CoordSys i c
+          -> i
+          -> i
+          -> Maybe (Array (ChrInterval c))
+intervals (CoordSys s) l r = do
+  let l' = min l r
+      r' = max l r
+
+  lIndex <- Array.findIndex ((==) l' <<< fst) s.intervals
+  rIndex <- Array.findIndex ((==) r' <<< fst) s.intervals
+
+  pure $ snd <$> Array.slice lIndex rIndex s.intervals
+
+
+
+viewIntervals :: forall i c.
+                 Ord i
+              => Ord c
+              => CoordSys i c
+              -> Interval c
+              -> Maybe (Array (ChrInterval c))
+viewIntervals cs (Interval l r) = do
+  lIv <- fst <$> findInterval cs l
+  rIv <- fst <$> findInterval cs r
+
+  intervals cs lIv rIv
+
+  -- pure $ Tuple lIv rIv
+
+
+
+
 
 canvasToView :: forall r.
                 { width :: Number | r }
@@ -297,6 +393,18 @@ canvasToView {width} x = x' % w'
 
 
 
+canvasToBrowserOffset :: forall r.
+                         { width :: Number | r }
+                      -> BigInt
+                      -> Number
+                      -> BrowserPoint
+canvasToBrowserOffset w vw x =
+  let x' = canvasToView w x
+      p' = x' * (vw % one)
+  in wrap $ (Ratio.numerator p') / (Ratio.denominator p')
+
+
+
 globalToFrame :: forall i c.
                  Eq i
               => CoordSys i BrowserPoint
@@ -304,7 +412,7 @@ globalToFrame :: forall i c.
               -> Maybe (Tuple i IntervalPoint)
 globalToFrame cs bp@(BPoint p) = do
   (Tuple i iv) <- findInterval cs bp
-  pure $ Tuple i $ globalToInterval iv.interval bp
+  pure $ Tuple i $ globalToLocal iv.interval bp
 
 
 
@@ -333,3 +441,28 @@ frameToChr :: forall i c.
 frameToChr (CoordSys s) (Tuple i lp) = do
   iv <- snd <$> Array.find ((==) i <<< fst) s.intervals
   intervalToChr s.padding lp iv.chrSize
+
+
+-- | Maps an interval to the canvas,
+-- | assuming the interval coincides directly with the canvas view;
+-- | i.e. does not try to map the point to the end up in [0, canvas width].
+localToCanvasView :: forall i c r.
+                     { width :: Number | r }
+                  -> LocalPoint BrowserPoint
+                  -> Interval BrowserPoint
+                  -> Number
+localToCanvasView {width} point view@(Interval l r) =
+  let p :: Ratio BigInt
+      p = point `seenFrom` view ^. _lP
+  in (unitRatioToNumber p) * width
+
+
+intervalSeenFromCanvas ::  forall i c r.
+                           { width :: Number | r }
+                       -> Interval BrowserPoint
+                       -> Interval BrowserPoint
+                       -> Interval Number
+intervalSeenFromCanvas {width} (Interval l r) view =
+  let l' = unitRatioToNumber $ globalToLocal view l ^. _lP
+      r' = unitRatioToNumber $ globalToLocal view r ^. _lP
+  in Interval (l' * width) (r' * width)
