@@ -45,7 +45,7 @@ import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
 import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawDemo, getDataDemo, mouseChrIds)
-import Genetics.Browser.Types (Bp(..), BrowserPoint(..), ChrId(..), CoordSys(..), Interval(..), IntervalPoint, LocalPoint(..), Point, canvasToView, frameToChr, globalToFrame, intervalToGlobal, mkCoordSys)
+import Genetics.Browser.Types (Bp(..), BrowserPoint(..), ChrId(..), CoordSys(..), Interval(..), IntervalPoint, LocalPoint(..), Point, canvasToBrowserOffset, canvasToView, frameToChr, globalToFrame, intervalSize, intervalToGlobal, mkCoordSys)
 import Genetics.Browser.View (Pixels)
 import Global as Global
 import Global.Unsafe (unsafeStringify)
@@ -60,16 +60,19 @@ import Unsafe.Coerce (unsafeCoerce)
 foreign import getScreenSize :: forall eff. Eff eff { w :: Number, h :: Number }
 
 -- 1st element is a backbuffer, 2nd the one shown on screen
--- foreign import scrollCanvas :: forall eff.
---                                CanvasElement
---                             -> CanvasElement
---                             -> Point
---                             -> Eff eff Unit
+foreign import scrollCanvas :: forall eff.
+                               CanvasElement
+                            -> CanvasElement
+                            -> Point
+                            -> Eff eff Unit
+
+foreign import canvasDragImpl :: CanvasElement -> Event { during :: Nullable Point
+                                                        , total :: Nullable Point }
 
 -- creates a new CanvasElement, not attached to the DOM and thus not visible
--- foreign import newCanvas :: forall eff.
---                             { w :: Number, h :: Number }
---                          -> Eff eff CanvasElement
+foreign import newCanvas :: forall eff.
+                            { w :: Number, h :: Number }
+                         -> Eff eff CanvasElement
 
 foreign import clearCanvas :: forall eff. CanvasElement -> Eff eff Unit
 
@@ -78,8 +81,6 @@ foreign import clearCanvas :: forall eff. CanvasElement -> Eff eff Unit
 foreign import buttonEvent :: String
                            -> Event Unit
 
--- foreign import canvasDragImpl :: CanvasElement -> Event { during :: Nullable Point
---                                                         , total :: Nullable Point }
 
 foreign import canvasEvent :: String -> CanvasElement -> Event Point
 
@@ -87,136 +88,141 @@ foreign import canvasEvent :: String -> CanvasElement -> Event Point
 foreign import setViewUI :: forall eff. String -> Eff eff Unit
 
 
-type View = { lHand :: ChrId, rHand :: ChrId }
+-- type View = { lHand :: ChrId, rHand :: ChrId }
 
-type ZipperRange a =
-  { left  :: List a
-  , focus :: List a
-  , right :: List a
-  }
+-- type ZipperRange a =
+--   { left  :: List a
+--   , focus :: List a
+--   , right :: List a
+--   }
 
-zipSlideLeft :: forall a.
-                ZipperRange a
-             -> ZipperRange a
-zipSlideLeft zr@{left, focus, right} = case List.uncons left, List.unsnoc focus of
-    Nothing, _  -> zr
-    _ , Nothing -> zr
-    Just l, Just f ->
-      let left'  = l.tail
-          focus' = l.head : f.init
-          right' = f.last : right
-      in {left: left', focus: focus', right: right'}
+-- zipSlideLeft :: forall a.
+--                 ZipperRange a
+--              -> ZipperRange a
+-- zipSlideLeft zr@{left, focus, right} = case List.uncons left, List.unsnoc focus of
+--     Nothing, _  -> zr
+--     _ , Nothing -> zr
+--     Just l, Just f ->
+--       let left'  = l.tail
+--           focus' = l.head : f.init
+--           right' = f.last : right
+--       in {left: left', focus: focus', right: right'}
 
-zipSlideRight :: forall a.
-                 ZipperRange a
-              -> ZipperRange a
-zipSlideRight zr@{left, focus, right} = case List.uncons focus, List.uncons right of
-    Nothing, _  -> zr
-    _ , Nothing -> zr
-    Just f, Just r ->
-      let left'  = f.head : left
-          focus' = f.tail <> List.singleton r.head
-          right' = r.tail
-      in {left: left', focus: focus', right: right'}
-
-
-zipZoomIn :: forall a.
-             ZipperRange a
-          -> ZipperRange a
-zipZoomIn zr@{left, focus, right} = case List.uncons focus of
-  Nothing -> zr
-  Just {head, tail} -> case List.unsnoc tail of
-    Nothing -> zr
-    Just {init, last} ->
-      let left'  = head : left
-          focus' = init
-          right' = last : right
-      in {left: left', focus: focus', right: right'}
+-- zipSlideRight :: forall a.
+--                  ZipperRange a
+--               -> ZipperRange a
+-- zipSlideRight zr@{left, focus, right} = case List.uncons focus, List.uncons right of
+--     Nothing, _  -> zr
+--     _ , Nothing -> zr
+--     Just f, Just r ->
+--       let left'  = f.head : left
+--           focus' = f.tail <> List.singleton r.head
+--           right' = r.tail
+--       in {left: left', focus: focus', right: right'}
 
 
-zipZoomOut :: forall a.
-              ZipperRange a
-           -> ZipperRange a
-zipZoomOut zr@{left, focus, right} = case List.uncons left, List.uncons right of
-  Nothing, Nothing -> zr
-  Nothing, Just r ->
-    let focus' = focus <> List.singleton r.head
-        right' = r.tail
-    in zr { focus = focus', right = right' }
-  Just l, Nothing ->
-    let left' = l.tail
-        focus' = l.head : focus
-    in zr { focus = focus', left = left' }
-  Just l, Just r ->
-    let left' = l.tail
-        focus' = l.head : focus <> List.singleton r.head
-        right' = r.tail
-    in { left: left', focus: focus', right: right' }
+-- zipZoomIn :: forall a.
+--              ZipperRange a
+--           -> ZipperRange a
+-- zipZoomIn zr@{left, focus, right} = case List.uncons focus of
+--   Nothing -> zr
+--   Just {head, tail} -> case List.unsnoc tail of
+--     Nothing -> zr
+--     Just {init, last} ->
+--       let left'  = head : left
+--           focus' = init
+--           right' = last : right
+--       in {left: left', focus: focus', right: right'}
 
 
-focusArray :: forall a.
-              ZipperRange a
-           -> Array a
-focusArray {focus} = Array.fromFoldable focus
-
-unfocusArray :: forall a.
-                Array a
-             -> ZipperRange a
-unfocusArray arr = { left: Nil
-                   , focus: List.fromFoldable arr
-                   , right: Nil
-                   }
-
-
-data UpdateView =
-    GoLeft
-  | GoRight
-  | Out
-  | In
-  | NoOp
+-- zipZoomOut :: forall a.
+--               ZipperRange a
+--            -> ZipperRange a
+-- zipZoomOut zr@{left, focus, right} = case List.uncons left, List.uncons right of
+--   Nothing, Nothing -> zr
+--   Nothing, Just r ->
+--     let focus' = focus <> List.singleton r.head
+--         right' = r.tail
+--     in zr { focus = focus', right = right' }
+--   Just l, Nothing ->
+--     let left' = l.tail
+--         focus' = l.head : focus
+--     in zr { focus = focus', left = left' }
+--   Just l, Just r ->
+--     let left' = l.tail
+--         focus' = l.head : focus <> List.singleton r.head
+--         right' = r.tail
+--     in { left: left', focus: focus', right: right' }
 
 
-btnScroll :: Event UpdateView
-btnScroll = const GoLeft  <$> buttonEvent "scrollLeft" <|>
-            const GoRight <$> buttonEvent "scrollRight"
+-- focusArray :: forall a.
+--               ZipperRange a
+--            -> Array a
+-- focusArray {focus} = Array.fromFoldable focus
 
-btnZoom :: Event UpdateView
-btnZoom = const Out <$> buttonEvent "zoomOut" <|>
-          const In  <$> buttonEvent "zoomIn"
-
-btnUpdateView :: Event UpdateView
-btnUpdateView = btnScroll <|> btnZoom <|> (const NoOp <$> buttonEvent "redraw")
-
-
-
-mkFoldView :: UpdateView
-           -> ZipperRange ChrId
-           -> ZipperRange ChrId
-mkFoldView uv zr = case uv of
-  GoLeft  -> zipSlideLeft zr
-  GoRight -> zipSlideRight zr
-  Out     -> zipZoomOut zr
-  In      -> zipZoomIn zr
-  NoOp    -> zr
+-- unfocusArray :: forall a.
+--                 Array a
+--              -> ZipperRange a
+-- unfocusArray arr = { left: Nil
+--                    , focus: List.fromFoldable arr
+--                    , right: Nil
+--                    }
 
 
-chrZREvent :: Array ChrId
-           -> Event UpdateView
-           -> Event (ZipperRange ChrId)
-chrZREvent chrs uv = Event.fold mkFoldView uv (unfocusArray chrs)
+-- data UpdateView =
+--     GoLeft
+--   | GoRight
+--   | Out
+--   | In
+--   | NoOp
 
-chrsArrayEvent :: Event (ZipperRange ChrId)
-               -> Event (Array ChrId)
-chrsArrayEvent = map (Array.fromFoldable <<< _.focus)
+
+-- btnScroll :: Event UpdateView
+-- btnScroll = const GoLeft  <$> buttonEvent "scrollLeft" <|>
+--             const GoRight <$> buttonEvent "scrollRight"
+
+-- btnZoom :: Event UpdateView
+-- btnZoom = const Out <$> buttonEvent "zoomOut" <|>
+--           const In  <$> buttonEvent "zoomIn"
+
+-- btnUpdateView :: Event UpdateView
+-- btnUpdateView = btnScroll <|> btnZoom <|> (const NoOp <$> buttonEvent "redraw")
+
+
+
+-- mkFoldView :: UpdateView
+--            -> ZipperRange ChrId
+--            -> ZipperRange ChrId
+-- mkFoldView uv zr = case uv of
+--   GoLeft  -> zipSlideLeft zr
+--   GoRight -> zipSlideRight zr
+--   Out     -> zipZoomOut zr
+--   In      -> zipZoomIn zr
+--   NoOp    -> zr
+
+
+-- chrZREvent :: Array ChrId
+--            -> Event UpdateView
+--            -> Event (ZipperRange ChrId)
+-- chrZREvent chrs uv = Event.fold mkFoldView uv (unfocusArray chrs)
+
+-- chrsArrayEvent :: Event (ZipperRange ChrId)
+--                -> Event (Array ChrId)
+-- chrsArrayEvent = map (Array.fromFoldable <<< _.focus)
+
+type BrowserView = Interval BrowserPoint
+
 
 
 drawingEvent :: { min :: Number, max :: Number }
+             -> CoordSys ChrId BrowserPoint
              -> { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
              -> { gwas  :: Map ChrId (List _)
                 , annots :: Map ChrId (List _) }
-             -> Event (Array ChrId)
+             -- -> Event (Array ChrId)
+             -> Event (BrowserView)
              -> Event (Drawing)
-drawingEvent s box dat = let dd = drawDemo s 0.25 box dat
+drawingEvent s box dat = let dd = drawDemo' s 0.25 box dat
                          in map dd
 
 
@@ -243,31 +249,20 @@ viewRange :: CoordSys ChrId BrowserPoint
 viewRange chrs = map (chrsToView chrs)
 
 
-clickEvent :: forall r.
-              CanvasElement
-           -> Event Pixels
+clickEvent :: forall r. CanvasElement -> Event Pixels
 clickEvent el = (_.x) <$> canvasEvent "mousedown" el
 
 
-viewClick :: forall r.
-             { width :: Pixels | r}
-          -> Event Pixels
-          -> Event (Ratio BigInt)
+viewClick :: forall r. { width :: Pixels | r} -> Event Pixels -> Event (Ratio BigInt)
 viewClick w = map (canvasToView w)
 
 
-globalClick :: Event (Interval BrowserPoint)
-            -> Event (Ratio BigInt)
-            -> Event BrowserPoint
+globalClick :: Event (Interval BrowserPoint) -> Event (Ratio BigInt) -> Event BrowserPoint
 globalClick vs vx = (\iv r -> intervalToGlobal $ Local iv r) <$> vs <*> vx
 
 
-frameClick :: CoordSys ChrId BrowserPoint
-           -> Event BrowserPoint
-           -> Event (Maybe (Tuple ChrId IntervalPoint))
+frameClick :: CoordSys ChrId BrowserPoint -> Event BrowserPoint -> Event (Maybe (Tuple ChrId IntervalPoint))
 frameClick csys = map (globalToFrame csys)
-
-
 
 chrClick :: CoordSys ChrId BrowserPoint
          -> Event (Maybe (Tuple ChrId IntervalPoint))
@@ -278,12 +273,28 @@ chrClick csys ev = f <$> ev
           Tuple i <$> frameToChr csys p
 
 
-
 showView :: Interval BrowserPoint -> String
 showView (Interval (BPoint l) (BPoint r)) = "< " <> BigInt.toString l <> " -- " <> BigInt.toString r <> " >"
 
 showLP :: IntervalPoint -> String
 showLP (Local iv p) = "Interval: " <> showView iv <> ";\t" <> show p
+
+
+canvasDrag :: CanvasElement -> Event (Either Point Point)
+canvasDrag el = f <$> canvasDragImpl el
+  where f ev = case toMaybe ev.during of
+          Just p  -> Right p
+          Nothing -> Left $ unsafePartial $ fromJust (toMaybe ev.total)
+
+
+browserDrag :: forall r.
+               { width :: Number | r }
+            -> Event (Interval BrowserPoint)
+            -> Event Number
+            -> Event BrowserPoint
+browserDrag w v ev = canvasToBrowserOffset w
+                     <$> map intervalSize v
+                     <*> ev
 
 
 
@@ -299,11 +310,16 @@ main = launchAff do
     _ <- setCanvasWidth (w-2.0) canvas
     pure {w, h}
 
+  backCanvas <- liftEff $ newCanvas {w,h}
+
   let height = h
       offset = 0.0
       yInfo = { height, offset }
 
       chrIds = mouseChrIds
+
+
+  let dragCanvasEv = canvasDrag canvas
 
 
   let viewEvent :: Event (Array ChrId)
