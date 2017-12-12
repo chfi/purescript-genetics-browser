@@ -37,7 +37,7 @@ import Data.Traversable (scanl, traverse)
 import Data.Tuple (Tuple(..), fst, snd, uncurry)
 import Data.Variant (class Contractable, Variant)
 import Data.Variant as Variant
-import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
+import Genetics.Browser.Types (Bp(Bp), BrowserPoint, ChrId(ChrId), ChrInterval, CoordSys(..), Interval(..), Point, intervalSeenFromCanvas, viewIntervals)
 import Genetics.Browser.View (Pixels)
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, scale, translate)
 import Graphics.Drawing as Drawing
@@ -47,178 +47,14 @@ import Type.Prelude (class IsSymbol, class RowLacks)
 import Unsafe.Coerce (unsafeCoerce)
 
 
-
-
--- This type represents a point on the *browser*, not the *genome*.
--- It includes spaces between chromosomes, for example.
-newtype BrowserPoint = BrowserPoint (Ratio BigInt)
-
-derive instance eqBrowserPoint :: Eq BrowserPoint
-derive instance ordBrowserPoint :: Ord BrowserPoint
-derive instance newtypeBrowserPoint :: Newtype BrowserPoint _
-
-
-
-inRange :: forall c.
-              Ord c
-           => c
-           -> Tuple c c
-           -> Boolean
-inRange c (Tuple l r) = l <= c && c <= r
-
-
-
-ivals :: forall i c.
-         Eq i
-      => Ord c
-      => EuclideanRing c
-      => Array (Tuple i c)
-      -> { toLocal  :: Ratio c   -> Maybe (Tuple i c)
-         , toGlobal  :: Tuple i c -> Maybe (Ratio c)
-         , intervals :: Array (Tuple i (Tuple (Ratio c) (Ratio c)))
-         }
-ivals frames = { toLocal, toGlobal, intervals }
-  where (Tuple is sizes) = Array.unzip frames
-        normalized :: Array (Ratio c)
-        normalized = let total = sum sizes in map (_ % total) sizes
-        intervals = Array.zip is
-                      $ Array.zip (zero `Array.cons` normalized) normalized
-        toLocal :: Ratio c -> Maybe (Tuple i c)
-        toLocal r = do
-          -- xx <-
-          (Tuple i (Tuple start end)) <- Array.find (inRange r <<< snd) intervals
-          (Tuple _ size) <- Array.find ((==) i <<< fst) frames
-
-
-          -- TODO this might be totally messed up
-          -- r' should be possible to round to the final value safely
-
-          -- Needs testing!!!
-          let r' :: Ratio c
-              r' = ((r - start) / (end - start)) * (size % one)
-              n = Ratio.numerator r'
-              d = Ratio.denominator r'
-
-          pure $ Tuple i (n / d)
-
-        toGlobal :: Tuple i c -> Maybe (Ratio c)
-        toGlobal (Tuple i c) = do
-
-          (Tuple _ (Tuple sR eR)) <- Array.find ((==) i <<< fst) intervals
-
-          (Tuple _ size) <- Array.find ((==) i <<< fst) frames
-
-              -- I'm not sure what's going on here
-              -- also needs testing...
-          let iLenR :: _
-              iLenR = eR - sR   -- the proportion of the interval to the entire browser
-              iLenR' = one / iLenR -- scaling from interval to browser
-              r = c % size -- the given point in interval-local coordinates
-              r' = r % iLenR'  --- and in global coordinates
-
-          pure $ (c % size) * (one / eR - sR)
-
-
-
-
-
-newtype CoordSystem = CoordSystem { genLength :: BigInt
-                                  , toGenome :: Ratio BigInt -> Maybe (Tuple ChrId Bp)
-                                  , toGlobal :: Tuple ChrId Bp -> Maybe (Ratio BigInt)
-                                  , frames :: Array (Tuple ChrId
-                                                     { start :: Ratio BigInt
-                                                     , end :: Ratio BigInt
-                                                     })
-                                  }
-
-toBigInt :: Bp -> BigInt
-toBigInt (Bp x) = BigInt.fromInt $ Int.round $ x
-
-
-chrIntervals :: Array (Tuple ChrId Bp)
-             -> Array (Tuple ChrId (Tuple BigInt BigInt))
-chrIntervals chrs = case Array.uncons chrs of
-  Nothing -> []
-  Just {head, tail} ->
-    let first = Tuple (toBigInt (Bp 0.0)) (toBigInt (snd head))
-        g :: Tuple BigInt BigInt -> Bp -> Tuple BigInt BigInt
-        g (Tuple start end) size = (Tuple end (end+(toBigInt size)))
-        (Tuple ids sizes) = Array.unzip chrs
-    in Array.zip ids (Array.cons first $ scanl g first sizes)
-
-
-toBp :: Ratio BigInt -> Ratio BigInt -> Ratio BigInt -> Bp -> Bp
-toBp start end pos bp =
-  let norm = (pos - start) - (end - start)
-      norm' = (BigInt.toNumber $ numerator norm) / (BigInt.toNumber $ denominator norm)
-  in (Bp norm') * bp
-
-
-frameToGenome :: Array (Tuple ChrId { start :: Ratio BigInt
-                                    , end :: Ratio BigInt })
-         -> Ratio BigInt
-         -> Maybe (Tuple ChrId Bp)
-frameToGenome frames r = do
-  chr <- Array.find (\(Tuple _ {start, end}) -> start <= r && r <= end) frames
-
-  let chr' :: _
-      chr' = chr
-
-  pure $ unsafeCoerce unit
-
-
--- toGlobal :: Tuple ChrId Bp -> Maybe (Ratio BigInt)
--- toGlobal = unsafeCoerce unit
-
-
-mkCoordSystem :: forall f.
-                 Functor f
-              => Foldable f
-              => f (Tuple ChrId Bp)
-              -> CoordSystem
-mkCoordSystem chrs = CoordSystem { genLength, toGenome, toGlobal, frames }
-  where genLength :: BigInt
-        genLength = Additive `ala` foldMap $ map (toBigInt <<< snd) chrs
-
-        frames :: Array (Tuple ChrId {start :: Ratio BigInt, end :: Ratio BigInt})
-        frames = map (\(Tuple s e) -> {start: s % genLength, end: e % genLength})
-                   <$> (chrIntervals $ Array.fromFoldable chrs)
-
-        toGenome :: Ratio BigInt -> Maybe (Tuple ChrId Bp)
-        toGenome r = unsafeCoerce unit
-
-        toGlobal :: Tuple ChrId Bp -> Maybe (Ratio BigInt)
-        toGlobal = unsafeCoerce unit
-
-
--- testin :: List _ -> _
--- testin = Additive `ala` foldMap
-
--- To map a BrowserPoint to a point on the genome, we need to know
--- the intervals of the chromosomes, and their respective sizes.
--- I.e. we need to "invert" the Frames.
--- To simplify that we should simplify Frames, decoupling the concept of width from height.
--- Then produce a function
-{-
-  x in [0.0, 1.0] -> Tuple ChrId Bp
--}
--- So extract the `frames` function from `drawData'` (again).
--- Or, well
--- the drawData' function should grow to handle events on glyphs,
--- which will involve this type of thing as well.
-
--- toGenome :: BrowserPoint -> ChrCtx
-
-
-
 type Frame a = { padding :: Pixels, width :: Pixels, contents :: a }
 
 type ChrCtx r = Map ChrId (Record r)
 
-totalSize :: forall r.
-             ChrCtx (size :: Bp | r)
-          -> Bp
-totalSize chrCtx = alaF Additive foldMap _.size chrCtx
+-- totalSize :: forall r.
+--              ChrCtx (size :: Bp | r)
+--           -> Bp
+-- totalSize chrCtx = alaF Additive foldMap _.size chrCtx
 
 
 newtype Normalized a = Normalized a
@@ -265,24 +101,24 @@ type PureRenderer' a = a -> Maybe { drawing :: Pixels -> Drawing
                                   }
 
 
-tagRenderer :: forall a sym r1 r2.
-               RowCons sym a r1 r2
-            => IsSymbol sym
-            => SProxy sym
-            -> PureRenderer a
-            -> PureRenderer (Variant r2)
-tagRenderer sym renderer var = Variant.prj sym var >>= renderer
+-- tagRenderer :: forall a sym r1 r2.
+--                RowCons sym a r1 r2
+--             => IsSymbol sym
+--             => SProxy sym
+--             -> PureRenderer a
+--             -> PureRenderer (Variant r2)
+-- tagRenderer sym renderer var = Variant.prj sym var >>= renderer
 
 
-combineRenderers :: forall r1 r2 r3.
-                    Union r1 r2 r3
-                 => Contractable r3 r1
-                 => Contractable r3 r2
-                 => PureRenderer (Variant r1)
-                 -> PureRenderer (Variant r2)
-                 -> PureRenderer (Variant r3)
-combineRenderers r1 r2 var = (Variant.contract var >>= r1) <|>
-                             (Variant.contract var >>= r2)
+-- combineRenderers :: forall r1 r2 r3.
+--                     Union r1 r2 r3
+--                  => Contractable r3 r1
+--                  => Contractable r3 r2
+--                  => PureRenderer (Variant r1)
+--                  -> PureRenderer (Variant r2)
+--                  -> PureRenderer (Variant r3)
+-- combineRenderers r1 r2 var = (Variant.contract var >>= r1) <|>
+--                              (Variant.contract var >>= r2)
 
 
 type GWASFeature r = { score :: Number
@@ -321,6 +157,12 @@ pureRender :: forall f a.
 pureRender r as = filterMap r as
 
 
+-- csysFrames :: forall i c.
+--               { interval :: Interval BrowserPoint, chrSize :: Bp }
+--            -> Pixels
+--            ->
+
+
 -- TODO simplify these two functions by extracting `padding` and `height` to another argument;
 -- after all, only `width` changes per frame
 drawPureFrame :: forall f r.
@@ -332,6 +174,7 @@ drawPureFrame fs { width, padding, height } = foldMap render' fs
   where render' {drawing, point} =
             let {x,y} = nPointToFrame (width - padding * 2.0) height $ point
             in translate (x + padding) y drawing
+
 
 
 -- Draw a collection of , lined up one after another
@@ -589,6 +432,74 @@ drawDemo s sig f {gwas, annots} =
       drawGwas   = drawData f mouseChrCtx renderers.gwas   gwas
       drawAnnots = drawData f mouseChrCtx renderers.annots annots
   in \chrs -> (drawGwas chrs) <> (drawAnnots chrs) <> ruler' f
+
+drawDemo' :: _
+drawDemo' = unsafeCoerce
+
+
+
+
+mkFrame :: forall r i.
+           { width :: Pixels, height :: Pixels | r }
+        -> Interval BrowserPoint
+        -> Interval BrowserPoint
+        -> { width :: Pixels, height :: Pixels, offset :: Pixels }
+mkFrame canvasSize interval view@(Interval l r) =
+  let (Interval l r) = intervalSeenFromCanvas canvasSize interval view
+      width = r - l
+      offset = l
+  in { width, height: canvasSize.height, offset }
+
+
+
+mkFrames :: forall i c r.
+            { width :: Pixels, height :: Pixels | r }
+         -> Array (Interval BrowserPoint)
+         -> Interval BrowserPoint
+         -> Array ( {width :: Pixels, height :: Pixels, offset :: Pixels} )
+mkFrames canvasSize ivals view = map (mkFrame canvasSize view) ivals
+
+
+
+drawData' :: forall i f a r.
+             Ord i
+          => Foldable f
+          => Filterable f
+          => CoordSys i BrowserPoint
+          -> { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
+          -> PureRenderer a
+          -> Map i (f a)
+          -> Interval BrowserPoint
+          -> Drawing
+drawData' cs canvasBox renderer dat =
+  let drawings :: Map i (Array {drawing :: Drawing, point :: _})
+      drawings = map (Array.fromFoldable <<< pureRender renderer) dat
+
+      fIvals :: _
+      fIvals v' = (map <<< map) _.interval $ viewIntervals cs v'
+
+      -- mkFrame :: Array i -> i -> Maybe {width :: _, height :: _, padding :: _}
+      -- mkFrame chrs' chr = do
+      --   {size} <- Map.lookup chr chrCtx
+      --   let total = sum $ filterMap (\c -> _.size <$> Map.lookup c chrCtx) chrs'
+      --       width = (unwrap $ size / total) * frameBox.width
+      --   pure { height: frameBox.height - frameBox.yOffset, padding: frameBox.padding, width }
+
+      -- frames :: Array ChrId -> Array (Tuple (Array _) (_))
+      -- frames chrs' = Array.zip (map (\c -> fromMaybe [] $ Map.lookup c drawings) chrs')
+      --                          (filterMap (mkFrame chrs') chrs')
+
+      mkFrames' :: Interval BrowserPoint -> Array { | _ }
+      mkFrames' v = mkFrames canvasBox (fromMaybe [] $ fIvals v) v
+
+      frames :: Interval BrowserPoint -> Array (Tuple (Array _) (_))
+      frames v = Array.zip (unsafeCoerce unit) (mkFrames' v)
+
+
+  in \view -> translate 0.0 (canvasBox.height - canvasBox.yOffset)
+                $ scale 1.0 (-1.0)
+                $ drawPureFrames (frames view)
+
 
 
 -- Draw data by rendering it only once
