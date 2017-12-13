@@ -242,15 +242,13 @@ _lP :: forall c. Lens' (LocalPoint c) (Ratio BigInt)
 _lP = lens (\(Local _ p) -> p) (\(Local i _) p -> Local i p)
 
 
-
--- TODO This is dumb and bad
-unitRatioToNumber :: Ratio BigInt
-                  -> Number
-unitRatioToNumber r =
+-- TODO This is dumb and bad, precision etc.
+ratioToNumber :: Ratio BigInt
+              -> Number
+ratioToNumber r =
   let n = (Ratio.numerator r)
       d = (Ratio.denominator r)
   in (BigInt.toNumber n) / (BigInt.toNumber d)
-
 
 
 -- for now we just assume that the given point is in the interval...
@@ -311,7 +309,6 @@ intervalSeenFrom (Interval l r) i2 =
 
 type IntervalPoint = LocalPoint BrowserPoint
 
-
 type ChrInterval c = { interval :: Interval c, chrSize :: Bp }
 
 newtype CoordSys i c =
@@ -320,8 +317,6 @@ newtype CoordSys i c =
            -- , intervals :: Array (Tuple i (Interval c))
            , intervals :: Array (Tuple i (ChrInterval c))
            }
-
-
 
 
 -- TODO need to make sure the padding is correctly applied/removed
@@ -338,7 +333,6 @@ mkCoordSys chrs padding = CoordSys { size, padding: wrap padding, intervals }
         size = wrap $ (sum sizes) + (length sizes * padding)
 
 
-
 findInterval :: forall i c.
                 Ord c
              => CoordSys i c
@@ -353,16 +347,13 @@ intervals :: forall i c.
           => CoordSys i c
           -> i
           -> i
-          -> Maybe (Array (ChrInterval c))
+          -> Maybe (Array (Tuple i (ChrInterval c)))
 intervals (CoordSys s) l r = do
   let l' = min l r
       r' = max l r
-
   lIndex <- Array.findIndex ((==) l' <<< fst) s.intervals
   rIndex <- Array.findIndex ((==) r' <<< fst) s.intervals
-
-  pure $ snd <$> Array.slice lIndex rIndex s.intervals
-
+  pure $ Array.slice lIndex rIndex s.intervals
 
 
 viewIntervals :: forall i c.
@@ -370,17 +361,12 @@ viewIntervals :: forall i c.
               => Ord c
               => CoordSys i c
               -> Interval c
-              -> Maybe (Array (ChrInterval c))
+              -> Maybe (Array (Tuple i (ChrInterval c)))
 viewIntervals cs (Interval l r) = do
   lIv <- fst <$> findInterval cs l
   rIv <- fst <$> findInterval cs r
 
   intervals cs lIv rIv
-
-  -- pure $ Tuple lIv rIv
-
-
-
 
 
 canvasToView :: forall r.
@@ -390,7 +376,6 @@ canvasToView :: forall r.
 canvasToView {width} x = x' % w'
   where w' = BigInt.fromInt $ Int.round width
         x' = BigInt.fromInt $ Int.round x
-
 
 
 canvasToBrowserOffset :: forall r.
@@ -404,7 +389,6 @@ canvasToBrowserOffset w vw x =
   in wrap $ (Ratio.numerator p') / (Ratio.denominator p')
 
 
-
 globalToFrame :: forall i c.
                  Eq i
               => CoordSys i BrowserPoint
@@ -413,9 +397,6 @@ globalToFrame :: forall i c.
 globalToFrame cs bp@(BPoint p) = do
   (Tuple i iv) <- findInterval cs bp
   pure $ Tuple i $ globalToLocal iv.interval bp
-
-
-
 
 
 intervalToChr :: BrowserPoint
@@ -432,7 +413,6 @@ intervalToChr padding (Local (Interval l r) p) chrSize = do
   pure $ bp * chrSize
 
 
-
 frameToChr :: forall i c.
               Eq i
            => CoordSys i BrowserPoint
@@ -443,26 +423,25 @@ frameToChr (CoordSys s) (Tuple i lp) = do
   intervalToChr s.padding lp iv.chrSize
 
 
--- | Maps an interval to the canvas,
--- | assuming the interval coincides directly with the canvas view;
--- | i.e. does not try to map the point to the end up in [0, canvas width].
-localToCanvasView :: forall i c r.
-                     { width :: Number | r }
-                  -> LocalPoint BrowserPoint
-                  -> Interval BrowserPoint
-                  -> Number
-localToCanvasView {width} point view@(Interval l r) =
-  let p :: Ratio BigInt
-      p = point `seenFrom` view ^. _lP
-  in (unitRatioToNumber p) * width
-
-
-intervalSeenFromCanvas ::  forall i c r.
-                           { width :: Number | r }
-                       -> Interval BrowserPoint
-                       -> Interval BrowserPoint
-                       -> Interval Number
-intervalSeenFromCanvas {width} (Interval l r) view =
-  let l' = unitRatioToNumber $ globalToLocal view l ^. _lP
-      r' = unitRatioToNumber $ globalToLocal view r ^. _lP
-  in Interval (l' * width) (r' * width)
+intervalToScreen :: BrowserPoint
+                 -> Number
+                 -> Interval BrowserPoint
+                 -> Interval BrowserPoint
+                 -> { width :: Number, offset :: Number }
+intervalToScreen pad screenWidth reference other = { width, offset }
+  where screen :: BigInt
+        screen = BigInt.fromInt $ Int.round screenWidth
+        padL :: BrowserPoint
+        padL = wrap $ (unwrap $ other^._iL) + (unwrap pad)
+        padR :: BrowserPoint
+        padR = wrap $ (unwrap $ other^._iR) - (unwrap pad)
+        -- 1. calculate LHS and RHS of other wrt. reference
+        (Interval l r) = (Interval padL padR) `intervalSeenFrom` reference
+        l' = ratioToNumber $ l * (screen % one)
+        r' = ratioToNumber $ r * (screen % one)
+        -- 2. width is obvious
+        width :: Number
+        width = r' - l'
+        -- 3. offset is less so
+        offset :: Number
+        offset = l'
