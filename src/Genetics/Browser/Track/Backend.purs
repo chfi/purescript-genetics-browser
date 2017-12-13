@@ -12,6 +12,7 @@ import Control.Monad.Reader (class MonadReader, ask)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array ((:))
 import Data.Array as Array
+import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Filterable (class Filterable, filterMap)
@@ -37,7 +38,7 @@ import Data.Traversable (scanl, traverse)
 import Data.Tuple (Tuple(..), fst, snd, uncurry)
 import Data.Variant (class Contractable, Variant)
 import Data.Variant as Variant
-import Genetics.Browser.Types (Bp(Bp), BrowserPoint, ChrId(ChrId), ChrInterval, CoordSys(..), Interval(..), Point, intervalSeenFromCanvas, viewIntervals)
+import Genetics.Browser.Types (Bp(Bp), BrowserPoint, ChrId(ChrId), ChrInterval, CoordSys(CoordSys), Interval, Point, intervalToScreen, viewIntervals)
 import Genetics.Browser.View (Pixels)
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, scale, translate)
 import Graphics.Drawing as Drawing
@@ -162,6 +163,60 @@ pureRender r as = filterMap r as
 --            -> Pixels
 --            ->
 
+
+
+
+drawPureInterval :: forall f r .
+                    Foldable f
+                 => { height :: Pixels | r }
+                 -> f { drawing :: Drawing, point :: Normalized Point }
+                 -> { width :: Pixels, offset :: Pixels }
+                 -> Drawing
+drawPureInterval {height} ds {width, offset} = foldMap render' ds
+  where render' {drawing, point} =
+          let {x,y} = nPointToFrame width height $ point
+          in translate (x + offset) y drawing
+
+
+drawPureIntervals :: forall r.
+                     { height :: Pixels | r }
+                  -> Array (Tuple (Array { drawing :: Drawing, point :: Normalized Point })
+                            { width :: Pixels, offset :: Pixels })
+                  -> Drawing
+drawPureIntervals h frames = foldMap (uncurry $ drawPureInterval h) frames
+
+
+
+drawDataIv :: forall i f a r.
+              Ord i
+           => Foldable f
+           => Filterable f
+           => CoordSys i BrowserPoint
+           -> { width :: Pixels, height :: Pixels, yOffset :: Pixels }
+           -> PureRenderer a
+           -> Map i (f a)
+           -> Interval BrowserPoint
+           -> Drawing
+drawDataIv cs@(CoordSys s) canvasBox renderer dat =
+  let drawings :: Map i (Array { drawing :: _, point :: _ })
+      drawings = map (Array.fromFoldable <<< pureRender renderer) dat
+
+      -- 1. get the relevant browser intervals from the current view;
+      --    i.e. filter from coordsys
+      ivalsInView :: Interval BrowserPoint -> Array (Tuple i (ChrInterval BrowserPoint))
+      ivalsInView v = fromMaybe [] $ viewIntervals cs v
+
+      -- 2. big money
+      toDraw :: Interval BrowserPoint -> Array (Tuple (Array _) _)
+      toDraw vw = map (bimap f g) $ ivalsInView vw
+        where f :: i -> Array {drawing :: Drawing, point :: _}
+              f i = fromMaybe [] $ Map.lookup i drawings
+              g :: ChrInterval BrowserPoint -> {width :: Number, offset :: Number}
+              g = intervalToScreen s.padding canvasBox.width vw <<< _.interval
+
+  in \view -> translate 0.0 (canvasBox.height - canvasBox.yOffset)
+                $ scale 1.0 (-1.0)
+                $ drawPureIntervals canvasBox (toDraw view)
 
 -- TODO simplify these two functions by extracting `padding` and `height` to another argument;
 -- after all, only `width` changes per frame
@@ -413,9 +468,6 @@ ruler {min, max} val color f = outlined outline rulerDrawing
         rulerDrawing = Drawing.path [{x: 0.0, y}, {x: f.width, y}]
 
 
-
-
-
 drawDemo :: forall f.
             Foldable f
          => Filterable f
@@ -433,73 +485,24 @@ drawDemo s sig f {gwas, annots} =
       drawAnnots = drawData f mouseChrCtx renderers.annots annots
   in \chrs -> (drawGwas chrs) <> (drawAnnots chrs) <> ruler' f
 
-drawDemo' :: _
-drawDemo' = unsafeCoerce
 
-
-
-
-mkFrame :: forall r i.
-           { width :: Pixels, height :: Pixels | r }
-        -> Interval BrowserPoint
-        -> Interval BrowserPoint
-        -> { width :: Pixels, height :: Pixels, offset :: Pixels }
-mkFrame canvasSize interval view@(Interval l r) =
-  let (Interval l r) = intervalSeenFromCanvas canvasSize interval view
-      width = r - l
-      offset = l
-  in { width, height: canvasSize.height, offset }
-
-
-
-mkFrames :: forall i c r.
-            { width :: Pixels, height :: Pixels | r }
-         -> Array (Interval BrowserPoint)
+drawDemo' :: forall f.
+            Foldable f
+         => Filterable f
+         => CoordSys _ _
+         -> { min :: Number, max :: Number }
+         -> Number
+         -> { width :: Pixels, height :: Pixels, yOffset :: Pixels }
+         -> { gwas :: Map ChrId (f (GWASFeature ()))
+            , annots :: Map ChrId (f (Annot (minY :: Number))) }
          -> Interval BrowserPoint
-         -> Array ( {width :: Pixels, height :: Pixels, offset :: Pixels} )
-mkFrames canvasSize ivals view = map (mkFrame canvasSize view) ivals
-
-
-
-drawData' :: forall i f a r.
-             Ord i
-          => Foldable f
-          => Filterable f
-          => CoordSys i BrowserPoint
-          -> { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
-          -> PureRenderer a
-          -> Map i (f a)
-          -> Interval BrowserPoint
-          -> Drawing
-drawData' cs canvasBox renderer dat =
-  let drawings :: Map i (Array {drawing :: Drawing, point :: _})
-      drawings = map (Array.fromFoldable <<< pureRender renderer) dat
-
-      fIvals :: _
-      fIvals v' = (map <<< map) _.interval $ viewIntervals cs v'
-
-      -- mkFrame :: Array i -> i -> Maybe {width :: _, height :: _, padding :: _}
-      -- mkFrame chrs' chr = do
-      --   {size} <- Map.lookup chr chrCtx
-      --   let total = sum $ filterMap (\c -> _.size <$> Map.lookup c chrCtx) chrs'
-      --       width = (unwrap $ size / total) * frameBox.width
-      --   pure { height: frameBox.height - frameBox.yOffset, padding: frameBox.padding, width }
-
-      -- frames :: Array ChrId -> Array (Tuple (Array _) (_))
-      -- frames chrs' = Array.zip (map (\c -> fromMaybe [] $ Map.lookup c drawings) chrs')
-      --                          (filterMap (mkFrame chrs') chrs')
-
-      mkFrames' :: Interval BrowserPoint -> Array { | _ }
-      mkFrames' v = mkFrames canvasBox (fromMaybe [] $ fIvals v) v
-
-      frames :: Interval BrowserPoint -> Array (Tuple (Array _) (_))
-      frames v = Array.zip (unsafeCoerce unit) (mkFrames' v)
-
-
-  in \view -> translate 0.0 (canvasBox.height - canvasBox.yOffset)
-                $ scale 1.0 (-1.0)
-                $ drawPureFrames (frames view)
-
+         -> Drawing
+drawDemo' cs s sig canvasBox {gwas, annots} =
+  let renderers = renderersDemo s
+      ruler' = ruler s sig red
+      drawGwas   = drawDataIv cs canvasBox renderers.gwas gwas
+      drawAnnots = drawDataIv cs canvasBox renderers.annots annots
+  in \view -> (drawGwas view) <> (drawAnnots view) <> ruler' canvasBox
 
 
 -- Draw data by rendering it only once
