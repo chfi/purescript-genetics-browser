@@ -44,8 +44,8 @@ import Debug.Trace (traceShow)
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawDemo, getDataDemo, mouseChrIds)
-import Genetics.Browser.Types (Bp(..), BrowserPoint(..), ChrId(..), CoordSys(..), Interval(..), IntervalPoint, LocalPoint(..), Point, canvasToBrowserOffset, canvasToView, frameToChr, globalToFrame, intervalSize, intervalToGlobal, mkCoordSys)
+import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawDemo, drawDemo', getDataDemo, mouseChrIds)
+import Genetics.Browser.Types (Bp(..), BrowserPoint(..), ChrId(..), CoordSys(..), Interval(..), IntervalPoint, LocalPoint(..), Point, canvasToBrowserOffset, canvasToView, frameToChr, globalToFrame, intervalSize, localToGlobal, mkCoordSys)
 import Genetics.Browser.View (Pixels)
 import Global as Global
 import Global.Unsafe (unsafeStringify)
@@ -87,94 +87,12 @@ foreign import canvasEvent :: String -> CanvasElement -> Event Point
 
 foreign import setViewUI :: forall eff. String -> Eff eff Unit
 
+type BrowserView = Interval BrowserPoint
 
--- type View = { lHand :: ChrId, rHand :: ChrId }
-
--- type ZipperRange a =
---   { left  :: List a
---   , focus :: List a
---   , right :: List a
---   }
-
--- zipSlideLeft :: forall a.
---                 ZipperRange a
---              -> ZipperRange a
--- zipSlideLeft zr@{left, focus, right} = case List.uncons left, List.unsnoc focus of
---     Nothing, _  -> zr
---     _ , Nothing -> zr
---     Just l, Just f ->
---       let left'  = l.tail
---           focus' = l.head : f.init
---           right' = f.last : right
---       in {left: left', focus: focus', right: right'}
-
--- zipSlideRight :: forall a.
---                  ZipperRange a
---               -> ZipperRange a
--- zipSlideRight zr@{left, focus, right} = case List.uncons focus, List.uncons right of
---     Nothing, _  -> zr
---     _ , Nothing -> zr
---     Just f, Just r ->
---       let left'  = f.head : left
---           focus' = f.tail <> List.singleton r.head
---           right' = r.tail
---       in {left: left', focus: focus', right: right'}
-
-
--- zipZoomIn :: forall a.
---              ZipperRange a
---           -> ZipperRange a
--- zipZoomIn zr@{left, focus, right} = case List.uncons focus of
---   Nothing -> zr
---   Just {head, tail} -> case List.unsnoc tail of
---     Nothing -> zr
---     Just {init, last} ->
---       let left'  = head : left
---           focus' = init
---           right' = last : right
---       in {left: left', focus: focus', right: right'}
-
-
--- zipZoomOut :: forall a.
---               ZipperRange a
---            -> ZipperRange a
--- zipZoomOut zr@{left, focus, right} = case List.uncons left, List.uncons right of
---   Nothing, Nothing -> zr
---   Nothing, Just r ->
---     let focus' = focus <> List.singleton r.head
---         right' = r.tail
---     in zr { focus = focus', right = right' }
---   Just l, Nothing ->
---     let left' = l.tail
---         focus' = l.head : focus
---     in zr { focus = focus', left = left' }
---   Just l, Just r ->
---     let left' = l.tail
---         focus' = l.head : focus <> List.singleton r.head
---         right' = r.tail
---     in { left: left', focus: focus', right: right' }
-
-
--- focusArray :: forall a.
---               ZipperRange a
---            -> Array a
--- focusArray {focus} = Array.fromFoldable focus
-
--- unfocusArray :: forall a.
---                 Array a
---              -> ZipperRange a
--- unfocusArray arr = { left: Nil
---                    , focus: List.fromFoldable arr
---                    , right: Nil
---                    }
-
-
--- data UpdateView =
---     GoLeft
---   | GoRight
---   | Out
---   | In
---   | NoOp
+data UpdateView =
+    Scroll BrowserPoint
+  | Zoom (Ratio BigInt)
+  | NoOp
 
 
 -- btnScroll :: Event UpdateView
@@ -188,29 +106,32 @@ foreign import setViewUI :: forall eff. String -> Eff eff Unit
 -- btnUpdateView :: Event UpdateView
 -- btnUpdateView = btnScroll <|> btnZoom <|> (const NoOp <$> buttonEvent "redraw")
 
+scrollView :: BrowserPoint
+           -> BrowserView
+           -> BrowserView
+scrollView (BPoint p) (Interval (BPoint l) (BPoint r)) =
+  Interval (BPoint $ l - p) (BPoint $ r - p)
 
 
--- mkFoldView :: UpdateView
---            -> ZipperRange ChrId
---            -> ZipperRange ChrId
--- mkFoldView uv zr = case uv of
---   GoLeft  -> zipSlideLeft zr
---   GoRight -> zipSlideRight zr
---   Out     -> zipZoomOut zr
---   In      -> zipZoomIn zr
---   NoOp    -> zr
+zoomView :: Ratio BigInt
+         -> BrowserView
+         -> BrowserView
+zoomView (BPoint p) iv@(Interval (BPoint l) (BPoint r)) = iv
 
 
--- chrZREvent :: Array ChrId
---            -> Event UpdateView
---            -> Event (ZipperRange ChrId)
--- chrZREvent chrs uv = Event.fold mkFoldView uv (unfocusArray chrs)
+updateViewFold :: UpdateView
+               -> BrowserView
+               -> BrowserView
+updateViewFold uv iv@(Interval l r) of
+  Scroll p  -> scrollView p iv
+  Zoom r    -> zoomView r iv
+  NoOp -> iv
 
--- chrsArrayEvent :: Event (ZipperRange ChrId)
---                -> Event (Array ChrId)
--- chrsArrayEvent = map (Array.fromFoldable <<< _.focus)
+browserViewEvent :: BrowserView
+                 -> Event UpdateView
+                 -> Event BrowserView
+browserViewEvent start ev = Event.fold updateViewFold ev start
 
-type BrowserView = Interval BrowserPoint
 
 
 
@@ -219,34 +140,10 @@ drawingEvent :: { min :: Number, max :: Number }
              -> { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
              -> { gwas  :: Map ChrId (List _)
                 , annots :: Map ChrId (List _) }
-             -- -> Event (Array ChrId)
-             -> Event (BrowserView)
-             -> Event (Drawing)
+             -> Event BrowserView
+             -> Event Drawing
 drawingEvent s box dat = let dd = drawDemo' s 0.25 box dat
                          in map dd
-
-
-
-chrsToView :: CoordSys ChrId BrowserPoint
-           -> Array ChrId
-           -> Interval BrowserPoint
-chrsToView (CoordSys csys) view = fromMaybe (Interval (BPoint zero) (BPoint one)) $ do
-  f <- Array.head view
-  l <- Array.last view
-  (Tuple _ ivS) <- Array.find ((==) f <<< fst) csys.intervals
-  (Tuple _ ivE) <- Array.find ((==) l <<< fst) csys.intervals
-
-  let (Interval start _) = ivS.interval
-      (Interval _   end) = ivE.interval
-
-  pure $ Interval start end
-
-
-
-viewRange :: CoordSys ChrId BrowserPoint
-          -> Event (Array ChrId)
-          -> Event (Interval BrowserPoint)
-viewRange chrs = map (chrsToView chrs)
 
 
 clickEvent :: forall r. CanvasElement -> Event Pixels
@@ -258,7 +155,7 @@ viewClick w = map (canvasToView w)
 
 
 globalClick :: Event (Interval BrowserPoint) -> Event (Ratio BigInt) -> Event BrowserPoint
-globalClick vs vx = (\iv r -> intervalToGlobal $ Local iv r) <$> vs <*> vx
+globalClick vs vx = (\iv r -> localToGlobal $ Local iv r) <$> vs <*> vx
 
 
 frameClick :: CoordSys ChrId BrowserPoint -> Event BrowserPoint -> Event (Maybe (Tuple ChrId IntervalPoint))
