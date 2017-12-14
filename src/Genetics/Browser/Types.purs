@@ -445,3 +445,16 @@ intervalToScreen pad screenWidth reference other = { width, offset }
         -- 3. offset is less so
         offset :: Number
         offset = l'
+
+
+
+shiftIntervalBy :: forall c.
+                   Newtype c BigInt
+                => Interval c
+                -> Ratio BigInt
+                -> Interval c
+shiftIntervalBy (Interval l r) rat =
+  let l' = unwrap l
+      r' = unwrap r
+      diff = ((r' - l') * (Ratio.numerator rat)) / (Ratio.denominator rat)
+  in Interval (wrap $ l' - diff) (wrap $ r' - diff)
