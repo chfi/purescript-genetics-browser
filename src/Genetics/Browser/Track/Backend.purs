@@ -19,7 +19,8 @@ import Data.Filterable (class Filterable, filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, maximum, sum)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens (united, (^?))
+import Data.Lens (united, (^?), (^.))
+import Data.Lens as Lens
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -38,7 +39,8 @@ import Data.Traversable (scanl, traverse)
 import Data.Tuple (Tuple(..), fst, snd, uncurry)
 import Data.Variant (class Contractable, Variant)
 import Data.Variant as Variant
-import Genetics.Browser.Types (Bp(Bp), BrowserPoint, ChrId(ChrId), ChrInterval, CoordSys(CoordSys), Interval, Point, intervalToScreen, viewIntervals)
+import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
+import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(..), Interval, Normalized(..), _BrowserIntervals, _Index, _Interval, intervalToScreen, nPointToFrame, normPoint, viewIntervals)
 import Genetics.Browser.View (Pixels)
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, scale, translate)
 import Graphics.Drawing as Drawing
@@ -48,221 +50,6 @@ import Type.Prelude (class IsSymbol, class RowLacks)
 import Unsafe.Coerce (unsafeCoerce)
 
 
-type Frame a = { padding :: Pixels, width :: Pixels, contents :: a }
-
-type ChrCtx r = Map ChrId (Record r)
-
--- totalSize :: forall r.
---              ChrCtx (size :: Bp | r)
---           -> Bp
--- totalSize chrCtx = alaF Additive foldMap _.size chrCtx
-
-
-newtype Normalized a = Normalized a
-
-derive instance newtypeNormalized :: Newtype (Normalized a) _
-
-normalizePoint :: { width :: Number
-                  , height :: Number }
-               -> Point
-               -> Normalized Point
-normalizePoint {width, height} {x, y} = Normalized { x: x', y: y' }
-  where x' = x / width
-        y' = y / height
-
-normPoint :: Point -> Maybe (Normalized Point)
-normPoint p@{x, y}
-  | x < 0.0 || x > 1.0 = Nothing
-  | y < 0.0 || y > 1.0 = Nothing
-  | otherwise = Just $ Normalized p
-
-nPointToFrame :: Pixels -> Pixels -> Normalized Point -> Point
-nPointToFrame w h (Normalized p) = {x: p.x * w, y: p.y * h}
-
-
--- A renderer draws a single value to a normalized "canvas",
--- i.e. the whole chromosome is located in x = (0.0, 1.0),
--- and the whole track height in y = (0.0, 1.0).
--- It can fail if the given feature for some reason cannot be rendered,
--- either because the feature lacks information, or because the context lacks something.
-
-type PureRenderer a = a -> Maybe { drawing :: Drawing
-                                 , point   :: Normalized Point
-                                 }
-
-
--- Drawings are not entirely pure. They can depend on the width of the
--- frame, if they something that spans across a range of the genome.
--- So, the `drawing` field should really have type
---   Pixels -> Drawing
--- where the `Pixels` is the width of the frame. Renderers already
--- have access to the chr size when created, so the width is all that's needed.
-type PureRenderer' a = a -> Maybe { drawing :: Pixels -> Drawing
-                                  , point   :: Normalized Point
-                                  }
-
-
--- tagRenderer :: forall a sym r1 r2.
---                RowCons sym a r1 r2
---             => IsSymbol sym
---             => SProxy sym
---             -> PureRenderer a
---             -> PureRenderer (Variant r2)
--- tagRenderer sym renderer var = Variant.prj sym var >>= renderer
-
-
--- combineRenderers :: forall r1 r2 r3.
---                     Union r1 r2 r3
---                  => Contractable r3 r1
---                  => Contractable r3 r2
---                  => PureRenderer (Variant r1)
---                  -> PureRenderer (Variant r2)
---                  -> PureRenderer (Variant r3)
--- combineRenderers r1 r2 var = (Variant.contract var >>= r1) <|>
---                              (Variant.contract var >>= r2)
-
-
-type GWASFeature r = { score :: Number
-                     , pos :: Bp
-                     , chrId :: ChrId | r }
-
-mkGwasRenderer :: forall m rf rctx.
-                  MonadReader (ChrCtx (size :: Bp, color :: Color | rctx)) m
-               -- => MonadError Unit m
-               => {min :: Number, max :: Number}
-               -> m (PureRenderer (GWASFeature rf))
-mkGwasRenderer {min, max} = do
-  ctx <- ask
-  let renderer f = do
-        size <- _.size <$> Map.lookup f.chrId ctx
-        color <- _.color <$> Map.lookup f.chrId ctx
-        let r = 2.2
-            x = unwrap $ f.pos / size
-            y = (f.score - min) / (max - min)
-            c = circle x y r
-            out = outlined (outlineColor color) c
-            fill = filled (fillColor color) c
-            drawing = out <> fill
-
-        point <- normPoint {x, y}
-        pure { drawing, point }
-
-  pure renderer
-
-
-pureRender :: forall f a.
-              Filterable f
-           => PureRenderer a
-           -> f a
-           -> f { drawing :: Drawing, point :: Normalized Point }
-pureRender r as = filterMap r as
-
-
--- csysFrames :: forall i c.
---               { interval :: Interval BrowserPoint, chrSize :: Bp }
---            -> Pixels
---            ->
-
-
-
-
-drawPureInterval :: forall f r .
-                    Foldable f
-                 => { height :: Pixels | r }
-                 -> f { drawing :: Drawing, point :: Normalized Point }
-                 -> { width :: Pixels, offset :: Pixels }
-                 -> Drawing
-drawPureInterval {height} ds {width, offset} = foldMap render' ds
-  where render' {drawing, point} =
-          let {x,y} = nPointToFrame width height $ point
-          in translate (x + offset) y drawing
-
-
-drawPureIntervals :: forall r.
-                     { height :: Pixels | r }
-                  -> Array (Tuple (Array { drawing :: Drawing, point :: Normalized Point })
-                            { width :: Pixels, offset :: Pixels })
-                  -> Drawing
-drawPureIntervals h frames = foldMap (uncurry $ drawPureInterval h) frames
-
-
-
-drawDataIv :: forall i f a r.
-              Ord i
-           => Foldable f
-           => Filterable f
-           => CoordSys i BrowserPoint
-           -> { width :: Pixels, height :: Pixels, yOffset :: Pixels }
-           -> PureRenderer a
-           -> Map i (f a)
-           -> Interval BrowserPoint
-           -> Drawing
-drawDataIv cs@(CoordSys s) canvasBox renderer dat =
-  let drawings :: Map i (Array { drawing :: _, point :: _ })
-      drawings = map (Array.fromFoldable <<< pureRender renderer) dat
-
-      -- 1. get the relevant browser intervals from the current view;
-      --    i.e. filter from coordsys
-      ivalsInView :: Interval BrowserPoint -> Array (Tuple i (ChrInterval BrowserPoint))
-      ivalsInView v = fromMaybe [] $ viewIntervals cs v
-
-      -- 2. big money
-      toDraw :: Interval BrowserPoint -> Array (Tuple (Array _) _)
-      toDraw vw = map (bimap f g) $ ivalsInView vw
-        where f :: i -> Array {drawing :: Drawing, point :: _}
-              f i = fromMaybe [] $ Map.lookup i drawings
-              g :: ChrInterval BrowserPoint -> {width :: Number, offset :: Number}
-              g = intervalToScreen s.padding canvasBox.width vw <<< _.interval
-
-  in \view -> translate 0.0 (canvasBox.height - canvasBox.yOffset)
-                $ scale 1.0 (-1.0)
-                $ drawPureIntervals canvasBox (toDraw view)
-
--- TODO simplify these two functions by extracting `padding` and `height` to another argument;
--- after all, only `width` changes per frame
-drawPureFrame :: forall f r.
-                 Foldable f
-              => f { drawing :: Drawing, point :: Normalized Point | r }
-              -> { width :: Pixels, padding :: Pixels, height :: Pixels }
-              -> Drawing
-drawPureFrame fs { width, padding, height } = foldMap render' fs
-  where render' {drawing, point} =
-            let {x,y} = nPointToFrame (width - padding * 2.0) height $ point
-            in translate (x + padding) y drawing
-
-
-
--- Draw a collection of , lined up one after another
-drawPureFrames :: forall a.
-                  Array (Tuple (Array { drawing :: Drawing, point :: Normalized Point })
-                               { width :: Pixels, padding :: Pixels, height :: Pixels })
-               -> Drawing
-drawPureFrames frames = fold $ Array.zipWith (\o -> translate o 0.0) os drawings'
-  where os = framesOffsets $ snd <$> frames
-        drawings' = map (uncurry drawPureFrame) frames
-
-
-framesOffsets :: forall r.
-                 Array { width :: Pixels | r }
-              -> Array Pixels
-framesOffsets fs = 0.0 : scanl (\o {width} -> width + o) 0.0 fs
-    -- add 0.0 since scanl in framesOffsets doesn't include seed
-
-
-shiftRendererMinY :: forall rf.
-                      RowLacks "minY" rf
-                   => Number
-                   -> { min :: Number, max :: Number }
-                   -> PureRenderer (Record rf)
-                   -> PureRenderer (Record (minY :: Number | rf))
-shiftRendererMinY dist s render f = do
-  {drawing, point} <- render (Record.delete (SProxy :: SProxy "minY") f)
-  let {x,y} = unwrap point
-      normY = (f.minY - s.min) / (s.max - s.min)
-      y' = min (normY + dist) 0.95
-
-  point' <- normPoint {x, y: y'}
-  pure {drawing, point: point'}
 
 
 intersection :: forall k a b.
@@ -291,6 +78,152 @@ zipMapsWith :: forall k a b c.
             -> Map k b
             -> Map k c
 zipMapsWith f a b = uncurry f <$> zipMaps a b
+
+
+type ChrCtx r = Map ChrId (Record r)
+
+
+-- A renderer draws a single value to a normalized "canvas",
+-- i.e. the whole chromosome is located in x = (0.0, 1.0),
+-- and the whole track height in y = (0.0, 1.0).
+-- It can fail if the given feature for some reason cannot be rendered,
+-- either because the feature lacks information, or because the context lacks something.
+
+type PureRenderer a = a -> Maybe { drawing :: Drawing
+                                 , point   :: Normalized Point
+                                 }
+
+-- TODO Instead of tag & combine, we can just use Variant.match & Record.Builder!
+-- tagRenderer :: forall a sym r1 r2.
+-- combineRenderers :: forall r1 r2 r3.
+
+
+type GWASFeature r = { score :: Number
+                     , pos :: Bp
+                     , chrId :: ChrId | r }
+
+mkGwasRenderer :: forall m rf rctx.
+                  MonadReader (ChrCtx (size :: Bp, color :: Color | rctx)) m
+               => {min :: Number, max :: Number}
+               -> m (PureRenderer (GWASFeature rf))
+mkGwasRenderer {min, max} = do
+  ctx <- ask
+  let renderer f = do
+        size <- _.size <$> Map.lookup f.chrId ctx
+        color <- _.color <$> Map.lookup f.chrId ctx
+        let r = 2.2
+            x = unwrap $ f.pos / size
+            y = (f.score - min) / (max - min)
+            c = circle x y r
+            out = outlined (outlineColor color) c
+            fill = filled (fillColor color) c
+            drawing = out <> fill
+
+        point <- normPoint {x, y}
+        pure { drawing, point }
+  pure renderer
+
+
+mkAnnotRenderer :: forall m rf rctx.
+                   MonadReader (ChrCtx (size :: Bp | rctx)) m
+                => m (PureRenderer (Annot rf))
+mkAnnotRenderer = do
+  ctx <- ask
+  let font' = font sansSerif 12 mempty
+  let renderer f = do
+        size <- _.size <$> Map.lookup f.chrId ctx
+
+        let rad = 5.0
+            x = unwrap $ f.pos / size
+            y = 0.0
+            c = circle x y rad
+            out  = outlined (outlineColor maroon <> lineWidth 3.0) c
+            fill = filled   (fillColor red) c
+            -- the canvas is flipped so y-axis increases upward, need to flip the text too
+            text' = scale 1.0 (-1.0)
+                    $ Drawing.text font' (x+7.5) (y+2.5) (fillColor black) f.name
+            drawing = out <> fill <> text'
+
+        point <- normPoint {x, y}
+        pure { drawing, point }
+
+  pure renderer
+
+
+pureRender :: forall f a.
+              Filterable f
+           => PureRenderer a
+           -> f a
+           -> f { drawing :: Drawing, point :: Normalized Point }
+pureRender r as = filterMap r as
+
+
+drawPureInterval :: forall f r .
+                    Foldable f
+                 => { height :: Pixels | r }
+                 -> { width :: Pixels, offset :: Pixels }
+                 -> f { drawing :: Drawing, point :: Normalized Point }
+                 -> Drawing
+drawPureInterval {height} {width, offset} = foldMap render'
+  where render' {drawing, point} =
+          let {x,y} = nPointToFrame width height $ point
+          in translate (x + offset) y drawing
+
+
+-- Current scrolling/rendering problem is likely due to
+-- some interval position offset not getting applied.
+
+
+-- Or something is wrong during the normalization of the browser view.
+-- Trace prints~~
+
+
+drawData :: forall i c f a.
+            Ord i
+         => Foldable f
+         => Filterable f
+         => CoordSys i BrowserPoint
+         -> { width :: Pixels, height :: Pixels, yOffset :: Pixels }
+         -> PureRenderer a
+         -> Map i (f a)
+         -> Interval BrowserPoint
+         -> Drawing
+drawData cs@(CoordSys s) canvasBox renderer dat =
+  let drawings :: Map i (Array { drawing :: _, point :: _ })
+      drawings = map (Array.fromFoldable <<< pureRender renderer) dat
+
+      f :: Interval _  -> CoordInterval i _ -> { width :: _, offset :: _ }
+      f iv c = (intervalToScreen canvasBox iv) (c^._Interval)
+
+      g :: CoordInterval i _ -> Array { drawing :: _, point :: _ }
+      g c = fromMaybe [] $ Map.lookup (c^._Index) drawings
+
+      toDraw :: Interval BrowserPoint -> Array (Tuple _ (Array _))
+      toDraw iv = (\x -> Tuple (f iv x) (g x)) <$> (viewIntervals cs iv)
+
+      drawIvs :: Array (Tuple _ (Array _)) -> Drawing
+      drawIvs = foldMap (uncurry $ drawPureInterval canvasBox)
+
+  in \bView -> translate 0.0 (canvasBox.height - canvasBox.yOffset)
+                $ scale 1.0 (-1.0)
+                $ drawIvs (toDraw bView)
+
+
+shiftRendererMinY :: forall rf.
+                      RowLacks "minY" rf
+                   => Number
+                   -> { min :: Number, max :: Number }
+                   -> PureRenderer (Record rf)
+                   -> PureRenderer (Record (minY :: Number | rf))
+shiftRendererMinY dist s render f = do
+  {drawing, point} <- render (Record.delete (SProxy :: SProxy "minY") f)
+  let {x,y} = unwrap point
+      normY = (f.minY - s.min) / (s.max - s.min)
+      y' = min (normY + dist) 0.95
+
+  point' <- normPoint {x, y: y'}
+  pure {drawing, point: point'}
+
 
 
 groupToChrs :: forall a f rData.
@@ -365,34 +298,6 @@ type AnnotRow r = ( geneID :: String
                   , chrId :: ChrId | r )
 
 type Annot r = Record (AnnotRow r)
-
-
-mkAnnotRenderer :: forall m rf rctx.
-                   MonadReader (ChrCtx (size :: Bp | rctx)) m
-                => m (PureRenderer (Annot rf))
-mkAnnotRenderer = do
-  ctx <- ask
-  let font' = font sansSerif 12 mempty
-  let renderer f = do
-        size <- _.size <$> Map.lookup f.chrId ctx
-
-        let rad = 5.0
-            x = unwrap $ f.pos / size
-            y = 0.0
-            c = circle x y rad
-            out  = outlined (outlineColor maroon <> lineWidth 3.0) c
-            fill = filled   (fillColor red) c
-            -- the canvas is flipped so y-axis increases upward, need to flip the text too
-            text' = scale 1.0 (-1.0)
-                    $ Drawing.text font' (x+7.5) (y+2.5) (fillColor black) f.name
-            drawing = out <> fill <> text'
-
-        point <- normPoint {x, y}
-        pure { drawing, point }
-
-  pure renderer
-
-
 
 
 fetchAnnotJSON :: String -> Aff _ (Array (Annot ()))
@@ -471,24 +376,6 @@ ruler {min, max} val color f = outlined outline rulerDrawing
 drawDemo :: forall f.
             Foldable f
          => Filterable f
-         => { min :: Number, max :: Number }
-         -> Number
-         -> { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
-         -> { gwas :: Map ChrId (f (GWASFeature ()))
-            , annots :: Map ChrId (f (Annot (minY :: Number))) }
-         -> Array ChrId
-         -> Drawing
-drawDemo s sig f {gwas, annots} =
-  let renderers = renderersDemo s
-      ruler' = ruler s sig red
-      drawGwas   = drawData f mouseChrCtx renderers.gwas   gwas
-      drawAnnots = drawData f mouseChrCtx renderers.annots annots
-  in \chrs -> (drawGwas chrs) <> (drawAnnots chrs) <> ruler' f
-
-
-drawDemo' :: forall f.
-            Foldable f
-         => Filterable f
          => CoordSys _ _
          -> { min :: Number, max :: Number }
          -> Number
@@ -497,43 +384,12 @@ drawDemo' :: forall f.
             , annots :: Map ChrId (f (Annot (minY :: Number))) }
          -> Interval BrowserPoint
          -> Drawing
-drawDemo' cs s sig canvasBox {gwas, annots} =
+drawDemo cs s sig canvasBox {gwas, annots} =
   let renderers = renderersDemo s
       ruler' = ruler s sig red
-      drawGwas   = drawDataIv cs canvasBox renderers.gwas gwas
-      drawAnnots = drawDataIv cs canvasBox renderers.annots annots
+      drawGwas   = drawData cs canvasBox renderers.gwas gwas
+      drawAnnots = drawData cs canvasBox renderers.annots annots
   in \view -> (drawGwas view) <> (drawAnnots view) <> ruler' canvasBox
-
-
--- Draw data by rendering it only once
-drawData :: forall f a r.
-            Foldable f
-         => Filterable f
-         -- NOTE! the width is the canvas width, not frame. Same w/ yOffset
-         => { width :: Pixels, height :: Pixels, padding :: Pixels, yOffset :: Pixels }
-         -> Map ChrId { size :: Bp | r}
-         -> PureRenderer a
-         -> Map ChrId (f a)
-         -> Array ChrId
-         -> Drawing
-drawData frameBox chrCtx renderer dat =
-  let drawings :: Map ChrId (Array {drawing :: Drawing, point :: _})
-      drawings = map (Array.fromFoldable <<< pureRender renderer) dat
-
-      mkFrame :: Array ChrId -> ChrId -> Maybe {width :: _, height :: _, padding :: _}
-      mkFrame chrs' chr = do
-        {size} <- Map.lookup chr chrCtx
-        let total = sum $ filterMap (\c -> _.size <$> Map.lookup c chrCtx) chrs'
-            width = (unwrap $ size / total) * frameBox.width
-        pure { height: frameBox.height - frameBox.yOffset, padding: frameBox.padding, width }
-
-      frames :: Array ChrId -> Array (Tuple (Array _) (_))
-      frames chrs' = Array.zip (map (\c -> fromMaybe [] $ Map.lookup c drawings) chrs')
-                               (filterMap (mkFrame chrs') chrs')
-
-  in \chrs -> translate 0.0 (frameBox.height - frameBox.yOffset)
-                $ scale 1.0 (-1.0)
-                $ drawPureFrames (frames chrs)
 
 
 
