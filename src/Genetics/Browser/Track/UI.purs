@@ -24,7 +24,7 @@ import Data.Filterable as Filterable
 import Data.Foldable (class Foldable, foldMap, for_, length, maximum, maximumBy, sum)
 import Data.Int (round)
 import Data.Int as Int
-import Data.Lens (_Left, view, (^?))
+import Data.Lens (_Left, view, (^?), (^.))
 import Data.Lens.Index (ix)
 import Data.List (List(..), (:))
 import Data.List as List
@@ -35,6 +35,7 @@ import Data.Monoid (mempty)
 import Data.Newtype (ala, alaF, over, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Ord.Max (Max(..))
+import Data.Pair (Pair(..))
 import Data.Ratio (Ratio, (%))
 import Data.Ratio as Ratio
 import Data.Semigroup.Foldable (foldMap1)
@@ -45,8 +46,9 @@ import Debug.Trace as Debug
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawDemo, drawDemo', getDataDemo, mouseChrIds)
-import Genetics.Browser.Types (Bp(..), BrowserPoint(..), ChrId(..), CoordSys(..), Interval(..), IntervalPoint, LocalPoint(..), Point, canvasToBrowserOffset, canvasToView, frameToChr, globalToFrame, intervalSize, localToGlobal, mkCoordSys, shiftIntervalBy)
+import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawDemo, getDataDemo, mouseChrIds)
+import Genetics.Browser.Types (Bp(..), ChrId(..), Point)
+import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(..), Interval, RelPoint, _BrowserSize, canvasToView, findBrowserInterval, intervalToGlobal, mkCoordSys, shiftIntervalBy)
 import Genetics.Browser.View (Pixels)
 import Global as Global
 import Global.Unsafe (unsafeStringify)
@@ -91,7 +93,7 @@ foreign import setViewUI :: forall eff. String -> Eff eff Unit
 type BrowserView = Interval BrowserPoint
 
 data UpdateView =
-    Scroll BigInt
+    Scroll BrowserPoint
   | Zoom (Ratio BigInt)
   | ScrollView (Ratio BigInt)
   | NoOp
@@ -99,7 +101,7 @@ data UpdateView =
 
 
 btnScroll :: forall r.
-             BigInt
+             BrowserPoint
           -> Event UpdateView
           --    BrowserPoint
           -- -> BrowserPoint
@@ -114,63 +116,71 @@ btnZoom :: (Ratio BigInt)
 btnZoom m = const (Zoom (m )) <$> buttonEvent "zoomOut" <|>
             const (Zoom (m * (BigInt.fromInt 9 % BigInt.fromInt 100))) <$> buttonEvent "zoomIn"
 
-btnUpdateView :: {scroll :: BigInt, zoom :: Ratio BigInt } -> Event UpdateView
+btnUpdateView :: {scroll :: BrowserPoint, zoom :: Ratio BigInt } -> Event UpdateView
 -- btnUpdateView {scroll,zoom} = btnScroll scroll <|> btnZoom zoom <|> (const NoOp <$> buttonEvent "redraw")
 btnUpdateView  {scroll, zoom } = btnScroll scroll <|>
                                  btnZoom zoom <|>
                                  (const NoOp <$> buttonEvent "redraw")
 -- btnUpdateView = const NoOp <$> buttonEvent "redraw"
 
-scrollView :: BrowserPoint
-           -> BigInt
+scrollView :: CoordSys ChrId BrowserPoint
+           -> BrowserPoint
            -> BrowserView
            -> BrowserView
-scrollView (BPoint size) p (Interval (BPoint l) (BPoint r)) =
-  let p' = p
-  in Interval (BPoint $ max zero (l - p')) (BPoint $ min size (r - p'))
+scrollView cs p v = (_ - p) <$> v
+  -- let p' = p
+  -- in Interval (BPoint $ max zero (l - p')) (BPoint $ min size (r - p'))
 
+-- scrollViewRel :: CoordSys _ _
+--               -> RelPoint
+--               -> BrowserView
+--               -> BrowserView
+-- scrollViewRel p v
 
 scrollViewGood :: Ratio BigInt
                -> BrowserView
                -> BrowserView
-scrollViewGood rat iv@(Interval (BPoint l) (BPoint r)) =
-  iv `shiftIntervalBy` rat
+scrollViewGood rat iv = iv `shiftIntervalBy` rat
 
 
-zoomView :: BrowserPoint
-         -> Ratio BigInt
-         -> BrowserView
-         -> BrowserView
-zoomView (BPoint size) p iv@(Interval (BPoint l) (BPoint r)) =
-  let len = r - l
-      len' = (len * (Ratio.numerator p)) / (Ratio.denominator p)
-  in (Interval (BPoint $ max zero (l + len')) (BPoint $ min size (r - len')))
+-- zoomView :: BrowserPoint
+--          -> Ratio BigInt
+--          -> BrowserView
+--          -> BrowserView
+-- zoomView (BPoint size) p iv@(Interval (BPoint l) (BPoint r)) =
+--   let len = r - l
+--       len' = (len * (Ratio.numerator p)) / (Ratio.denominator p)
+--   in (Interval (BPoint $ max zero (l + len')) (BPoint $ min size (r - len')))
+
 
 
 
 normalizeView :: BrowserView
               -> BrowserView
               -> BrowserView
-normalizeView (Interval (BPoint lhs) (BPoint rhs))
-              (Interval (BPoint l)   (BPoint r)) = Interval (BPoint $ max lhs l) (BPoint $ min r rhs)
+normalizeView (Pair lhs rhs)
+              -- (Pair l   r) = Pair (max lhs l) (min r rhs)
+              (Pair l   r) = Pair l r
 
 
-updateViewFold :: { size :: _, scroll :: _, zoom :: _ }
+updateViewFold :: CoordSys ChrId BrowserPoint
                -> UpdateView
                -> BrowserView
                -> BrowserView
 -- updateViewFold _ iv = iv
-updateViewFold ssz uv iv@(Interval l r) = case uv of
-  Scroll p  -> scrollView ssz.size p iv
-  Zoom r    -> zoomView ssz.size r iv
+updateViewFold cs uv iv@(Pair l r) = case uv of
+  Scroll p  -> scrollView cs p iv
+  -- Zoom r    -> zoomView ssz.size r iv
   ScrollView x -> scrollViewGood x iv
   _ -> iv
 
-browserViewEvent :: { size :: BrowserPoint, scroll :: _, zoom :: _ }
+browserViewEvent :: CoordSys ChrId BrowserPoint
                  -> BrowserView
                  -> Event UpdateView
                  -> Event BrowserView
-browserViewEvent ssz start ev = Event.fold (\a b -> (normalizeView start) (updateViewFold ssz a b)) ev start
+browserViewEvent cs start ev =
+  Event.fold
+    (\a b -> (normalizeView start) (updateViewFold cs a b)) ev start
 
 
 drawingEvent :: { min :: Number, max :: Number }
@@ -180,7 +190,7 @@ drawingEvent :: { min :: Number, max :: Number }
                 , annots :: Map ChrId (List _) }
              -> Event BrowserView
              -> Event Drawing
-drawingEvent s csys box dat = let dd = drawDemo' csys s 0.25 box dat
+drawingEvent s csys box dat = let dd = drawDemo csys s 0.25 box dat
                               in map dd
 
 
@@ -193,26 +203,26 @@ viewClick w = map (canvasToView w)
 
 
 globalClick :: Event (Interval BrowserPoint) -> Event (Ratio BigInt) -> Event BrowserPoint
-globalClick vs vx = (\iv r -> localToGlobal $ Local iv r) <$> vs <*> vx
+globalClick vs vx = (\iv r -> intervalToGlobal iv r) <$> vs <*> vx
 
 
-frameClick :: CoordSys ChrId BrowserPoint -> Event BrowserPoint -> Event (Maybe (Tuple ChrId IntervalPoint))
-frameClick csys = map (globalToFrame csys)
+frameClick :: CoordSys ChrId BrowserPoint
+           -> Event BrowserPoint
+           -> Event (Maybe (CoordInterval _ _))
+frameClick csys = map (findBrowserInterval csys)
 
 chrClick :: CoordSys ChrId BrowserPoint
-         -> Event (Maybe (Tuple ChrId IntervalPoint))
+         -> Event (Maybe (CoordInterval _ _))
          -> Event (Maybe (Tuple ChrId Bp))
-chrClick csys ev = f <$> ev
-  where f x = do
-          p@(Tuple i _) <- x
-          Tuple i <$> frameToChr csys p
+chrClick csys ev = (map <<< map) f $ ev
+  where f {chrSize, index} = Tuple index chrSize
 
 
 showView :: Interval BrowserPoint -> String
-showView (Interval (BPoint l) (BPoint r)) = "< " <> BigInt.toString l <> " -- " <> BigInt.toString r <> " >"
+showView (Pair l r) = "< " <> BigInt.toString (unwrap l) <> " -- " <> BigInt.toString (unwrap r) <> " >"
 
-showLP :: IntervalPoint -> String
-showLP (Local iv p) = "Interval: " <> showView iv <> ";\t" <> show p
+showLP :: Interval BrowserPoint -> RelPoint -> String
+showLP iv p = "Interval: " <> showView iv <> ";\t" <> show p
 
 
 canvasDrag :: CanvasElement -> Event (Either Point Point)
@@ -230,36 +240,12 @@ browserDrag w ev = f <$> ev
   where f :: _ -> _
         f {x} = let width = BigInt.fromInt $ Int.round w.width
                     x' = BigInt.fromInt $ Int.round x
-                in x' % width
-
+                    p = x' % width
+                in Debug.trace (show p) \_ -> p
 
 scrollViewEvent :: Event (Ratio BigInt)
                 -> Event UpdateView
 scrollViewEvent = map ScrollView
-
-
-
-  -- let cDrag = canvasDrag canvas
-  --     lefts = case _ of
-  --       Left x -> Just x
-  --       Right _ -> Nothing
-  --     -- the alt operator <|> combines the two event streams,
-  --     -- resulting in an event of both button-click scrolls
-  --     -- and canvas-drag scrolls
-
-      -- dragScroll = filterMap (map (ScrollPixels <<< _.x) <<< lefts) cDrag
-      -- updateViews = btnScroll (Bp 500.0)
-      --           <|> dragScroll
-      --           <|> btnZoom (wrap <<< (_ * 0.8) <<< unwrap)
-      --                       (wrap <<< (_ * 1.2) <<< unwrap)
-      --           <|> scrollZoom canvas
-      -- viewB = FRP.fold foldView updateViews v
-
-
-  -- _ <- liftEff $ unsafeCoerceEff $ FRP.subscribe cDrag $ case _ of
-  --   Left _      -> pure unit
-  --   Right {x,y} -> scrollCanvas backCanvas canvas {x: -x, y: 0.0}
-
 
 
 main :: Eff _ _
@@ -295,8 +281,8 @@ main = launchAff do
 
   let cs@(CoordSys s) = coordSys
 
-      scroll :: BigInt
-      scroll = BigInt.fromInt 10000000
+      scroll :: BrowserPoint
+      scroll = wrap $ BigInt.fromInt 10000000
 
       zoom :: Ratio BigInt
       zoom = one % (BigInt.fromInt 1000)
@@ -305,12 +291,12 @@ main = launchAff do
   let
       begin :: Interval BrowserPoint
       -- begin = Interval (BPoint $ BigInt.fromInt 652428823) (BPoint $ BigInt.fromInt 1829028329)
-      begin = Interval (BPoint $ BigInt.fromInt 652428823) s.size
+      -- begin = Pair (wrap $ BigInt.fromInt 652428823) s.size
+      begin = Pair zero s.size
 
-      viewEvent :: Event (Interval BrowserPoint)
-      viewEvent = browserViewEvent {size: s.size, scroll, zoom } begin
-                    $ btnUpdateView {scroll: scroll, zoom } <|> dregs
-
+      viewEvent :: Event _
+      viewEvent = browserViewEvent cs begin
+                    $ btnUpdateView {scroll, zoom} <|> dregs
 
 
       click :: Event Pixels
@@ -347,10 +333,11 @@ main = launchAff do
 
   void $ liftEff $ Event.subscribe clickEvs
        (\ev -> do
-           let sF (Just (Tuple chr i)) = "Frame: " <> show chr <> showLP i
+           let sF (Just x) = "Frame: " <> show (unsafeStringify x)
                sF Nothing = "No Frame"
-               sChr (Just (Tuple chr bp)) = "Chr: " <> show chr <> "\t" <> show (unwrap bp)
-               sChr Nothing = "No Chr"
+               sChr x = "Chr: " <> unsafeStringify x
+               -- sChr (Just x) = "Chr: " <> show chr <> "\t" <> show (unwrap bp)
+               -- sChr Nothing = "No Chr"
 
            setViewUI $ "<p>" <> showView ev.view <> "</p>"
                     <> "<p>" <> "Canvas click:" <> show ev.canvasClick <> "</p>"
@@ -374,6 +361,7 @@ main = launchAff do
 
 
 
+coordSys :: _
 coordSys = mkCoordSys mouseChrSizes (BigInt.fromInt 2000000)
 
 mouseChrSizes :: Array (Tuple ChrId BigInt)
