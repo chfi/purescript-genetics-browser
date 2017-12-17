@@ -54,6 +54,9 @@
     "purescript-psci-support": "^3.0.0",
     "purescript-debug": "^3.0.0",
     "purescript-spec": "^1.0.0",
-    "purescript-jack": "^2.0.0"
+    "purescript-jack": "^2.0.0",
+    "purescript-quickcheck": "^4.6.0",
+    "purescript-spec-quickcheck": "1.0.0",
+    "purescript-quickcheck-laws": "^3.0.1"
   }
 }

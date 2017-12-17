@@ -6,7 +6,7 @@ import Control.Monad.Aff (Aff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Console (log)
 import Genetics.Browser.Biodalliance.Source (Source, createSource)
-import Genetics.Browser.Units (Bp(..), Chr(..))
+import Genetics.Browser.Types (Bp(..), Chr(..), ChrId(..))
 import Jack (jackMain)
 import Test.Config as Config
 import Test.Cytoscape as Cytoscape
@@ -16,7 +16,7 @@ import Test.Spec.Reporter.Console (consoleReporter)
 import Test.Spec.Runner (run)
 import Test.Track as Track
 
-fetchFun :: Chr -> Bp -> Bp -> Aff _ String
+fetchFun :: ChrId -> Bp -> Bp -> Aff _ String
 fetchFun _ _ _ = pure "hello world"
 
 foreign import testFetch :: ∀ eff a. a -> Source a -> Eff eff Unit
