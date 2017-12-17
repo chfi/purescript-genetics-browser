@@ -47,6 +47,7 @@ derive instance newtypeBrowserPoint :: Newtype BrowserPoint _
 
 derive newtype instance ringBrowserPoint :: Ring BrowserPoint
 derive newtype instance semiringBrowserPoint :: Semiring BrowserPoint
+derive newtype instance commutativeringBrowserPoint :: CommutativeRing BrowserPoint
 derive newtype instance euclideanringBrowserPoint :: EuclideanRing BrowserPoint
 
 
@@ -93,8 +94,16 @@ intervalsOverlap :: forall c.
                  => Interval c
                  -> Interval c
                  -> Boolean
-intervalsOverlap (Pair l1 r1) (Pair l2 r2) = not $ r1 < l2 && r2 < l1
+intervalsOverlap (Pair l1 r1) (Pair l2 r2) =
+  let (Pair l1' r1') = Pair (min l1 l2) (min r1 r2)
+      (Pair l2' r2') = Pair (max l1 l2) (max r1 r2)
+  in r1' >= l2'
 
+p0 = Pair 0 0
+p1 = Pair 0 2
+p2 = Pair 2 4
+p3 = Pair 3 4
+p4 = Pair (-2) (-1)
 
 
 coveringIntervals :: forall f i c.
@@ -189,14 +198,19 @@ globalToInterval :: forall c.
                  -> RelPoint
 globalToInterval v x = globalToInterval' (map unwrap v) (unwrap x)
 
-globalToInterval' :: Interval BigInt
-                  -> BigInt
-                  -> RelPoint
+globalToInterval' :: forall c.
+                     Ord c
+                  => EuclideanRing c
+                  => Interval c
+                  -> c
+                  -> Ratio c
 globalToInterval' (Pair l r) x =
   let n = x - l
-      d = r - l
+      d = max one (r - l)
   in n % d
 
+
+-- Global <-> Interval are isomorphic for big enough intervals...
 intervalToGlobal :: forall c.
                     Newtype c BigInt
                  => Interval c
@@ -204,16 +218,19 @@ intervalToGlobal :: forall c.
                  -> c
 intervalToGlobal v x = wrap $ intervalToGlobal' (map unwrap v) x
 
-intervalToGlobal' :: Interval BigInt
-                  -> RelPoint
-                  -> BigInt
-intervalToGlobal' iv p =
-  let (Pair l r) = iv
-      s = (r - l) % one
-      x = p*s + (l % one)
-      n = Ratio.numerator x
-      d = Ratio.denominator x
-  in (n / d)
+intervalToGlobal' :: forall c.
+                     Ord c
+                  => Show c
+                  => EuclideanRing c
+                  => Interval c
+                  -> Ratio c
+                  -> c
+intervalToGlobal' iv@(Pair l r) p =
+  let d1 = max one (r - l)
+      d2 = Ratio.denominator p
+      a = d1 / d2
+      n = a * Ratio.numerator p
+  in l + n
 
 
 
@@ -280,7 +297,7 @@ browserPointToCanvas screenSize v@(Pair vL vR) p = relPointToNumber pixels'
         -- Pixels/BrowserPoint
         scale :: Ratio BigInt
         scale = width' % viewSize
-        pixels' = (unwrap p % one) * scale
+        pixels' = (unwrap (p - vL) % one) * scale
 
 
 intervalToScreen :: forall i c r.
@@ -299,13 +316,17 @@ shiftIntervalBy :: forall c.
                 => Interval c
                 -> Ratio BigInt
                 -> Interval c
-shiftIntervalBy v@(Pair l r) rat =
-  let l' = unwrap l
-      r' = unwrap r
-      diff = ((r' - l') * (Ratio.numerator rat)) / (Ratio.denominator rat)
-      v' = Pair (l' + diff) (r' + diff)
-  in Debug.trace (show (map unwrap v) <> " shifted by " <> show rat <> " means " <> show diff <> " output is " <> show v')
-     \_ -> map wrap v'
+shiftIntervalBy v rat = wrap <$> shiftIntervalBy' (unwrap <$> v) rat
+
+shiftIntervalBy' :: forall c.
+                    EuclideanRing c
+                 => Interval c
+                 -> Ratio c
+                 -> Interval c
+shiftIntervalBy' v@(Pair l r) rat =
+  let diff = ((r - l) * (Ratio.numerator rat)) / (Ratio.denominator rat)
+      v' = Pair (l + diff) (r + diff)
+  in v'
 
 newtype Normalized a = Normalized a
 
