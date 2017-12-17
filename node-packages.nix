@@ -49,13 +49,13 @@ let
         sha1 = "adf53529c8d4af02ef24fb8d5341c1419d33e2f7";
       };
     };
-    "pulp-11.0.0" = {
+    "pulp-12.0.1" = {
       name = "pulp";
       packageName = "pulp";
-      version = "11.0.0";
+      version = "12.0.1";
       src = fetchurl {
-        url = "https://registry.npmjs.org/pulp/-/pulp-11.0.0.tgz";
-        sha1 = "65d9210a78dfd0797193ee701fa5ba0201705db2";
+        url = "https://registry.npmjs.org/pulp/-/pulp-12.0.1.tgz";
+        sha512 = "3n09lgnyd4p3h3jlhgcvbh6n6m9h89hwvbhli5ic32fkl5y4g7yi61m1vw483479jxkif2zyqs89l6j6hq4iy15jdknx1lcp9qbyvwy";
       };
     };
     "pscid-2.0.2" = {
@@ -4025,7 +4025,7 @@ let
         ];
       })
       sources."bower-1.8.2"
-      (sources."pulp-11.0.0" // {
+      (sources."pulp-12.0.1" // {
         dependencies = [
           (sources."browserify-13.3.0" // {
             dependencies = [
