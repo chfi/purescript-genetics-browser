@@ -103,13 +103,8 @@ data UpdateView =
 btnScroll :: forall r.
              BrowserPoint
           -> Event UpdateView
-          --    BrowserPoint
-          -- -> BrowserPoint
-          -- -> Event UpdateView
 btnScroll x = const (Scroll x) <$> buttonEvent "scrollLeft" <|>
               const (Scroll (negate x)) <$> buttonEvent "scrollRight"
--- btnScroll s (BPoint x) = scrollView s (wrap x)  <$> buttonEvent "scrollLeft"
-                         -- const (scrollView s (wrap $ negate x)) <$> buttonEvent "scrollRight"
 
 btnZoom :: (Ratio BigInt)
         -> Event UpdateView
@@ -117,25 +112,15 @@ btnZoom m = const (Zoom (m )) <$> buttonEvent "zoomOut" <|>
             const (Zoom (m * (BigInt.fromInt 9 % BigInt.fromInt 100))) <$> buttonEvent "zoomIn"
 
 btnUpdateView :: {scroll :: BrowserPoint, zoom :: Ratio BigInt } -> Event UpdateView
--- btnUpdateView {scroll,zoom} = btnScroll scroll <|> btnZoom zoom <|> (const NoOp <$> buttonEvent "redraw")
 btnUpdateView  {scroll, zoom } = btnScroll scroll <|>
                                  btnZoom zoom <|>
                                  (const NoOp <$> buttonEvent "redraw")
--- btnUpdateView = const NoOp <$> buttonEvent "redraw"
 
 scrollView :: CoordSys ChrId BrowserPoint
            -> BrowserPoint
            -> BrowserView
            -> BrowserView
 scrollView cs p v = (_ - p) <$> v
-  -- let p' = p
-  -- in Interval (BPoint $ max zero (l - p')) (BPoint $ min size (r - p'))
-
--- scrollViewRel :: CoordSys _ _
---               -> RelPoint
---               -> BrowserView
---               -> BrowserView
--- scrollViewRel p v
 
 scrollViewGood :: Ratio BigInt
                -> BrowserView
@@ -153,14 +138,11 @@ scrollViewGood rat iv = iv `shiftIntervalBy` rat
 --   in (Interval (BPoint $ max zero (l + len')) (BPoint $ min size (r - len')))
 
 
-
-
 normalizeView :: BrowserView
               -> BrowserView
               -> BrowserView
 normalizeView (Pair lhs rhs)
-              -- (Pair l   r) = Pair (max lhs l) (min r rhs)
-              (Pair l   r) = Pair l r
+              (Pair l   r) = Pair (max lhs l) (min r rhs)
 
 
 updateViewFold :: CoordSys ChrId BrowserPoint
@@ -273,7 +255,7 @@ main = launchAff do
       dragCanvasEv = canvasDrag canvas
 
       browserDragEv :: Event (Ratio BigInt)
-      browserDragEv = browserDrag {width: w} (filterMap (_^?_Left) dragCanvasEv)
+      browserDragEv = map negate $ browserDrag {width: w} (filterMap (_^?_Left) dragCanvasEv)
 
       dregs :: _
       dregs = scrollViewEvent browserDragEv
