@@ -431,6 +431,59 @@ drawLegend width height icons =
       ds = mapWithIndex (\i ic -> f (vPad+(vPad*(Int.toNumber i))) ic) icons
   in fold ds
 
+
+
+mkIcon :: Color -> String -> { text :: String, icon :: Drawing }
+mkIcon c text =
+  let sh = circle (-5.0) (-5.0) 10.0
+      icon = outlined (outlineColor c <> lineWidth 2.0) sh <>
+             filled (fillColor c) sh
+  in {text, icon}
+
+
+demoLegend :: Array {text :: String, icon :: Drawing}
+demoLegend =
+  [ mkIcon red "Red thing"
+  , mkIcon blue "blue thing"
+  , mkIcon purple "boop"
+  ]
+
+              -- the first 2 are used by all parts of the browser
+demoBrowser :: forall f.
+               Foldable f
+            => Filterable f
+            => CoordSys _ _
+            -> { width :: Pixels, height :: Pixels }
+            -- this by the vertical scale and the tracks
+            -> { min :: Number, max :: Number, sig :: Number }
+            -- these define the width of the non-track parts of the browser;
+            -- the browser takes up the remaining space.
+            -> { vScaleWidth :: Pixels
+               , legendWidth :: Pixels }
+            -- vScale only
+            -> Color
+            -- to be drawn in the legend on the RHS
+            -> Array { text :: String, icon :: Drawing }
+            -- finally, used by the main track
+            -> { gwas :: Map ChrId (f (GWASFeature ()))
+               , annots :: Map ChrId (f (Annot (minY :: Number))) }
+            -> Interval BrowserPoint
+            -- the drawing produced contains all 3 parts.
+            -> Drawing
+demoBrowser cs canvas vscale sizes vscaleColor legend {gwas, annots} =
+  let track v = drawDemo cs vscale trackCanvas {gwas, annots} v
+      trackCanvas = { width: canvas.width - sizes.vScaleWidth - sizes.legendWidth
+                    , height: canvas.height, yOffset: 0.0 }
+
+      vScale :: _ -> Drawing
+      vScale _ = drawVScale sizes.vScaleWidth canvas.height vscale vscaleColor
+
+      legendD :: _ -> Drawing
+      legendD _ = drawLegend sizes.legendWidth canvas.height legend
+
+  in \view -> vScale view <> track view <> legendD view
+
+
 mouseChrIds :: Array ChrId
 mouseChrIds =
             [ (ChrId "1")
