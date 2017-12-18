@@ -172,7 +172,7 @@ drawingEvent :: { min :: Number, max :: Number }
                 , annots :: Map ChrId (List _) }
              -> Event BrowserView
              -> Event Drawing
-drawingEvent s csys box dat = let dd = drawDemo csys s 0.25 box dat
+drawingEvent s csys box dat = let dd = drawDemo csys { min: s.min, max: s.max, sig: 0.25 } box dat
                               in map dd
 
 

@@ -104,7 +104,7 @@ type GWASFeature r = { score :: Number
 
 mkGwasRenderer :: forall m rf rctx.
                   MonadReader (ChrCtx (size :: Bp, color :: Color | rctx)) m
-               => {min :: Number, max :: Number}
+               => {min :: Number, max :: Number, sig :: Number}
                -> m (PureRenderer (GWASFeature rf))
 mkGwasRenderer {min, max} = do
   ctx <- ask
@@ -209,10 +209,12 @@ drawData cs@(CoordSys s) canvasBox renderer dat =
                 $ drawIvs (toDraw bView)
 
 
+
+
 shiftRendererMinY :: forall rf.
                       RowLacks "minY" rf
                    => Number
-                   -> { min :: Number, max :: Number }
+                   -> { min :: Number, max :: Number, sig :: Number }
                    -> PureRenderer (Record rf)
                    -> PureRenderer (Record (minY :: Number | rf))
 shiftRendererMinY dist s render f = do
@@ -347,7 +349,8 @@ getDataDemo urls = do
 
 
 
-renderersDemo :: { min :: Number, max :: Number }
+renderersDemo :: forall r.
+                 { min :: Number, max :: Number, sig :: Number }
               -> { gwas  :: PureRenderer (GWASFeature ()       )
                  , annots :: PureRenderer (Annot (minY :: Number)) }
 renderersDemo s = { gwas, annots }
@@ -360,33 +363,31 @@ renderersDemo s = { gwas, annots }
         annots = shiftRendererMinY 0.06 s $ mkAnnotRenderer mouseChrCtx
 
 
-ruler :: forall r.
-         { min :: Number, max :: Number }
-      -> Number
+ruler :: forall r r1.
+         { min :: Number, max :: Number, sig :: Number }
       -> Color
       -> { width :: Pixels, height :: Pixels, yOffset :: Pixels | r}
       -> Drawing
-ruler {min, max} val color f = outlined outline rulerDrawing
-  where normY = (val - min) / (max - min)
+ruler {min, max, sig} color f = outlined outline rulerDrawing
+  where normY = (sig - min) / (max - min)
         y = f.height - (normY * f.height + f.yOffset)
         outline = outlineColor color
         rulerDrawing = Drawing.path [{x: 0.0, y}, {x: f.width, y}]
 
 
-drawDemo :: forall f.
+drawDemo :: forall f r.
             Foldable f
          => Filterable f
          => CoordSys _ _
-         -> { min :: Number, max :: Number }
-         -> Number
+         -> { min :: Number, max :: Number, sig :: Number }
          -> { width :: Pixels, height :: Pixels, yOffset :: Pixels }
          -> { gwas :: Map ChrId (f (GWASFeature ()))
             , annots :: Map ChrId (f (Annot (minY :: Number))) }
          -> Interval BrowserPoint
          -> Drawing
-drawDemo cs s sig canvasBox {gwas, annots} =
+drawDemo cs s canvasBox {gwas, annots} =
   let renderers = renderersDemo s
-      ruler' = ruler s sig red
+      ruler' = ruler s red
       drawGwas   = drawData cs canvasBox renderers.gwas gwas
       drawAnnots = drawData cs canvasBox renderers.annots annots
   in \view -> (drawGwas view) <> (drawAnnots view) <> ruler' canvasBox
