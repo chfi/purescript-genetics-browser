@@ -2,7 +2,7 @@ module Genetics.Browser.Track.Backend where
 
 import Prelude
 
-import Color (Color, black)
+import Color (Color, black, textColor)
 import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive, orange, purple, red, teal, yellow)
 import Control.Alt ((<|>))
 import Control.Monad.Aff (Aff)
@@ -16,7 +16,7 @@ import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Filterable (class Filterable, filterMap)
-import Data.Foldable (class Foldable, fold, foldMap, foldl, maximum, sum)
+import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum, sum)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
 import Data.Lens (united, (^?), (^.))
@@ -169,13 +169,6 @@ drawPureInterval {height} {width, offset} = foldMap render'
           let {x,y} = nPointToFrame width height $ point
           in translate (x + offset) y drawing
 
-
--- Current scrolling/rendering problem is likely due to
--- some interval position offset not getting applied.
-
-
--- Or something is wrong during the normalization of the browser view.
--- Trace prints~~
 
 
 drawData :: forall i c f a.
@@ -393,6 +386,50 @@ drawDemo cs s canvasBox {gwas, annots} =
   in \view -> (drawGwas view) <> (drawAnnots view) <> ruler' canvasBox
 
 
+
+drawVScale :: forall r.
+              Number
+           -> Number
+           -> { min :: Number, max :: Number, sig :: Number }
+           -> Color
+           -> Drawing
+drawVScale width height vs col =
+  -- should have some padding here too; hardcode for now
+  let hPad = width  / 10.0
+      vPad = height / 10.0
+      x = width / 2.0
+      y1 = vPad
+      y2 = height - vPad
+      p = Drawing.path [{x, y:y1}, {x, y:y2}]
+
+  in outlined (outlineColor col <> lineWidth 3.0) p
+
+
+
+drawLegendItem :: Number
+               -> { text :: String, icon :: Drawing }
+               -> Drawing
+drawLegendItem w {text, icon} =
+  let ft = font sansSerif 12 mempty
+      t = scale 1.0 (-1.0) $ Drawing.text ft 32.0 0.0 (fillColor black) text
+  in icon <> t
+
+
+drawLegend :: Number
+           -> Number
+           -> Array { text :: String, icon :: Drawing }
+           -> Drawing
+drawLegend width height icons =
+  let hPad = width  / 10.0
+      vPad = height / 10.0
+      n :: Int
+      n = length icons
+      x = hPad
+      f :: Number -> { text :: String, icon :: Drawing } -> Drawing
+      f y ic = translate x y $ drawLegendItem (width - 2.0*hPad) ic
+      d = (height - 2.0*vPad) / (length icons)
+      ds = mapWithIndex (\i ic -> f (vPad+(vPad*(Int.toNumber i))) ic) icons
+  in fold ds
 
 mouseChrIds :: Array ChrId
 mouseChrIds =
