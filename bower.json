@@ -41,7 +41,7 @@
     "purescript-profunctor-lenses": "^3.2.0",
     "purescript-options": "^3.0.0",
     "purescript-filterable": "^2.4.1",
-    "purescript-behaviors": "^6.0.0",
+    "purescript-behaviors": "^6.3.0",
     "purescript-csv": "^2.0.0",
     "purescript-lists": "^4.11.0",
     "purescript-drawing": "^3.0.0",

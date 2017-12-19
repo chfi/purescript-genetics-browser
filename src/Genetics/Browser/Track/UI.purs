@@ -285,6 +285,7 @@ main = launchAff do
       zoom :: Ratio BigInt
       zoom = one % (BigInt.fromInt 1000)
 
+  updateBrowser <- liftEff $ Event.create
 
   let
       begin :: Interval BrowserPoint
@@ -294,7 +295,9 @@ main = launchAff do
 
       viewEvent :: Event _
       viewEvent = browserViewEvent cs begin
-                    $ btnUpdateView {scroll, zoom} <|> dregs
+                    $ btnUpdateView {scroll, zoom} <|>
+                    dregs <|>
+                    (const NoOp <$> updateBrowser.event)
 
 
       click :: Event Pixels
@@ -345,9 +348,11 @@ main = launchAff do
                     <> "<p>Chr click: " <> sChr ev.cClick <> "</p>"
            )
 
-
-  dat <- getDataDemo { gwas: "./gwas.json"
-                     , annots: "./annots_fake.json" }
+  dat <- do
+    res <- getDataDemo { gwas: "./gwas.json"
+                       , annots: "./annots_fake.json" }
+    liftEff $ updateBrowser.push unit
+    pure res
 
   let browserSize = {width: w, height: h}
       score = {min: 0.125, max: 0.42, sig: 0.25}
@@ -356,6 +361,9 @@ main = launchAff do
       bg = filled (fillColor white) $ rectangle 0.0 0.0 w h
 
   void $ liftEff $ Event.subscribe ev' (\d -> Drawing.render ctx (bg <> d))
+
+  liftEff $ updateBrowser.push unit
+
 
 
 
