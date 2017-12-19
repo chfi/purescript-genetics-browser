@@ -10,7 +10,7 @@ import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Reader (class MonadReader, ask)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
-import Data.Array ((:))
+import Data.Array ((:), (..))
 import Data.Array as Array
 import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
@@ -387,6 +387,16 @@ drawDemo cs s canvasBox {gwas, annots} =
 
 
 
+{-
+TODO
+there is currently no connection between the vertical scale's
+position and the track. Need to take stuff like vertical
+offset and padding into account; calculate once and use
+in both places. However don't just use canvasheight - yoffset
+or whatever; actually derive the top and bottom of the track.
+
+-}
+
 drawVScale :: forall r.
               Number
            -> Number
@@ -395,14 +405,26 @@ drawVScale :: forall r.
            -> Drawing
 drawVScale width height vs col =
   -- should have some padding here too; hardcode for now
-  let hPad = width  / 10.0
+  let hPad = width  / 5.0
       vPad = height / 10.0
       x = width / 2.0
       y1 = vPad
       y2 = height - vPad
+      n = (_ * 0.1) <<< Int.toNumber <$> (0 .. 10)
       p = Drawing.path [{x, y:y1}, {x, y:y2}]
+      bar w y = Drawing.path [{x:x-w, y}, {x:x+w, y}]
+      ps = foldMap (\i -> bar
+                          (if i == 0.0 || i == 1.0 then 4.0 else 2.0)
+                          (y1 + i*(y2-y1))) n
 
-  in outlined (outlineColor col <> lineWidth 3.0) p
+      ft = font sansSerif 10 mempty
+      mkT y = Drawing.text ft (x+12.0) y (fillColor black)
+      top = mkT y1 $ show vs.max
+      btm = mkT y2 $ show vs.min
+
+  in outlined (outlineColor col <> lineWidth 2.0) (p <> ps) <>
+     top <> btm
+
 
 
 
@@ -411,7 +433,7 @@ drawLegendItem :: Number
                -> Drawing
 drawLegendItem w {text, icon} =
   let ft = font sansSerif 12 mempty
-      t = scale 1.0 (-1.0) $ Drawing.text ft 32.0 0.0 (fillColor black) text
+      t = Drawing.text ft 12.0 0.0 (fillColor black) text
   in icon <> t
 
 
@@ -420,8 +442,8 @@ drawLegend :: Number
            -> Array { text :: String, icon :: Drawing }
            -> Drawing
 drawLegend width height icons =
-  let hPad = width  / 10.0
-      vPad = height / 10.0
+  let hPad = width  / 5.0
+      vPad = height / 5.0
       n :: Int
       n = length icons
       x = hPad
@@ -435,7 +457,7 @@ drawLegend width height icons =
 
 mkIcon :: Color -> String -> { text :: String, icon :: Drawing }
 mkIcon c text =
-  let sh = circle (-5.0) (-5.0) 10.0
+  let sh = circle (-2.5) (-2.5) 5.0
       icon = outlined (outlineColor c <> lineWidth 2.0) sh <>
              filled (fillColor c) sh
   in {text, icon}
@@ -471,15 +493,18 @@ demoBrowser :: forall f.
             -- the drawing produced contains all 3 parts.
             -> Drawing
 demoBrowser cs canvas vscale sizes vscaleColor legend {gwas, annots} =
-  let track v = drawDemo cs vscale trackCanvas {gwas, annots} v
-      trackCanvas = { width: canvas.width - sizes.vScaleWidth - sizes.legendWidth
+  let trackCanvas = { width: canvas.width - sizes.vScaleWidth - sizes.legendWidth
                     , height: canvas.height, yOffset: 0.0 }
 
       vScale :: _ -> Drawing
       vScale _ = drawVScale sizes.vScaleWidth canvas.height vscale vscaleColor
 
+      track v = translate sizes.vScaleWidth 0.0
+                  $ drawDemo cs vscale trackCanvas {gwas, annots} v
+
       legendD :: _ -> Drawing
-      legendD _ = drawLegend sizes.legendWidth canvas.height legend
+      legendD _ = translate (canvas.width - sizes.legendWidth) 0.0
+                    $ drawLegend sizes.legendWidth canvas.height legend
 
   in \view -> vScale view <> track view <> legendD view
 
