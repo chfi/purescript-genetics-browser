@@ -2,6 +2,7 @@ module Genetics.Browser.Track.UI where
 
 import Prelude
 
+import Color.Scheme.Clrs (red)
 import Control.Alt ((<|>))
 import Control.Alternative (empty, (<*>))
 import Control.Monad.Aff (Aff, launchAff)
@@ -46,7 +47,7 @@ import Debug.Trace as Debug
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Backend (GWASFeature, Gene, drawDemo, getDataDemo, mouseChrIds)
+import Genetics.Browser.Track.Backend (GWASFeature, Gene, demoBrowser, demoLegend, drawDemo, getDataDemo, mouseChrIds)
 import Genetics.Browser.Types (Bp(..), ChrId(..), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(..), Interval, RelPoint, _BrowserSize, canvasToView, findBrowserInterval, intervalToGlobal, mkCoordSys, shiftIntervalBy)
 import Genetics.Browser.View (Pixels)
@@ -174,6 +175,21 @@ drawingEvent :: { min :: Number, max :: Number }
              -> Event Drawing
 drawingEvent s csys box dat = let dd = drawDemo csys { min: s.min, max: s.max, sig: 0.25 } box dat
                               in map dd
+
+browserDrawEvent :: CoordSys ChrId BrowserPoint
+                 -> { width :: Pixels, height :: Pixels }
+                 -> { min :: Number, max :: Number, sig :: Number }
+                 -- -> { vScaleWidth :: Pixels, legendWidth :: Pixels }
+                 -> { gwas  :: Map ChrId (List _)
+                    , annots :: Map ChrId (List _) }
+                 -> Event BrowserView
+                 -> Event Drawing
+browserDrawEvent csys canvasSize vscale dat
+  = let dd = demoBrowser csys canvasSize vscale {vScaleWidth, legendWidth} red demoLegend dat
+        vScaleWidth = 40.0
+        legendWidth = 100.0
+    in map dd
+
 
 
 clickEvent :: forall r. CanvasElement -> Event Pixels
@@ -333,10 +349,10 @@ main = launchAff do
   dat <- getDataDemo { gwas: "./gwas.json"
                      , annots: "./annots_fake.json" }
 
-  let sizes = {width: w, height: h, yOffset: 5.0}
-      score = {min: 0.125, max: 0.42}
+  let browserSize = {width: w, height: h}
+      score = {min: 0.125, max: 0.42, sig: 0.25}
 
-  let ev' = drawingEvent score cs sizes dat viewEvent
+  let ev' = browserDrawEvent cs browserSize score dat viewEvent
       bg = filled (fillColor white) $ rectangle 0.0 0.0 w h
 
   void $ liftEff $ Event.subscribe ev' (\d -> Drawing.render ctx (bg <> d))
