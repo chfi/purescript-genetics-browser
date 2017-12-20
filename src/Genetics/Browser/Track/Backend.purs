@@ -394,7 +394,6 @@ position and the track. Need to take stuff like vertical
 offset and padding into account; calculate once and use
 in both places. However don't just use canvasheight - yoffset
 or whatever; actually derive the top and bottom of the track.
-
 -}
 
 drawVScale :: forall r.
@@ -424,8 +423,6 @@ drawVScale width height vs col =
 
   in outlined (outlineColor col <> lineWidth 2.0) (p <> ps) <>
      top <> btm
-
-
 
 
 drawLegendItem :: Number
@@ -474,7 +471,7 @@ demoLegend =
 demoBrowser :: forall f.
                Foldable f
             => Filterable f
-            => CoordSys _ _
+            => CoordSys ChrId BrowserPoint
             -> { width :: Pixels, height :: Pixels }
             -- this by the vertical scale and the tracks
             -> { min :: Number, max :: Number, sig :: Number }
@@ -507,6 +504,53 @@ demoBrowser cs canvas vscale sizes vscaleColor legend {gwas, annots} =
                     $ drawLegend sizes.legendWidth canvas.height legend
 
   in \view -> vScale view <> track view <> legendD view
+
+
+-- the browser as an entire thing can be split into
+-- some functions for drawing it given a current view;
+-- this is because (for now) the only state that can
+-- change is the view.
+-- components of the browser can thus simply be provided
+-- as a foldable containing the components.
+
+-- More generally, this is some kinda comonad, certainly
+-- contravariant, and it should be possible to use those
+-- abstractions to construct a nice interface!
+-- applicative something.
+browser :: forall f.
+           Foldable f
+        => Filterable f
+        => f { width :: Pixels
+             , draw  :: Interval BrowserPoint -> Drawing}
+        -> Interval BrowserPoint
+        -> Drawing
+-- TODO sum up offsets so the translation is correct
+browser parts bView = foldMap (\p -> translate p.width 0.0 $ p.draw bView) parts
+
+demoParts :: forall f r.
+             Foldable f
+          => Filterable f
+          => CoordSys ChrId BrowserPoint
+          -> { height :: Number, width :: Number | r }
+          -> { vScaleWidth :: Number , legendWidth :: Number }
+          -> { min :: Number, max :: Number, sig :: Number }
+          -> { gwas   :: Map ChrId (f _)
+             , annots :: Map ChrId (f _) }
+          -> Array { width :: Pixels
+                   , draw :: Interval BrowserPoint -> Drawing }
+demoParts cs canvas sizes vscaling {gwas, annots} = [vScale, track, legend]
+  where trackCanvas = { width: canvas.width - sizes.vScaleWidth - sizes.legendWidth
+                      , height: canvas.height, yOffset: 0.0 }
+
+        vScale = { width: sizes.vScaleWidth
+                 , draw: \_ -> drawVScale sizes.vScaleWidth canvas.height vscaling red }
+
+        track = { width: trackCanvas.width
+                , draw: \v -> drawDemo cs vscaling trackCanvas {gwas, annots} v }
+
+        legend = { width: sizes.legendWidth
+                 , draw: \_ -> drawLegend sizes.legendWidth canvas.height demoLegend }
+
 
 
 mouseChrIds :: Array ChrId
