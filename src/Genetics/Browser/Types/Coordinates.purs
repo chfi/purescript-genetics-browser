@@ -325,8 +325,25 @@ shiftIntervalBy' :: forall c.
                  -> Interval c
 shiftIntervalBy' v@(Pair l r) rat =
   let diff = ((r - l) * (Ratio.numerator rat)) / (Ratio.denominator rat)
-      v' = Pair (l + diff) (r + diff)
-  in v'
+  in Pair (l + diff) (r + diff)
+
+
+zoomIntervalBy :: forall c.
+                  Newtype c BigInt
+               => Interval c
+               -> Ratio BigInt
+               -> Interval c
+zoomIntervalBy v r = wrap <$> zoomIntervalBy' (unwrap <$> v) r
+
+zoomIntervalBy' :: forall c.
+                   EuclideanRing c
+                => Interval c
+                -> Ratio c
+                -> Interval c
+zoomIntervalBy' v@(Pair l r) rat =
+  let diff = ((r - l) * (Ratio.numerator rat)) / (Ratio.denominator rat)
+  in Pair (l - diff) (r + diff)
+
 
 newtype Normalized a = Normalized a
 
