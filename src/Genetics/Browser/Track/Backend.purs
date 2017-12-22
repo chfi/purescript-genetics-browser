@@ -89,6 +89,93 @@ type ChrCtx r = Map ChrId (Record r)
 -- It can fail if the given feature for some reason cannot be rendered,
 -- either because the feature lacks information, or because the context lacks something.
 
+
+type Drawable a r      = ( draw  :: a -> Drawing | r )
+type Placeable a r     = ( place :: a -> Maybe (Normalized Point) | r )
+type Scorable a r      = ( score :: a -> Number | r )
+-- `Categorizable` means there's a categorical/qualitative difference between
+-- some members of `a`. e.g. a bunch of SNPs in a GWAS track are not,
+-- since the only difference is really their position and value (Chr could arguably be categorized, but eh),
+-- but annotations could be, where the categories are e.g. what kind of trait
+-- for a concrete example, in https://raw.githubusercontent.com/genetics-statistics/GEMMA/master/cfw.gif
+-- the annotation categories would be "Muscle or bone", "Other physiological trait", "Behavior".
+type Categorizable a r = ( categorize :: a -> String | r )
+
+type Renderable a r = Drawable  a (Placeable a r)
+type Scaleable  a r = Placeable a (Scorable a r)
+
+emptyTrack :: forall a.
+              Record
+              (Drawable a
+               (Placeable a
+                (Scorable a
+                 (Categorizable a ()))))
+emptyTrack = { draw: const mempty
+             , place: const Nothing
+             , score: const zero
+             , categorize: const mempty
+             }
+
+{-
+idea:
+configurations for a track define how these various "actions"
+are performed, i.e. how a thing is drawn, placed, categorized, etc.
+
+parsing a configuration, then, produces a list of
+Variants:
+  List (Variant (Drawable (Placeable _))) etc.
+
+then we can apply each variant individually to automate the
+process of mapping a "track" or w/e to the various browser parts,
+simply returning mempty (since it's all a Drawing in the end, for now)
+if a given track does not support some action.
+
+problem: lose help from the type system. need to think more
+  is this a problem?
+  only (obvious) risk is forgetting to implement one of the things...
+  which is pretty obvious when it happens, hopefully why, too.
+  becomes even less of a problem when configuration is added;
+  we still have the type system's help for actually typing each of
+  the actions individually.
+-}
+
+
+render :: forall f a r.
+          Filterable f
+       => Record (Renderable a r)
+       -> f a
+       -> f { drawing :: Drawing, point :: Normalized Point }
+render { draw, place } = filterMap f
+  where f a = do
+          point <- place a
+          let drawing = draw a
+          pure { drawing, point }
+
+scaledPoint :: forall a r r'.
+               Record (Scaleable a r)
+            -> { min :: Number, max :: Number | r' }
+            -> a
+            -> Maybe (Normalized Point)
+scaledPoint { place, score } { min, max } a = do
+  (Normalized pt) <- place a
+  normPoint $ pt { y = (pt.y - min) / (max - min) }
+
+
+mkLegend :: forall a r f.
+            Functor f
+         => Record (Categorizable a (Drawable a r))
+         -> f a
+         -> f { text :: String, icon :: Drawing }
+mkLegend { categorize, draw } = map f
+  where f a = let text = categorize a
+                  icon = draw a
+              in { text, icon }
+
+
+
+
+
+
 type PureRenderer a = a -> Maybe { drawing :: Drawing
                                  , point   :: Normalized Point
                                  }
