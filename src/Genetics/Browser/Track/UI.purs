@@ -177,6 +177,21 @@ browserDrawEvent csys canvasSize vscale dat
     in map dd
 
 
+browserDrawEvent' :: CoordSys ChrId BrowserPoint
+                  -> { width :: Pixels, height :: Pixels }
+                  -> { min :: Number, max :: Number, sig :: Number }
+                  -- -> { vScaleWidth :: Pixels, legendWidth :: Pixels }
+                  -> { gwas  :: Map ChrId (List _)
+                     , annots :: Map ChrId (List _) }
+                  -> Event BrowserView
+                  -> Event (Tuple Drawing (Array Drawing))
+browserDrawEvent' csys canvasSize vscale dat
+  = let dd = demoBrowser' csys canvasSize vscale {vScaleWidth, legendWidth} red demoLegend dat
+        vScaleWidth = 40.0
+        legendWidth = 100.0
+    in map dd
+
+
 
 clickEvent :: forall r. CanvasElement -> Event Pixels
 clickEvent el = (_.x) <$> canvasEvent "mousedown" el
@@ -250,6 +265,15 @@ scrollZoomEvent el = map (ZoomView <<< f) $ canvasWheelEvent el
                    n = BigInt.fromInt $ Int.round $ dY * d'
                    d = BigInt.fromInt $ Int.round $ 10000.0
                in n % d
+
+
+
+trackRenderProd :: Int
+                -> Array Point
+                ->
+
+-- trackRenderCnsm ::
+
 
 
 main :: Eff _ _
@@ -365,9 +389,15 @@ main = launchAff do
       score = {min: 0.125, max: 0.42, sig: 0.25}
 
   let ev' = browserDrawEvent cs browserSize score dat viewEvent
+      evCool :: Event (Tuple Drawing (Array Drawing))
+      evCool = browserDrawEvent' cs browserSize score dat viewEvent
       bg = filled (fillColor white) $ rectangle 0.0 0.0 w h
 
   void $ liftEff $ Event.subscribe ev' (\d -> Drawing.render ctx (bg <> d))
+
+  void $ liftEff $ Event.subscribe evCool \(Tuple s d) -> do
+    Drawing.render ctx (bd <> d)
+
 
   liftEff $ updateBrowser.push unit
 

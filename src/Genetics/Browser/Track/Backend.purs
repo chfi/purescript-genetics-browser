@@ -37,6 +37,8 @@ import Data.Record as Record
 import Data.Symbol (SProxy(..))
 import Data.Traversable (scanl, traverse)
 import Data.Tuple (Tuple(..), fst, snd, uncurry)
+import Data.Unfoldable (class Unfoldable, none)
+import Data.Unfoldable as Unfoldable
 import Data.Variant (class Contractable, Variant)
 import Data.Variant as Variant
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
@@ -284,10 +286,45 @@ drawData cs@(CoordSys s) canvasBox renderer dat =
       drawIvs :: Array (Tuple _ (Array _)) -> Drawing
       drawIvs = foldMap (uncurry $ drawPureInterval canvasBox)
 
+      drawIvs' :: Array (Tuple _ (Array _)) -> Array Drawing
+      drawIvs' = map (uncurry $ drawPureInterval canvasBox)
+
   in \bView -> translate 0.0 (canvasBox.height - canvasBox.yOffset)
                 $ scale 1.0 (-1.0)
                 $ drawIvs (toDraw bView)
 
+
+drawData' :: forall i c f a.
+             Ord i
+          => Foldable f
+          => Unfoldable f
+          => Filterable f
+          => CoordSys i BrowserPoint
+          -> { width :: Pixels, height :: Pixels, yOffset :: Pixels }
+          -> PureRenderer a
+          -> Map i (f a)
+          -> Interval BrowserPoint
+          -> f Drawing
+drawData' cs@(CoordSys s) canvasBox renderer dat =
+  let drawings :: Map i (f { drawing :: _, point :: _ })
+      drawings = map (pureRender renderer) dat
+
+      f :: Interval _  -> CoordInterval i _ -> { width :: _, offset :: _ }
+      f iv c = (intervalToScreen canvasBox iv) (c^._Interval)
+
+      g :: CoordInterval i _ -> f { drawing :: _, point :: _ }
+      g c = fromMaybe none $ Map.lookup (c^._Index) drawings
+
+      toDraw :: Interval BrowserPoint -> f (Tuple _ (f _))
+      toDraw iv = (\x -> Tuple (f iv x) (g x)) <$>
+                  (Array.toUnfoldable $ viewIntervals cs iv)
+
+      drawIvs :: f (Tuple _ (f _)) -> f Drawing
+      drawIvs = map (uncurry $ drawPureInterval canvasBox)
+
+  in \bView -> translate 0.0 (canvasBox.height - canvasBox.yOffset)
+                <<< scale 1.0 (-1.0)
+                <$> drawIvs (toDraw bView)
 
 
 
@@ -461,7 +498,7 @@ drawDemo :: forall f r.
          => CoordSys _ _
          -> { min :: Number, max :: Number, sig :: Number }
          -> { width :: Pixels, height :: Pixels, yOffset :: Pixels }
-         -> { gwas :: Map ChrId (f (GWASFeature ()))
+         -> { gwas   :: Map ChrId (f (GWASFeature ()))
             , annots :: Map ChrId (f (Annot (minY :: Number))) }
          -> Interval BrowserPoint
          -> Drawing
@@ -471,6 +508,26 @@ drawDemo cs s canvasBox {gwas, annots} =
       drawGwas   = drawData cs canvasBox renderers.gwas gwas
       drawAnnots = drawData cs canvasBox renderers.annots annots
   in \view -> (drawGwas view) <> (drawAnnots view) <> ruler' canvasBox
+
+
+
+drawDemo' :: forall f r.
+             Foldable f
+          => Unfoldable f
+          => Filterable f
+          => CoordSys _ _
+          -> { min :: Number, max :: Number, sig :: Number }
+          -> { width :: Pixels, height :: Pixels, yOffset :: Pixels }
+          -> { gwas   :: Map ChrId (f (GWASFeature ()))
+             , annots :: Map ChrId (f (Annot (minY :: Number))) }
+          -> Interval BrowserPoint
+          -> Tuple Drawing (Array Drawing)
+drawDemo' cs s canvasBox {gwas, annots} =
+  let renderers = renderersDemo s
+      ruler' = ruler s red
+      drawGwas   = Array.fromFoldable <$> drawData' cs canvasBox renderers.gwas gwas
+      drawAnnots = drawData cs canvasBox renderers.annots annots
+  in \view -> Tuple (drawAnnots view <> ruler' canvasBox) (drawGwas view)
 
 
 
@@ -591,6 +648,49 @@ demoBrowser cs canvas vscale sizes vscaleColor legend {gwas, annots} =
                     $ drawLegend sizes.legendWidth canvas.height legend
 
   in \view -> vScale view <> track view <> legendD view
+
+
+
+demoBrowser' :: forall f.
+                Foldable f
+             => Unfoldable f
+             => Filterable f
+             => CoordSys ChrId BrowserPoint
+             -> { width :: Pixels, height :: Pixels }
+             -- this by the vertical scale and the tracks
+             -> { min :: Number, max :: Number, sig :: Number }
+             -- these define the width of the non-track parts of the browser;
+             -- the browser takes up the remaining space.
+             -> { vScaleWidth :: Pixels
+                , legendWidth :: Pixels }
+             -- vScale only
+             -> Color
+             -- to be drawn in the legend on the RHS
+             -> Array { text :: String, icon :: Drawing }
+             -- finally, used by the main track
+             -> { gwas :: Map ChrId (f (GWASFeature ()))
+                , annots :: Map ChrId (f (Annot (minY :: Number))) }
+             -> Interval BrowserPoint
+             -- the drawing produced contains all 3 parts.
+             -> Tuple Drawing (Array Drawing)
+demoBrowser' cs canvas vscale sizes vscaleColor legend {gwas, annots} =
+  let trackCanvas = { width: canvas.width - sizes.vScaleWidth - sizes.legendWidth
+                    , height: canvas.height, yOffset: 0.0 }
+
+      vScale :: _ -> Drawing
+      vScale _ = drawVScale sizes.vScaleWidth canvas.height vscale vscaleColor
+
+      track :: _ -> _
+      track v = let f = translate sizes.vScaleWidth 0.0
+                in bimap f (map f) $ drawDemo' cs vscale trackCanvas {gwas, annots} v
+
+      legendD :: _ -> Drawing
+      legendD _ = translate (canvas.width - sizes.legendWidth) 0.0
+                    $ drawLegend sizes.legendWidth canvas.height legend
+
+  in \view -> let (Tuple bg ds) = track view
+              in Tuple (vScale view <> bg <> legendD view) ds
+
 
 
 -- the browser as an entire thing can be split into
