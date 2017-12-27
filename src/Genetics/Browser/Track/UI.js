@@ -15,16 +15,6 @@ exports.buttonEvent = function(id) {
     };
 };
 
-exports.effEvent = function() {
-    var fun = null;
-    var ev = function(sub) {
-        fun = function() {
-            sub();
-        };
-    };
-    return { ev: ev, fun: fun };
-};
-
 exports.getScreenSize = function() {
     var w = window.innerWidth;
     var h = window.innerHeight;
@@ -134,17 +124,5 @@ exports.canvasWheelEvent = function(canvas) {
         return function() {
             canvas.removeEventListener("wheel", cb);
         }
-    };
-};
-
-exports.subscribeM = function(dict) {
-    return function(e) {
-        return function(f) {
-            return function() {
-                return e(function(a) {
-                    dict.liftEff(f)(a)();
-                });
-            };
-        };
     };
 };

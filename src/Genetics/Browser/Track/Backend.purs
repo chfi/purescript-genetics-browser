@@ -2,25 +2,21 @@ module Genetics.Browser.Track.Backend where
 
 import Prelude
 
-import Color (Color, black, textColor)
+import Color (Color, black)
 import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive, orange, purple, red, teal, yellow)
-import Control.Alt ((<|>))
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Reader (class MonadReader, ask)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
-import Data.Array ((:), (..))
+import Data.Array ((..))
 import Data.Array as Array
 import Data.Bifunctor (bimap)
-import Data.BigInt (BigInt)
-import Data.BigInt as BigInt
 import Data.Filterable (class Filterable, filterMap)
-import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum, sum)
+import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens (united, (^?), (^.))
-import Data.Lens as Lens
+import Data.Lens ((^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -28,30 +24,20 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
 import Data.Monoid (class Monoid, mempty)
-import Data.Monoid.Additive (Additive(..))
-import Data.Newtype (class Newtype, ala, alaF, unwrap)
-import Data.Ord.Max (Max(..))
-import Data.Ratio (Ratio(..), denominator, numerator, (%))
-import Data.Ratio as Ratio
+import Data.Newtype (unwrap)
 import Data.Record as Record
 import Data.Symbol (SProxy(..))
-import Data.Traversable (scanl, traverse)
-import Data.Tuple (Tuple(..), fst, snd, uncurry)
+import Data.Traversable (traverse)
+import Data.Tuple (Tuple(Tuple), snd, uncurry)
 import Data.Unfoldable (class Unfoldable, none)
-import Data.Unfoldable as Unfoldable
-import Data.Variant (class Contractable, Variant)
-import Data.Variant as Variant
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
-import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(..), Interval, Normalized(..), _BrowserIntervals, _Index, _Interval, intervalToScreen, nPointToFrame, normPoint, viewIntervals)
+import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(CoordSys), Interval, Normalized(Normalized), _Index, _Interval, intervalToScreen, nPointToFrame, normPoint, viewIntervals)
 import Genetics.Browser.View (Pixels)
-import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, scale, translate)
+import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, scale, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
-import Type.Prelude (class IsSymbol, class RowLacks)
-import Unsafe.Coerce (unsafeCoerce)
-
-
+import Type.Prelude (class RowLacks)
 
 
 intersection :: forall k a b.

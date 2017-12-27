@@ -2,34 +2,25 @@ module Genetics.Browser.Types.Coordinates where
 
 import Prelude
 
-import Control.Alternative (empty)
-import Control.MonadPlus (guard)
 import Data.Array as Array
-import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Filterable (class Filterable, filter, filterMap)
+import Data.Filterable (class Filterable, filter)
 import Data.Foldable (length, sum)
-import Data.Foreign.Class (class Decode, class Encode)
 import Data.Int as Int
-import Data.Lens (APrism', Iso', Lens', Prism', Traversal', filtered, foldMapOf, iso, lens, preview, previewOn, prism', takeBoth, traversed, view, (^.))
-import Data.Lens as Lens
-import Data.Lens.Iso.Newtype (_Newtype)
-import Data.Lens.Record as Lens
-import Data.Lens.Types (Iso')
+import Data.Lens (Lens', Traversal', foldMapOf, lens, previewOn, traversed, view)
+import Data.Lens (filtered) as Lens
+import Data.Lens.Record (prop) as Lens
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Pair (Pair(..))
-import Data.Profunctor.Choice (fanin)
-import Data.Profunctor.Strong (fanout, splitStrong)
 import Data.Ratio (Ratio, (%))
 import Data.Ratio as Ratio
 import Data.Symbol (SProxy(..))
-import Data.Tuple (Tuple(..), fst, snd, uncurry)
-import Debug.Trace as Debug
-import Genetics.Browser.Types (Bp(..), Point)
+import Data.Tuple (Tuple(Tuple), uncurry)
+import Genetics.Browser.Types (Bp, Point)
 import Genetics.Browser.View (Pixels)
-import Unsafe.Coerce (unsafeCoerce)
+
 
 
 
@@ -138,7 +129,6 @@ _ChrSize = Lens.prop (SProxy :: SProxy "chrSize")
 type CoordSysRec i c =
   { size :: c
   , padding :: c
-  -- , intervals :: Array (Tuple i (Interval c))
   , intervals :: Array (CoordInterval i c)
   }
 
@@ -150,17 +140,17 @@ _CoordSys :: forall i c. Lens' (CoordSys i c) (CoordSysRec i c)
 _CoordSys = lens (\(CoordSys x) -> x) (\(CoordSys _) x -> CoordSys x)
 
 _BrowserIntervals :: forall i c. Traversal' (CoordSys i c) (CoordInterval i c)
-_BrowserIntervals = _CoordSys <<<
-                    Lens.prop (SProxy :: SProxy "intervals") <<<
-                    traversed
+_BrowserIntervals =   _CoordSys
+                  <<< Lens.prop (SProxy :: SProxy "intervals")
+                  <<< traversed
 
 _BrowserSize :: forall i c. Lens' (CoordSys i c) c
-_BrowserSize = _CoordSys <<<
-               Lens.prop (SProxy :: SProxy "size")
+_BrowserSize =   _CoordSys
+             <<< Lens.prop (SProxy :: SProxy "size")
 
 _BrowserPadding :: forall i c. Lens' (CoordSys i c) c
-_BrowserPadding = _CoordSys <<<
-               Lens.prop (SProxy :: SProxy "padding")
+_BrowserPadding =   _CoordSys
+                <<< Lens.prop (SProxy :: SProxy "padding")
 
 
 findIntervalFromGlobal :: forall f i c r.
@@ -177,8 +167,8 @@ findBrowserInterval :: forall i c.
                     -> c
                     -> Maybe (CoordInterval i c)
 findBrowserInterval cs x = previewOn cs
-                            (_BrowserIntervals <<<
-                             Lens.filtered
+                            (_BrowserIntervals
+                             <<< Lens.filtered
                              (inInterval x <<< view _Interval))
 
 viewIntervals :: forall i c.
@@ -187,8 +177,9 @@ viewIntervals :: forall i c.
               -> Interval c
               -> Array (CoordInterval i c)
 viewIntervals cs vw = foldMapOf inView pure cs
-  where inView = _BrowserIntervals <<<
-                 Lens.filtered (intervalsOverlap vw <<< view _Interval)
+  where inView = _BrowserIntervals
+                 <<< Lens.filtered
+                 (intervalsOverlap vw <<< view _Interval)
 
 
 globalToInterval :: forall c.
