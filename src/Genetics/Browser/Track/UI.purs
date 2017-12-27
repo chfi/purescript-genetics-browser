@@ -4,62 +4,37 @@ import Prelude
 
 import Color.Scheme.Clrs (red)
 import Control.Alt ((<|>))
-import Control.Alternative (empty, (<*>))
-import Control.Monad.Aff (Aff, launchAff)
-import Control.Monad.Aff.AVar (makeVar, putVar, tryPeekVar)
-import Control.Monad.Eff (Eff, foreachE)
+import Control.Monad.Aff (launchAff)
+import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
-import Control.Monad.Eff.Exception (error)
 import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
-import Control.Monad.Error.Class (throwError)
-import DOM.HTML.Types (HTMLElement)
-import Data.Argonaut (Json, _Array, _Number, _Object, _String)
-import Data.Array (take, zip)
-import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(..))
-import Data.Filterable (class Filterable, filter, filterMap)
-import Data.Filterable as Filterable
-import Data.Foldable (class Foldable, foldMap, for_, length, maximum, maximumBy, sum)
-import Data.Int (round)
+import Data.Filterable (filterMap)
 import Data.Int as Int
-import Data.Lens (_Left, view, (^?), (^.))
-import Data.Lens.Index (ix)
-import Data.List (List(..), (:))
-import Data.List as List
+import Data.Lens (_Left, (^?))
+import Data.List (List)
 import Data.Map (Map)
-import Data.Map as Map
-import Data.Maybe (Maybe(..), fromJust, fromMaybe)
-import Data.Monoid (mempty)
-import Data.Newtype (ala, alaF, over, unwrap, wrap)
+import Data.Maybe (Maybe(Nothing, Just), fromJust)
+import Data.Newtype (unwrap)
 import Data.Nullable (Nullable, toMaybe)
-import Data.Ord.Max (Max(..))
 import Data.Pair (Pair(..))
 import Data.Ratio (Ratio, (%))
-import Data.Ratio as Ratio
-import Data.Semigroup.Foldable (foldMap1)
-import Data.Traversable (traverse, traverse_)
-import Data.Tuple (Tuple(..), fst, snd)
-import Debug.Trace (traceShow)
-import Debug.Trace as Debug
+import Data.Tuple (Tuple(Tuple))
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Backend (GWASFeature, Gene, demoBrowser, demoLegend, drawDemo, getDataDemo, mouseChrIds)
-import Genetics.Browser.Types (Bp(..), ChrId(..), Point)
-import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(..), Interval, RelPoint, _BrowserSize, canvasToView, findBrowserInterval, intervalToGlobal, mkCoordSys, shiftIntervalBy, zoomIntervalBy)
+import Genetics.Browser.Track.Backend (demoBrowser, demoLegend, drawDemo, getDataDemo, mouseChrIds)
+import Genetics.Browser.Types (Bp, ChrId(ChrId), Point)
+import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(CoordSys), Interval, RelPoint, canvasToView, findBrowserInterval, intervalToGlobal, mkCoordSys, shiftIntervalBy, zoomIntervalBy)
 import Genetics.Browser.View (Pixels)
-import Global as Global
 import Global.Unsafe (unsafeStringify)
-import Graphics.Canvas (CanvasElement, Context2D, Transform, TranslateTransform, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth, transform, translate, withContext)
+import Graphics.Canvas (CanvasElement, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth)
 import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
 import Graphics.Drawing as Drawing
-import Math as Math
-import Network.HTTP.Affjax as Affjax
 import Partial.Unsafe (unsafePartial)
-import Unsafe.Coerce (unsafeCoerce)
+
 
 foreign import getScreenSize :: forall eff. Eff eff { w :: Number, h :: Number }
 
@@ -94,44 +69,26 @@ foreign import setViewUI :: forall eff. String -> Eff eff Unit
 type BrowserView = Interval BrowserPoint
 
 data UpdateView =
-    Scroll (Ratio BigInt)
-  | Zoom (Ratio BigInt)
-  | NoOp
+    ScrollView (Ratio BigInt)
+  | ZoomView (Ratio BigInt)
+  | ModView (BrowserView -> BrowserView)
 
 
 btnScroll :: forall r.
              Ratio BigInt
           -> Event UpdateView
-btnScroll x = const (ScrollView x) <$> buttonEvent "scrollLeft" <|>
-              const (ScrollView (negate x)) <$> buttonEvent "scrollRight"
+btnScroll x = const (ScrollView (-x)) <$> buttonEvent "scrollLeft" <|>
+              const (ScrollView   x ) <$> buttonEvent "scrollRight"
 
 btnZoom :: (Ratio BigInt)
         -> Event UpdateView
 btnZoom m = const (ZoomView (m )) <$> buttonEvent "zoomOut" <|>
             const (ZoomView (m * (BigInt.fromInt 9 % BigInt.fromInt 100))) <$> buttonEvent "zoomIn"
 
-btnUpdateView :: {scroll :: BrowserPoint, zoom :: Ratio BigInt } -> Event UpdateView
+btnUpdateView :: {scroll :: Ratio BigInt, zoom :: Ratio BigInt } -> Event UpdateView
 btnUpdateView  {scroll, zoom } = btnScroll scroll <|>
                                  btnZoom zoom <|>
-                                 (const NoOp <$> buttonEvent "redraw")
-
-scrollView :: Ratio BigInt
-           -> BrowserView
-           -> BrowserView
-scrollView = flip shiftIntervalBy
-
-
-zoomView :: Ratio BigInt
-         -> BrowserView
-         -> BrowserView
-zoomView = flip zoomIntervalBy
-
-
-normalizeView :: BrowserView
-              -> BrowserView
-              -> BrowserView
-normalizeView (Pair lhs rhs)
-              (Pair l   r  ) = Pair (max lhs l) (min r rhs)
+                                 (const (ModView id) <$> buttonEvent "redraw")
 
 
 updateViewFold :: CoordSys ChrId BrowserPoint
@@ -139,9 +96,10 @@ updateViewFold :: CoordSys ChrId BrowserPoint
                -> BrowserView
                -> BrowserView
 updateViewFold cs uv iv@(Pair l r) = case uv of
-  ZoomView   r -> zoomView   r iv
-  ScrollView r -> scrollView r iv
-  _ -> iv
+  ZoomView   x -> iv `zoomIntervalBy`  x
+  ScrollView x -> iv `shiftIntervalBy` x
+  ModView f    -> f iv
+
 
 browserViewEvent :: CoordSys ChrId BrowserPoint
                  -> BrowserView
@@ -150,6 +108,8 @@ browserViewEvent :: CoordSys ChrId BrowserPoint
 browserViewEvent cs start ev =
   Event.fold
     (\a b -> (normalizeView start) (updateViewFold cs a b)) ev start
+  where normalizeView (Pair lhs rhs) (Pair l r)
+          = Pair (max lhs l) (min r rhs)
 
 
 drawingEvent :: { min :: Number, max :: Number }
@@ -177,19 +137,6 @@ browserDrawEvent csys canvasSize vscale dat
     in map dd
 
 
-browserDrawEvent' :: CoordSys ChrId BrowserPoint
-                  -> { width :: Pixels, height :: Pixels }
-                  -> { min :: Number, max :: Number, sig :: Number }
-                  -- -> { vScaleWidth :: Pixels, legendWidth :: Pixels }
-                  -> { gwas  :: Map ChrId (List _)
-                     , annots :: Map ChrId (List _) }
-                  -> Event BrowserView
-                  -> Event (Tuple Drawing (Array Drawing))
-browserDrawEvent' csys canvasSize vscale dat
-  = let dd = demoBrowser' csys canvasSize vscale {vScaleWidth, legendWidth} red demoLegend dat
-        vScaleWidth = 40.0
-        legendWidth = 100.0
-    in map dd
 
 
 
@@ -245,15 +192,9 @@ browserDrag :: forall r.
             -> Event (Ratio BigInt)
 browserDrag w ev = f <$> ev
   where f :: _ -> _
-        f {x} = let width = BigInt.fromInt $ Int.round w.width
+        f {x} = let width' = BigInt.fromInt $ Int.round w.width
                     x' = BigInt.fromInt $ Int.round x
-                    p = x' % width
-                in Debug.trace (show p) \_ -> p
-
-
-scrollViewEvent :: Event (Ratio BigInt)
-                -> Event UpdateView
-scrollViewEvent = map ScrollView
+                in x' % width'
 
 
 foreign import canvasWheelEvent :: CanvasElement -> Event Number
@@ -268,16 +209,16 @@ scrollZoomEvent el = map (ZoomView <<< f) $ canvasWheelEvent el
 
 
 
-trackRenderProd :: Int
-                -> Array Point
-                ->
+-- trackRenderProd :: Int
+--                 -> Array Point
+--                 ->
 
 -- trackRenderCnsm ::
 
 
 
 main :: Eff _ _
-main = launchAff do
+main = launchAff $ do
 
   canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
   ctx <- liftEff $ getContext2D canvas
@@ -297,20 +238,16 @@ main = launchAff do
       chrIds = mouseChrIds
 
 
-  let dragCanvasEv :: _
-      dragCanvasEv = canvasDrag canvas
-
-      browserDragEv :: Event (Ratio BigInt)
-      browserDragEv = map negate $ browserDrag {width: w} (filterMap (_^?_Left) dragCanvasEv)
-
-      dregs :: _
-      dregs = scrollViewEvent browserDragEv
+  let browserDragEvent :: Event (Ratio BigInt)
+      browserDragEvent = map negate
+                         $ browserDrag {width: w}
+                         $ filterMap (_^?_Left) (canvasDrag canvas)
 
 
   let cs@(CoordSys s) = coordSys
 
-      scroll :: BrowserPoint
-      scroll = wrap $ BigInt.fromInt 10000000
+      scroll :: Ratio BigInt
+      scroll = one % BigInt.fromInt 20
 
       zoom :: Ratio BigInt
       zoom = one % (BigInt.fromInt 1000)
@@ -324,10 +261,10 @@ main = launchAff do
       begin = Pair zero s.size
 
       viewEvent :: Event _
-      viewEvent = browserViewEvent cs begin $
+      viewEvent = browserViewEvent cs begin
                   $  btnUpdateView {scroll, zoom}
-                 <|> dregs
-                 <|> const NoOp <$> updateBrowser.event
+                 <|> map ScrollView browserDragEvent
+                 <|> const (ModView id) <$> updateBrowser.event
                  <|> scrollZoomEvent canvas
 
 
@@ -358,7 +295,7 @@ main = launchAff do
                  <*> gClick <*> fClick <*> cClick
 
 
-  void $ liftEff $ unsafeCoerceEff $ FRP.subscribe dragCanvasEv $ case _ of
+  void $ liftEff $ unsafeCoerceEff $ FRP.subscribe (canvasDrag canvas) $ case _ of
     Left _      -> pure unit
     Right {x,y} -> scrollCanvas backCanvas canvas {x: -x, y: 0.0}
 
@@ -389,22 +326,20 @@ main = launchAff do
       score = {min: 0.125, max: 0.42, sig: 0.25}
 
   let ev' = browserDrawEvent cs browserSize score dat viewEvent
-      evCool :: Event (Tuple Drawing (Array Drawing))
-      evCool = browserDrawEvent' cs browserSize score dat viewEvent
+      -- evCool :: Event (Tuple Drawing (Array Drawing))
+      -- evCool = browserDrawEvent' cs browserSize score dat viewEvent
       bg = filled (fillColor white) $ rectangle 0.0 0.0 w h
 
   void $ liftEff $ Event.subscribe ev' (\d -> Drawing.render ctx (bg <> d))
 
-  void $ liftEff $ Event.subscribe evCool \(Tuple s d) -> do
-    Drawing.render ctx (bd <> d)
+  -- void $ liftEff $ Event.subscribe evCool \(Tuple s d) -> do
+  --   Drawing.render ctx (bd <> d)
 
 
   liftEff $ updateBrowser.push unit
 
 
-
-
-coordSys :: _
+coordSys :: CoordSys ChrId BrowserPoint
 coordSys = mkCoordSys mouseChrSizes (BigInt.fromInt 2000000)
 
 mouseChrSizes :: Array (Tuple ChrId BigInt)
