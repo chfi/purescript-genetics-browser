@@ -2,7 +2,7 @@ module Genetics.Browser.Track.Backend where
 
 import Prelude
 
-import Color (Color, black)
+import Color (Color, black, white)
 import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive, orange, purple, red, teal, yellow)
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Exception (error)
@@ -33,7 +33,7 @@ import Data.Unfoldable (class Unfoldable, none)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(CoordSys), Interval, Normalized(Normalized), _Index, _Interval, intervalToScreen, nPointToFrame, normPoint, viewIntervals)
 import Genetics.Browser.View (Pixels)
-import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, scale, translate)
+import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, scale, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
@@ -623,17 +623,25 @@ demoBrowser cs canvas vscale sizes vscaleColor legend {gwas, annots} =
   let trackCanvas = { width: canvas.width - sizes.vScaleWidth - sizes.legendWidth
                     , height: canvas.height, yOffset: 0.0 }
 
+      h = canvas.height
+
+      bg w' h' = filled (fillColor white) $ rectangle 0.0 0.0 w' h'
+
       vScale :: _ -> Drawing
-      vScale _ = drawVScale sizes.vScaleWidth canvas.height vscale vscaleColor
+      vScale _ = let w = sizes.vScaleWidth
+                 in  bg w h
+                  <> drawVScale w h vscale vscaleColor
 
       track v = translate sizes.vScaleWidth 0.0
                   $ drawDemo cs vscale trackCanvas {gwas, annots} v
 
       legendD :: _ -> Drawing
-      legendD _ = translate (canvas.width - sizes.legendWidth) 0.0
-                    $ drawLegend sizes.legendWidth canvas.height legend
+      legendD _ = let w = sizes.legendWidth
+                  in translate (canvas.width - w) 0.0
+                    $ (bg w h
+                    <> drawLegend sizes.legendWidth canvas.height legend)
 
-  in \view -> vScale view <> track view <> legendD view
+  in \view -> track view <> vScale view <> legendD view
 
 
 
