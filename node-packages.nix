@@ -265,22 +265,22 @@ let
         sha1 = "ae603b36b134bcec347b452422b0bf98d5832ec8";
       };
     };
-    "peer-id-0.10.3" = {
+    "peer-id-0.10.4" = {
       name = "peer-id";
       packageName = "peer-id";
-      version = "0.10.3";
+      version = "0.10.4";
       src = fetchurl {
-        url = "https://registry.npmjs.org/peer-id/-/peer-id-0.10.3.tgz";
-        sha512 = "20pyvmxlfkl1yd38myrs3m76vz27izpcdkpfa21di084i66rbdrwvz4k8959gmlvyi3rxrnwjd084kiqgsmv5dinc1lk0a5s0y0q0w7";
+        url = "https://registry.npmjs.org/peer-id/-/peer-id-0.10.4.tgz";
+        sha512 = "2mc2aqrpq3wgam5p0yzmxc2spajfndjl8d7xnklr7gbdzr33mxxdjf2mhfn245kxzv3lm4fj0wvbz0wji7znrcmg43v65dcjg8sc65n";
       };
     };
-    "peer-info-0.11.3" = {
+    "peer-info-0.11.4" = {
       name = "peer-info";
       packageName = "peer-info";
-      version = "0.11.3";
+      version = "0.11.4";
       src = fetchurl {
-        url = "https://registry.npmjs.org/peer-info/-/peer-info-0.11.3.tgz";
-        sha512 = "2f6nblp20hm2iwz4dklm8pg2ian245j5nvmf25wjq9p4y6djv9qx03pjylr34rrc0y3zx6pprai2v0h3lis2sbilkmvw6nqjcpp6cqp";
+        url = "https://registry.npmjs.org/peer-info/-/peer-info-0.11.4.tgz";
+        sha512 = "3d02kz4h98x0ina5g520q0p0lvsaflhdpspiw6wkbjq6zsvbb2h48lw70kl0gh0xh6nri23w2l6bxgj8nqn9ykc0ks5r7k90r36kqx7";
       };
     };
     "promisify-es6-1.0.3" = {
@@ -715,13 +715,13 @@ let
         sha1 = "0004569b37c7c74ba39c43f3ced78d1ad94140be";
       };
     };
-    "libp2p-crypto-0.10.4" = {
+    "libp2p-crypto-0.11.0" = {
       name = "libp2p-crypto";
       packageName = "libp2p-crypto";
-      version = "0.10.4";
+      version = "0.11.0";
       src = fetchurl {
-        url = "https://registry.npmjs.org/libp2p-crypto/-/libp2p-crypto-0.10.4.tgz";
-        sha512 = "3ksy2r7w8xqzkwz96nk1zvj33zingbrv9fs8rgvpfzr8lw5snpmdrfqy97w9fgw332cd07bs0b1xya5fbfq8ga13263mf78yb9jrlcc";
+        url = "https://registry.npmjs.org/libp2p-crypto/-/libp2p-crypto-0.11.0.tgz";
+        sha512 = "0a4jas5k389n96vqw47rx0p98jvvrw1h6rxk8rbsd89lqag532y4rjbs16ka6wbp8xn3y6nka8nz3hicdbgn1a3m47yjjmda4avzsln";
       };
     };
     "asn1.js-5.0.0" = {
@@ -740,6 +740,15 @@ let
       src = fetchurl {
         url = "https://registry.npmjs.org/browserify-aes/-/browserify-aes-1.1.1.tgz";
         sha512 = "0b874c5j68a6h1smd9avnc98zpjy2b4sykkhfpn97lzg7k5aq3ab0jdsmxjafifm0sa3srwscfpcl70gwnlg242p7cavnf115hd6sah";
+      };
+    };
+    "jsrsasign-8.0.4" = {
+      name = "jsrsasign";
+      packageName = "jsrsasign";
+      version = "8.0.4";
+      src = fetchurl {
+        url = "https://registry.npmjs.org/jsrsasign/-/jsrsasign-8.0.4.tgz";
+        sha1 = "3f7b8238844f126b496a7556ec9f4b511f95f861";
       };
     };
     "keypair-1.0.1" = {
@@ -1229,13 +1238,13 @@ let
         sha1 = "27584810891456a4171c8d0226441ade90cbcaeb";
       };
     };
-    "JSONStream-1.3.1" = {
+    "JSONStream-1.3.2" = {
       name = "JSONStream";
       packageName = "JSONStream";
-      version = "1.3.1";
+      version = "1.3.2";
       src = fetchurl {
-        url = "https://registry.npmjs.org/JSONStream/-/JSONStream-1.3.1.tgz";
-        sha1 = "707f761e01dae9e16f1bcf93703b78c70966579a";
+        url = "https://registry.npmjs.org/JSONStream/-/JSONStream-1.3.2.tgz";
+        sha1 = "c102371b6ec3a7cf3b847ca00c20bb0fce4c6dea";
       };
     };
     "assert-1.4.1" = {
@@ -1904,13 +1913,13 @@ let
         sha1 = "1b63be438a133e4b671cc1935197600175910d83";
       };
     };
-    "detective-4.7.0" = {
+    "detective-4.7.1" = {
       name = "detective";
       packageName = "detective";
-      version = "4.7.0";
+      version = "4.7.1";
       src = fetchurl {
-        url = "https://registry.npmjs.org/detective/-/detective-4.7.0.tgz";
-        sha512 = "2mx76wpkjn1pabajhcwl4jz35kb1vqhwba3sl90xa625z6gr9cmc8graa5lm35h56arj84jk2gdw1bhsfcl3hwg098ilz2c8x46lq72";
+        url = "https://registry.npmjs.org/detective/-/detective-4.7.1.tgz";
+        sha512 = "259c687nsmq5ni5q79081s6lpd2srwn7xlwipxwbrqkq9bq0zsvwb0n1d99jc7c6kvpm95bhvvlncfb0l4hqy6vnlb5lrhwwmwyd8qz";
       };
     };
     "stream-combiner2-1.1.1" = {
@@ -3839,9 +3848,9 @@ let
               sources."wrappy-1.0.2"
             ];
           })
-          (sources."peer-id-0.10.3" // {
+          (sources."peer-id-0.10.4" // {
             dependencies = [
-              (sources."libp2p-crypto-0.10.4" // {
+              (sources."libp2p-crypto-0.11.0" // {
                 dependencies = [
                   (sources."asn1.js-5.0.0" // {
                     dependencies = [
@@ -3877,6 +3886,7 @@ let
                       sources."safe-buffer-5.1.1"
                     ];
                   })
+                  sources."jsrsasign-8.0.4"
                   sources."keypair-1.0.1"
                   (sources."libp2p-crypto-secp256k1-0.2.2" // {
                     dependencies = [
@@ -3988,7 +3998,7 @@ let
               sources."lodash-4.17.4"
             ];
           })
-          (sources."peer-info-0.11.3" // {
+          (sources."peer-info-0.11.4" // {
             dependencies = [
               sources."lodash.uniqby-4.7.0"
             ];
@@ -4029,7 +4039,7 @@ let
         dependencies = [
           (sources."browserify-13.3.0" // {
             dependencies = [
-              (sources."JSONStream-1.3.1" // {
+              (sources."JSONStream-1.3.2" // {
                 dependencies = [
                   sources."jsonparse-1.3.1"
                 ];
@@ -4316,7 +4326,7 @@ let
               })
               (sources."module-deps-4.1.1" // {
                 dependencies = [
-                  (sources."detective-4.7.0" // {
+                  (sources."detective-4.7.1" // {
                     dependencies = [
                       sources."acorn-5.2.1"
                     ];
