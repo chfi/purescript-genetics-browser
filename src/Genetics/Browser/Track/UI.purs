@@ -9,7 +9,17 @@ import Control.Alt ((<|>))
 import Control.Monad.Aff (launchAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Exception (error)
 import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
+import Control.Monad.Error.Class (throwError)
+import DOM.Classy.Node (toNode)
+import DOM.Classy.ParentNode (toParentNode)
+import DOM.HTML (window) as DOM
+import DOM.HTML.Types (htmlDocumentToDocument) as DOM
+import DOM.HTML.Window (document) as DOM
+import DOM.Node.Node (appendChild) as DOM
+import DOM.Node.ParentNode (querySelector) as DOM
+import DOM.Node.Types (Node)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(..))
@@ -19,7 +29,7 @@ import Data.Lens (_Left, (^?), (^.))
 import Data.List (List)
 import Data.Map (Map)
 import Data.Maybe (Maybe(Nothing, Just), fromJust)
-import Data.Newtype (unwrap)
+import Data.Newtype (unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
 import Data.Ratio (Ratio, (%))
@@ -36,9 +46,10 @@ import Graphics.Canvas (CanvasElement, getCanvasElementById, getCanvasHeight, ge
 import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
 import Graphics.Drawing as Drawing
 import Partial.Unsafe (unsafePartial)
+import Unsafe.Coerce (unsafeCoerce)
 
 
-foreign import getScreenSize :: forall eff. Eff eff { w :: Number, h :: Number }
+foreign import getScreenSize :: forall eff. Eff eff { width :: Number, height :: Number }
 
 -- 1st element is a backbuffer, 2nd the one shown on screen
 foreign import scrollCanvas :: forall eff.
@@ -52,7 +63,7 @@ foreign import canvasDragImpl :: CanvasElement -> Event { during :: Nullable Poi
 
 -- creates a new CanvasElement, not attached to the DOM and thus not visible
 foreign import newCanvas :: forall eff.
-                            { w :: Number, h :: Number }
+                            { width :: Number, height :: Number }
                          -> Eff eff CanvasElement
 
 foreign import clearCanvas :: forall eff. CanvasElement -> Eff eff Unit
@@ -194,32 +205,59 @@ scrollZoomEvent el = map (ZoomView <<< f) $ canvasWheelEvent el
 
 
 
+
+type BrowserCanvas = { buffer  :: CanvasElement
+                     , track   :: CanvasElement
+                     , overlay :: CanvasElement
+                     }
+
+createBrowserCanvas :: Node
+                    -> { width :: Number, height :: Number }
+                    -> Eff _ BrowserCanvas
+createBrowserCanvas el dim = do
+  let f :: CanvasElement -> Node
+      f = unsafeCoerce
+
+  buffer  <- newCanvas dim
+  track   <- newCanvas dim
+  overlay <- newCanvas dim
+
+  _ <- DOM.appendChild el $ f track
+  _ <- DOM.appendChild el $ f overlay
+
+  pure { buffer, track, overlay }
+
+
 main :: Eff _ _
 main = launchAff $ do
 
-  canvas <- liftEff $ unsafePartial $ fromJust <$> getCanvasElementById "canvas"
-  ctx <- liftEff $ getContext2D canvas
+  {width} <- liftEff $ getScreenSize
 
-  {w,h} <- liftEff do
-    {w} <- getScreenSize
-    h <- getCanvasHeight canvas
-    _ <- setCanvasWidth (w-2.0) canvas
-    pure {w, h}
+  let height = 200.0
+      browserDimensions = {width, height}
 
-  backCanvas <- liftEff $ newCanvas {w,h}
+  bCanvas <- do
+    doc <- liftEff $ DOM.htmlDocumentToDocument
+           <$> (DOM.document =<< DOM.window)
+    cont <- liftEff $ DOM.querySelector (wrap "#browser") (toParentNode doc)
+    case cont of
+      Nothing -> throwError $ error "Could not find browser element"
+      Just c  -> liftEff $ createBrowserCanvas (toNode c) browserDimensions
 
-  let height = h
-      offset = 0.0
-      yInfo = { height, offset }
 
-      browserDragEvent :: Event (Ratio BigInt)
+  let browserDragEvent :: Event (Ratio BigInt)
       browserDragEvent = map negate
-                         $ browserDrag {width: w}
-                         $ filterMap (_^?_Left) (canvasDrag canvas)
+                         $ browserDrag {width}
+                         $ filterMap (_^?_Left) (canvasDrag bCanvas.track)
 
+
+  void $ liftEff $ unsafeCoerceEff $ FRP.subscribe (canvasDrag bCanvas.track) $ case _ of
+    Left _      -> pure unit
+    Right {x,y} -> scrollCanvas bCanvas.buffer bCanvas.track {x: -x, y: 0.0}
 
 
   updateBrowser <- liftEff $ Event.create
+
 
   let
       begin :: Interval BrowserPoint
@@ -233,10 +271,10 @@ main = launchAff $ do
                                    }
                  <|> map ScrollView browserDragEvent
                  <|> const (ModView id) <$> updateBrowser.event
-                 <|> scrollZoomEvent canvas
+                 <|> scrollZoomEvent bCanvas.track
 
-      click = clickEvent canvas
-      vClick = map (canvasToView {width: w}) click
+      click = clickEvent bCanvas.track
+      vClick = map (canvasToView {width}) click
       gClick = globalClick viewEvent vClick
       fClick = map (findBrowserInterval coordSys) gClick
 
@@ -254,16 +292,13 @@ main = launchAff $ do
                  , cClick: _
                  }
                  <$> viewEvent
-                 <*> clickEvent canvas
+                 <*> clickEvent bCanvas.track
                  <*> vClick
                  <*> gClick
                  <*> fClick
                  <*> chrClick coordSys fClick
 
 
-  void $ liftEff $ unsafeCoerceEff $ FRP.subscribe (canvasDrag canvas) $ case _ of
-    Left _      -> pure unit
-    Right {x,y} -> scrollCanvas backCanvas canvas {x: -x, y: 0.0}
 
 
   void $ liftEff $ Event.subscribe clickEvs
@@ -288,13 +323,13 @@ main = launchAff $ do
     liftEff $ updateBrowser.push unit
     pure res
 
-  let browserSize = {width: w, height: h}
-      score = {min: 0.125, max: 0.42, sig: 0.25}
+  let score = {min: 0.125, max: 0.42, sig: 0.25}
 
-  let ev' = browserDrawEvent coordSys browserSize score dat viewEvent
-      bg = filled (fillColor white) $ rectangle 0.0 0.0 w h
+  let ev' = browserDrawEvent coordSys browserDimensions score dat viewEvent
+      bg = filled (fillColor white) $ rectangle 0.0 0.0 width height
 
-  void $ liftEff $ Event.subscribe ev' (\d -> Drawing.render ctx (bg <> d))
+  -- TODO correctly render the layers
+  -- void $ liftEff $ Event.subscribe ev' (\d -> Drawing.render ctx (bg <> d))
 
 
   liftEff $ updateBrowser.push unit

@@ -18,7 +18,7 @@ exports.buttonEvent = function(id) {
 exports.getScreenSize = function() {
     var w = window.innerWidth;
     var h = window.innerHeight;
-    return { w: w, h: h };
+    return { width: w, height: h };
 };
 
 
@@ -51,6 +51,8 @@ exports.scrollCanvas = function(backCanvas) {
 exports.newCanvas = function(size) {
     return function() {
         var c = document.createElement('canvas');
+        c.width  = size.width;
+        c.height = size.height;
         return c;
     };
 };
