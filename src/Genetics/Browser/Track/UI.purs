@@ -87,10 +87,14 @@ btnZoom :: (Ratio BigInt)
 btnZoom m =  const (ZoomView    m ) <$> buttonEvent "zoomOut"
          <|> const (ZoomView  (-m)) <$> buttonEvent "zoomIn"
 
-btnUpdateView :: {scroll :: Ratio BigInt, zoom :: Ratio BigInt } -> Event UpdateView
-btnUpdateView  {scroll, zoom } =  btnScroll scroll
-                              <|> btnZoom zoom
-                              <|> (const (ModView id) <$> buttonEvent "redraw")
+btnUpdateView :: { scroll :: Ratio BigInt
+                 , zoom :: Ratio BigInt
+                 , reset :: BrowserView }
+              -> Event UpdateView
+btnUpdateView {scroll, zoom, reset}
+  =  btnScroll scroll
+ <|> btnZoom zoom
+ <|> (const (ModView (const reset)) <$> buttonEvent "reset")
 
 
 updateViewFold :: CoordSys ChrId BrowserPoint
@@ -225,6 +229,7 @@ main = launchAff $ do
       viewEvent = browserViewEvent coordSys begin
                   $  btnUpdateView { scroll: one % BigInt.fromInt 20
                                    , zoom:   one % BigInt.fromInt 20
+                                   , reset: begin
                                    }
                  <|> map ScrollView browserDragEvent
                  <|> const (ModView id) <$> updateBrowser.event
