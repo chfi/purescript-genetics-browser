@@ -618,7 +618,7 @@ demoBrowser :: forall f.
                , annots :: Map ChrId (f (Annot (minY :: Number))) }
             -> Interval BrowserPoint
             -- the drawing produced contains all 3 parts.
-            -> Drawing
+            -> { track :: Drawing, overlay :: Drawing }
 demoBrowser cs canvas vscale sizes vscaleColor legend {gwas, annots} =
   let trackCanvas = { width: canvas.width - sizes.vScaleWidth - sizes.legendWidth
                     , height: canvas.height, yOffset: 0.0 }
@@ -641,7 +641,8 @@ demoBrowser cs canvas vscale sizes vscaleColor legend {gwas, annots} =
                     $ (bg w h
                     <> drawLegend sizes.legendWidth canvas.height legend)
 
-  in \view -> track view <> vScale view <> legendD view
+  in \view -> { track: track view
+              , overlay: vScale view <> legendD view }
 
 
 
@@ -708,29 +709,6 @@ browser :: forall f.
 -- TODO sum up offsets so the translation is correct
 browser parts bView = foldMap (\p -> translate p.width 0.0 $ p.draw bView) parts
 
-demoParts :: forall f r.
-             Foldable f
-          => Filterable f
-          => CoordSys ChrId BrowserPoint
-          -> { height :: Number, width :: Number | r }
-          -> { vScaleWidth :: Number , legendWidth :: Number }
-          -> { min :: Number, max :: Number, sig :: Number }
-          -> { gwas   :: Map ChrId (f _)
-             , annots :: Map ChrId (f _) }
-          -> Array { width :: Pixels
-                   , draw :: Interval BrowserPoint -> Drawing }
-demoParts cs canvas sizes vscaling {gwas, annots} = [vScale, track, legend]
-  where trackCanvas = { width: canvas.width - sizes.vScaleWidth - sizes.legendWidth
-                      , height: canvas.height, yOffset: 0.0 }
-
-        vScale = { width: sizes.vScaleWidth
-                 , draw: \_ -> drawVScale sizes.vScaleWidth canvas.height vscaling red }
-
-        track = { width: trackCanvas.width
-                , draw: \v -> drawDemo cs vscaling trackCanvas {gwas, annots} v }
-
-        legend = { width: sizes.legendWidth
-                 , draw: \_ -> drawLegend sizes.legendWidth canvas.height demoLegend }
 
 
 

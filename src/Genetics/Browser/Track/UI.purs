@@ -4,7 +4,7 @@ module Genetics.Browser.Track.UI
 
 import Prelude
 
-import Color.Scheme.Clrs (red)
+import Color.Scheme.Clrs (black)
 import Control.Alt ((<|>))
 import Control.Monad.Aff (launchAff)
 import Control.Monad.Eff (Eff)
@@ -17,9 +17,10 @@ import DOM.Classy.ParentNode (toParentNode)
 import DOM.HTML (window) as DOM
 import DOM.HTML.Types (htmlDocumentToDocument) as DOM
 import DOM.HTML.Window (document) as DOM
+import DOM.Node.Element as DOM
 import DOM.Node.Node (appendChild) as DOM
 import DOM.Node.ParentNode (querySelector) as DOM
-import DOM.Node.Types (Node)
+import DOM.Node.Types (Element, Node)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(..))
@@ -136,9 +137,9 @@ browserDrawEvent :: CoordSys ChrId BrowserPoint
                  -> { gwas   :: Map ChrId (List _)
                     , annots :: Map ChrId (List _) }
                  -> Event BrowserView
-                 -> Event Drawing
+                 -> Event {track :: Drawing, overlay :: Drawing}
 browserDrawEvent csys canvasSize vscale dat
-  = let dd = demoBrowser csys canvasSize vscale {vScaleWidth, legendWidth} red demoLegend dat
+  = let dd = demoBrowser csys canvasSize vscale {vScaleWidth, legendWidth} black demoLegend dat
         vScaleWidth = 40.0
         legendWidth = 100.0
     in map dd
@@ -211,19 +212,36 @@ type BrowserCanvas = { buffer  :: CanvasElement
                      , overlay :: CanvasElement
                      }
 
-createBrowserCanvas :: Node
+createBrowserCanvas :: Element
                     -> { width :: Number, height :: Number }
                     -> Eff _ BrowserCanvas
 createBrowserCanvas el dim = do
-  let f :: CanvasElement -> Node
-      f = unsafeCoerce
+  let node :: CanvasElement -> Node
+      node = unsafeCoerce
+      element :: CanvasElement -> Element
+      element = unsafeCoerce
 
   buffer  <- newCanvas dim
   track   <- newCanvas dim
   overlay <- newCanvas dim
 
-  _ <- DOM.appendChild el $ f track
-  _ <- DOM.appendChild el $ f overlay
+  DOM.setId (wrap "buffer")  (element buffer)
+  DOM.setId (wrap "track")   (element track)
+  DOM.setId (wrap "overlay") (element overlay)
+
+  DOM.setAttribute "style" (   "width: "  <> show dim.width  <> "px"
+                          <> "; height: " <> show dim.height <> "px"
+                          <> "; position:relative"
+                          <> "; border: 1px solid black; display: block; margin: 0; padding: 0"
+                          ) el
+
+  let css i = "position:absolute; z-index: " <> i
+
+  DOM.setAttribute "style" (css "1") (element track)
+  DOM.setAttribute "style" (css "2") (element overlay)
+
+  _ <- DOM.appendChild (node track)   (toNode el)
+  _ <- DOM.appendChild (node overlay) (toNode el)
 
   pure { buffer, track, overlay }
 
@@ -242,16 +260,16 @@ main = launchAff $ do
     cont <- liftEff $ DOM.querySelector (wrap "#browser") (toParentNode doc)
     case cont of
       Nothing -> throwError $ error "Could not find browser element"
-      Just c  -> liftEff $ createBrowserCanvas (toNode c) browserDimensions
+      Just el -> liftEff $ createBrowserCanvas el browserDimensions
 
 
   let browserDragEvent :: Event (Ratio BigInt)
       browserDragEvent = map negate
                          $ browserDrag {width}
-                         $ filterMap (_^?_Left) (canvasDrag bCanvas.track)
+                         $ filterMap (_^?_Left) (canvasDrag bCanvas.overlay)
 
 
-  void $ liftEff $ unsafeCoerceEff $ FRP.subscribe (canvasDrag bCanvas.track) $ case _ of
+  void $ liftEff $ unsafeCoerceEff $ FRP.subscribe (canvasDrag bCanvas.overlay) $ case _ of
     Left _      -> pure unit
     Right {x,y} -> scrollCanvas bCanvas.buffer bCanvas.track {x: -x, y: 0.0}
 
@@ -329,7 +347,11 @@ main = launchAff $ do
       bg = filled (fillColor white) $ rectangle 0.0 0.0 width height
 
   -- TODO correctly render the layers
-  -- void $ liftEff $ Event.subscribe ev' (\d -> Drawing.render ctx (bg <> d))
+  trackCtx <- liftEff $ getContext2D bCanvas.track
+  overlayCtx <- liftEff $ getContext2D bCanvas.overlay
+  void $ liftEff $ Event.subscribe ev' \d -> do
+    Drawing.render trackCtx (bg <> d.track)
+    Drawing.render overlayCtx d.overlay
 
 
   liftEff $ updateBrowser.push unit
