@@ -189,7 +189,7 @@ drawData :: forall i c f a.
          => Foldable f
          => Filterable f
          => CoordSys i BrowserPoint
-         -> { width :: Pixels, height :: Pixels, yOffset :: Pixels }
+         -> { width :: Pixels, height :: Pixels }
          -> PureRenderer a
          -> Map i (f a)
          -> Interval BrowserPoint
@@ -213,7 +213,7 @@ drawData cs@(CoordSys s) canvasBox renderer dat =
       drawIvs' :: Array (Tuple _ (Array _)) -> Array Drawing
       drawIvs' = map (uncurry $ drawPureInterval canvasBox)
 
-  in \bView -> translate 0.0 (canvasBox.height - canvasBox.yOffset)
+  in \bView -> translate 0.0 canvasBox.height
                 $ scale 1.0 (-1.0)
                 $ drawIvs (toDraw bView)
 
@@ -373,11 +373,11 @@ renderersDemo s = { gwas, annots }
 ruler :: forall r r1.
          { min :: Number, max :: Number, sig :: Number }
       -> Color
-      -> { width :: Pixels, height :: Pixels, yOffset :: Pixels | r}
+      -> { width :: Pixels, height :: Pixels }
       -> Drawing
 ruler {min, max, sig} color f = outlined outline rulerDrawing
   where normY = (sig - min) / (max - min)
-        y = f.height - (normY * f.height + f.yOffset)
+        y = f.height - (normY * f.height)
         outline = outlineColor color
         rulerDrawing = Drawing.path [{x: 0.0, y}, {x: f.width, y}]
 
@@ -387,7 +387,7 @@ drawDemo :: forall f r.
          => Filterable f
          => CoordSys _ _
          -> { min :: Number, max :: Number, sig :: Number }
-         -> { width :: Pixels, height :: Pixels, yOffset :: Pixels }
+         -> { width :: Pixels, height :: Pixels }
          -> { gwas   :: Map ChrId (f (GWASFeature ()))
             , annots :: Map ChrId (f (Annot (minY :: Number))) }
          -> Interval BrowserPoint
@@ -481,12 +481,14 @@ demoLegend =
   , mkIcon purple "boop"
   ]
 
+
               -- the first 2 are used by all parts of the browser
 demoBrowser :: forall f.
                Foldable f
             => Filterable f
             => CoordSys ChrId BrowserPoint
             -> { width :: Pixels, height :: Pixels }
+            -> Pixels
             -- this by the vertical scale and the tracks
             -> { min :: Number, max :: Number, sig :: Number }
             -- these define the width of the non-track parts of the browser;
@@ -500,30 +502,34 @@ demoBrowser :: forall f.
             -- finally, used by the main track
             -> { gwas :: Map ChrId (f (GWASFeature ()))
                , annots :: Map ChrId (f (Annot (minY :: Number))) }
-            -> Interval BrowserPoint
+            -> BrowserView
             -- the drawing produced contains all 3 parts.
             -> { track :: Drawing, overlay :: Drawing }
-demoBrowser cs canvas vscale sizes vscaleColor legend {gwas, annots} =
-  let trackCanvas = { width: canvas.width - sizes.vScaleWidth - sizes.legendWidth
-                    , height: canvas.height, yOffset: 0.0 }
+demoBrowser cs canvas vpadding vscale sizes vscaleColor legend {gwas, annots} =
+  let height = canvas.height - 2.0 * vpadding
+      width  = canvas.width
 
-      h = canvas.height
+      trackCanvas = { width: canvas.width - sizes.vScaleWidth - sizes.legendWidth
+                    , height }
 
       bg w' h' = filled (fillColor white) $ rectangle 0.0 0.0 w' h'
 
+      -- TODO unify vertical offset by padding further; do it as late as possible
+
       vScale :: _ -> Drawing
       vScale _ = let w = sizes.vScaleWidth
-                 in  bg w h
-                  <> drawVScale w h vscale vscaleColor
+                 in  translate zero vpadding
+                   $ bg w height
+                  <> drawVScale w height vscale vscaleColor
 
-      track v = translate sizes.vScaleWidth 0.0
+      track v = translate sizes.vScaleWidth vpadding
                   $ drawDemo cs vscale trackCanvas {gwas, annots} v
 
       legendD :: _ -> Drawing
       legendD _ = let w = sizes.legendWidth
-                  in translate (canvas.width - w) 0.0
-                    $ (bg w h
-                    <> drawLegend sizes.legendWidth canvas.height legend)
+                  in translate (canvas.width - w) vpadding
+                    $ bg w height
+                   <> drawLegend sizes.legendWidth canvas.height legend
 
   in \view -> { track: track view
               , overlay: vScale view <> legendD view }

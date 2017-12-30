@@ -4,7 +4,7 @@ module Genetics.Browser.Track.UI
 
 import Prelude
 
-import Color.Scheme.Clrs (black)
+import Color (black)
 import Control.Alt ((<|>))
 import Control.Monad.Aff (launchAff)
 import Control.Monad.Eff (Eff)
@@ -38,7 +38,7 @@ import Data.Tuple (Tuple(Tuple))
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Backend (demoBrowser, demoLegend, drawDemo, getDataDemo)
+import Genetics.Browser.Track.Backend (demoBrowser, demoLegend, getDataDemo)
 import Genetics.Browser.Types (Bp, ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys, Interval, RelPoint, _BrowserSize, canvasToView, findBrowserInterval, intervalToGlobal, mkCoordSys, shiftIntervalBy, zoomIntervalBy)
 import Genetics.Browser.View (Pixels)
@@ -132,14 +132,15 @@ browserViewEvent cs start ev =
 
 browserDrawEvent :: CoordSys ChrId BrowserPoint
                  -> { width :: Pixels, height :: Pixels }
+                 -> Pixels
                  -> { min :: Number, max :: Number, sig :: Number }
                  -- -> { vScaleWidth :: Pixels, legendWidth :: Pixels }
                  -> { gwas   :: Map ChrId (List _)
                     , annots :: Map ChrId (List _) }
                  -> Event BrowserView
                  -> Event {track :: Drawing, overlay :: Drawing}
-browserDrawEvent csys canvasSize vscale dat
-  = let dd = demoBrowser csys canvasSize vscale {vScaleWidth, legendWidth} black demoLegend dat
+browserDrawEvent csys canvasSize vpadding vscale dat
+  = let dd = demoBrowser csys canvasSize vpadding vscale {vScaleWidth, legendWidth} black demoLegend dat
         vScaleWidth = 40.0
         legendWidth = 100.0
     in map dd
@@ -343,7 +344,7 @@ main = launchAff $ do
 
   let score = {min: 0.125, max: 0.42, sig: 0.25}
 
-  let ev' = browserDrawEvent coordSys browserDimensions score dat viewEvent
+  let ev' = browserDrawEvent coordSys browserDimensions 10.0 score dat viewEvent
       bg = filled (fillColor white) $ rectangle 0.0 0.0 width height
 
   -- TODO correctly render the layers
