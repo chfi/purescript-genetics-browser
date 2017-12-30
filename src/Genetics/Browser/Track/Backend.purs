@@ -39,6 +39,8 @@ import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class RowLacks)
 
+type BrowserView = Interval BrowserPoint
+
 
 intersection :: forall k a b.
                 Ord k
@@ -71,111 +73,47 @@ zipMapsWith f a b = uncurry f <$> zipMaps a b
 type ChrCtx r = Map ChrId (Record r)
 
 
--- A renderer draws a single value to a normalized "canvas",
--- i.e. the whole chromosome is located in x = (0.0, 1.0),
--- and the whole track height in y = (0.0, 1.0).
--- It can fail if the given feature for some reason cannot be rendered,
--- either because the feature lacks information, or because the context lacks something.
-
-
-type Drawable a r      = ( draw  :: a -> Drawing | r )
-type Placeable a r     = ( place :: a -> Maybe (Normalized Point) | r )
-type Scorable a r      = ( score :: a -> Number | r )
--- `Categorizable` means there's a categorical/qualitative difference between
--- some members of `a`. e.g. a bunch of SNPs in a GWAS track are not,
--- since the only difference is really their position and value (Chr could arguably be categorized, but eh),
--- but annotations could be, where the categories are e.g. what kind of trait
--- for a concrete example, in https://raw.githubusercontent.com/genetics-statistics/GEMMA/master/cfw.gif
--- the annotation categories would be "Muscle or bone", "Other physiological trait", "Behavior".
-type Categorizable a r = ( categorize :: a -> String | r )
-
-type Renderable a r = Drawable  a (Placeable a r)
-type Scaleable  a r = Placeable a (Scorable a r)
-
-emptyTrack :: forall a.
-              Record
-              (Drawable a
-               (Placeable a
-                (Scorable a
-                 (Categorizable a ()))))
-emptyTrack = { draw: const mempty
-             , place: const Nothing
-             , score: const zero
-             , categorize: const mempty
-             }
-
-{-
-idea:
-configurations for a track define how these various "actions"
-are performed, i.e. how a thing is drawn, placed, categorized, etc.
-
-parsing a configuration, then, produces a list of
-Variants:
-  List (Variant (Drawable (Placeable _))) etc.
-
-then we can apply each variant individually to automate the
-process of mapping a "track" or w/e to the various browser parts,
-simply returning mempty (since it's all a Drawing in the end, for now)
-if a given track does not support some action.
-
-problem: lose help from the type system. need to think more
-  is this a problem?
-  only (obvious) risk is forgetting to implement one of the things...
-  which is pretty obvious when it happens, hopefully why, too.
-  becomes even less of a problem when configuration is added;
-  we still have the type system's help for actually typing each of
-  the actions individually.
--}
-
-
-render :: forall f a r.
-          Filterable f
-       => Record (Renderable a r)
-       -> f a
-       -> f { drawing :: Drawing, point :: Normalized Point }
-render { draw, place } = filterMap f
-  where f a = do
-          point <- place a
-          let drawing = draw a
-          pure { drawing, point }
-
-scaledPoint :: forall a r r'.
-               Record (Scaleable a r)
-            -> { min :: Number, max :: Number | r' }
-            -> a
-            -> Maybe (Normalized Point)
-scaledPoint { place, score } { min, max } a = do
-  (Normalized pt) <- place a
-  normPoint $ pt { y = (pt.y - min) / (max - min) }
-
-
-mkLegend :: forall a r f.
-            Functor f
-         => Record (Categorizable a (Drawable a r))
-         -> f a
-         -> f { text :: String, icon :: Drawing }
-mkLegend { categorize, draw } = map f
-  where f a = let text = categorize a
-                  icon = draw a
-              in { text, icon }
-
-
-
-
-
-
 type PureRenderer a = a -> Maybe { drawing :: Drawing
                                  , point   :: Normalized Point
                                  }
 
--- TODO Instead of tag & combine, we can just use Variant.match & Record.Builder!
--- tagRenderer :: forall a sym r1 r2.
--- combineRenderers :: forall r1 r2 r3.
-
-
 type GWASFeature r = { score :: Number
                      , pos :: Bp
                      , chrId :: ChrId | r }
+
+gwasDraw :: forall a. Color -> a -> Drawing
+gwasDraw color =
+  let r = 2.2
+      c = circle 0.0 0.0 r
+      out = outlined (outlineColor color) c
+      fill = filled (fillColor color) c
+  in const $ out <> fill
+
+
+gwasPlace :: forall a r.
+             { min :: Number, max :: Number | r }
+          -> { chrSize :: a -> Maybe Bp
+             , pos     :: a -> Bp
+             , score   :: a -> Number }
+          -> a
+          -> Maybe (Normalized Point)
+gwasPlace {min, max} get a = do
+  size <- get.chrSize a
+  let x = unwrap $ (get.pos a) / size
+      y = (get.score a - min) / (max - min)
+  normPoint {x, y}
+
+
+gwasRenderer :: forall r rf.
+                { min :: Number, max :: Number | r }
+             -> Array (GWASFeature rf)
+             -> { drawing :: Drawing
+                , points :: Array (Normalized Point) }
+gwasRenderer vs gwas = { drawing, points }
+  where get = { chrSize: \a -> Map.lookup a.chrId mouseChrs
+              , pos: _.pos, score: _.score }
+        drawing = gwasDraw red unit
+        points = filterMap (gwasPlace vs get) gwas
 
 mkGwasRenderer :: forall m rf rctx.
                   MonadReader (ChrCtx (size :: Bp, color :: Color | rctx)) m
@@ -278,40 +216,6 @@ drawData cs@(CoordSys s) canvasBox renderer dat =
   in \bView -> translate 0.0 (canvasBox.height - canvasBox.yOffset)
                 $ scale 1.0 (-1.0)
                 $ drawIvs (toDraw bView)
-
-
-drawData' :: forall i c f a.
-             Ord i
-          => Foldable f
-          => Unfoldable f
-          => Filterable f
-          => CoordSys i BrowserPoint
-          -> { width :: Pixels, height :: Pixels, yOffset :: Pixels }
-          -> PureRenderer a
-          -> Map i (f a)
-          -> Interval BrowserPoint
-          -> f Drawing
-drawData' cs@(CoordSys s) canvasBox renderer dat =
-  let drawings :: Map i (f { drawing :: _, point :: _ })
-      drawings = map (pureRender renderer) dat
-
-      f :: Interval _  -> CoordInterval i _ -> { width :: _, offset :: _ }
-      f iv c = (intervalToScreen canvasBox iv) (c^._Interval)
-
-      g :: CoordInterval i _ -> f { drawing :: _, point :: _ }
-      g c = fromMaybe none $ Map.lookup (c^._Index) drawings
-
-      toDraw :: Interval BrowserPoint -> f (Tuple _ (f _))
-      toDraw iv = (\x -> Tuple (f iv x) (g x)) <$>
-                  (Array.toUnfoldable $ viewIntervals cs iv)
-
-      drawIvs :: f (Tuple _ (f _)) -> f Drawing
-      drawIvs = map (uncurry $ drawPureInterval canvasBox)
-
-  in \bView -> translate 0.0 (canvasBox.height - canvasBox.yOffset)
-                <<< scale 1.0 (-1.0)
-                <$> drawIvs (toDraw bView)
-
 
 
 shiftRendererMinY :: forall rf.
@@ -497,26 +401,6 @@ drawDemo cs s canvasBox {gwas, annots} =
 
 
 
-drawDemo' :: forall f r.
-             Foldable f
-          => Unfoldable f
-          => Filterable f
-          => CoordSys _ _
-          -> { min :: Number, max :: Number, sig :: Number }
-          -> { width :: Pixels, height :: Pixels, yOffset :: Pixels }
-          -> { gwas   :: Map ChrId (f (GWASFeature ()))
-             , annots :: Map ChrId (f (Annot (minY :: Number))) }
-          -> Interval BrowserPoint
-          -> Tuple Drawing (Array Drawing)
-drawDemo' cs s canvasBox {gwas, annots} =
-  let renderers = renderersDemo s
-      ruler' = ruler s red
-      drawGwas   = Array.fromFoldable <$> drawData' cs canvasBox renderers.gwas gwas
-      drawAnnots = drawData cs canvasBox renderers.annots annots
-  in \view -> Tuple (drawAnnots view <> ruler' canvasBox) (drawGwas view)
-
-
-
 {-
 TODO
 there is currently no connection between the vertical scale's
@@ -643,71 +527,6 @@ demoBrowser cs canvas vscale sizes vscaleColor legend {gwas, annots} =
 
   in \view -> { track: track view
               , overlay: vScale view <> legendD view }
-
-
-
-demoBrowser' :: forall f.
-                Foldable f
-             => Unfoldable f
-             => Filterable f
-             => CoordSys ChrId BrowserPoint
-             -> { width :: Pixels, height :: Pixels }
-             -- this by the vertical scale and the tracks
-             -> { min :: Number, max :: Number, sig :: Number }
-             -- these define the width of the non-track parts of the browser;
-             -- the browser takes up the remaining space.
-             -> { vScaleWidth :: Pixels
-                , legendWidth :: Pixels }
-             -- vScale only
-             -> Color
-             -- to be drawn in the legend on the RHS
-             -> Array { text :: String, icon :: Drawing }
-             -- finally, used by the main track
-             -> { gwas :: Map ChrId (f (GWASFeature ()))
-                , annots :: Map ChrId (f (Annot (minY :: Number))) }
-             -> Interval BrowserPoint
-             -- the drawing produced contains all 3 parts.
-             -> Tuple Drawing (Array Drawing)
-demoBrowser' cs canvas vscale sizes vscaleColor legend {gwas, annots} =
-  let trackCanvas = { width: canvas.width - sizes.vScaleWidth - sizes.legendWidth
-                    , height: canvas.height, yOffset: 0.0 }
-
-      vScale :: _ -> Drawing
-      vScale _ = drawVScale sizes.vScaleWidth canvas.height vscale vscaleColor
-
-      track :: _ -> _
-      track v = let f = translate sizes.vScaleWidth 0.0
-                in bimap f (map f) $ drawDemo' cs vscale trackCanvas {gwas, annots} v
-
-      legendD :: _ -> Drawing
-      legendD _ = translate (canvas.width - sizes.legendWidth) 0.0
-                    $ drawLegend sizes.legendWidth canvas.height legend
-
-  in \view -> let (Tuple bg ds) = track view
-              in Tuple (vScale view <> bg <> legendD view) ds
-
-
-
--- the browser as an entire thing can be split into
--- some functions for drawing it given a current view;
--- this is because (for now) the only state that can
--- change is the view.
--- components of the browser can thus simply be provided
--- as a foldable containing the components.
-
--- More generally, this is some kinda comonad, certainly
--- contravariant, and it should be possible to use those
--- abstractions to construct a nice interface!
--- applicative something.
-browser :: forall f.
-           Foldable f
-        => Filterable f
-        => f { width :: Pixels
-             , draw  :: Interval BrowserPoint -> Drawing}
-        -> Interval BrowserPoint
-        -> Drawing
--- TODO sum up offsets so the translation is correct
-browser parts bView = foldMap (\p -> translate p.width 0.0 $ p.draw bView) parts
 
 
 
