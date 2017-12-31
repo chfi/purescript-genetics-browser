@@ -421,22 +421,28 @@ drawVScale width height vs col =
   let hPad = width  / 5.0
       vPad = height / 10.0
       x = width / 2.0
-      y1 = vPad
-      y2 = height - vPad
+
+      y1 = 0.0
+      y2 = height
+
       n = (_ * 0.1) <<< Int.toNumber <$> (0 .. 10)
+
       p = Drawing.path [{x, y:y1}, {x, y:y2}]
-      bar w y = Drawing.path [{x:x-w, y}, {x:x+w, y}]
+
+      bar w y = Drawing.path [{x:x-w, y}, {x, y}]
+
       ps = foldMap (\i -> bar
-                          (if i == 0.0 || i == 1.0 then 4.0 else 2.0)
+                          (if i == 0.0 || i == 1.0 then 8.0 else 3.0)
                           (y1 + i*(y2-y1))) n
 
       ft = font sansSerif 10 mempty
-      mkT y = Drawing.text ft (x+12.0) y (fillColor black)
-      top = mkT y1 $ show vs.max
-      btm = mkT y2 $ show vs.min
+      mkT y = Drawing.text ft (x-12.0) y (fillColor black)
 
-  in outlined (outlineColor col <> lineWidth 2.0) (p <> ps) <>
-     top <> btm
+      topLabel = mkT (y1-(0.5*vPad)) $ show vs.max
+      btmLabel = mkT (y2+vPad) $ show vs.min
+
+  in outlined (outlineColor col <> lineWidth 2.0) (p <> ps)
+  <> topLabel <> btmLabel
 
 
 drawLegendItem :: Number
@@ -587,13 +593,17 @@ mouseChrs = Map.fromFoldable $ Array.zip mouseChrIds $
             , (Bp 9174469.0)
             ]
 
+
 mouseColors :: ChrCtx (color :: Color)
-mouseColors = Map.fromFoldable $ Array.zip mouseChrIds $ map (\x -> {color: x})
-              [ navy, blue, aqua, teal, olive
-              , green, lime, yellow, orange, red
-              , maroon, fuchsia, purple, navy, blue
-              , aqua, teal, olive, green, lime
-              , yellow ]
+mouseColors = Map.fromFoldable $ map (\x -> Tuple x {color: navy}) mouseChrIds
+
+mouseColors' :: ChrCtx (color :: Color)
+mouseColors' = Map.fromFoldable $ Array.zip mouseChrIds $ map (\x -> {color: x})
+               [ navy, blue, aqua, teal, olive
+               , green, lime, yellow, orange, red
+               , maroon, fuchsia, purple, navy, blue
+               , aqua, teal, olive, green, lime
+               , yellow ]
 
 
 mouseChrCtx :: ChrCtx (size :: Bp)

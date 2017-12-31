@@ -29,7 +29,7 @@ import Data.Int as Int
 import Data.Lens (_Left, (^?), (^.))
 import Data.List (List)
 import Data.Map (Map)
-import Data.Maybe (Maybe(Nothing, Just), fromJust)
+import Data.Maybe (Maybe(Nothing, Just), fromJust, fromMaybe)
 import Data.Newtype (unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
@@ -181,7 +181,7 @@ canvasDrag :: CanvasElement -> Event (Either Point Point)
 canvasDrag el = f <$> canvasDragImpl el
   where f ev = case toMaybe ev.during of
           Just p  -> Right p
-          Nothing -> Left $ unsafePartial $ fromJust (toMaybe ev.total)
+          Nothing -> Left $ fromMaybe {x:zero,y:zero} (toMaybe ev.total)
 
 
 browserDrag :: forall r.
@@ -202,7 +202,7 @@ scrollZoomEvent el = map (ZoomView <<< f) $ canvasWheelEvent el
   where f :: Number -> Ratio BigInt
         f dY = let d' = 10000.0
                    n = BigInt.fromInt $ Int.round $ dY * d'
-                   d = BigInt.fromInt $ Int.round $ 10000.0
+                   d = BigInt.fromInt $ Int.round $ d' * 100.0
                in n % d
 
 
@@ -290,9 +290,9 @@ main = launchAff $ do
                                    }
                  <|> map ScrollView browserDragEvent
                  <|> const (ModView id) <$> updateBrowser.event
-                 <|> scrollZoomEvent bCanvas.track
+                 <|> scrollZoomEvent bCanvas.overlay
 
-      click = clickEvent bCanvas.track
+      click = clickEvent bCanvas.overlay
       vClick = map (canvasToView {width}) click
       gClick = globalClick viewEvent vClick
       fClick = map (findBrowserInterval coordSys) gClick
@@ -311,7 +311,7 @@ main = launchAff $ do
                  , cClick: _
                  }
                  <$> viewEvent
-                 <*> clickEvent bCanvas.track
+                 <*> click
                  <*> vClick
                  <*> gClick
                  <*> fClick
@@ -344,7 +344,7 @@ main = launchAff $ do
 
   let score = {min: 0.125, max: 0.42, sig: 0.25}
 
-  let ev' = browserDrawEvent coordSys browserDimensions 10.0 score dat viewEvent
+  let ev' = browserDrawEvent coordSys browserDimensions 25.0 score dat viewEvent
       bg = filled (fillColor white) $ rectangle 0.0 0.0 width height
 
   -- TODO correctly render the layers
