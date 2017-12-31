@@ -31,7 +31,7 @@ import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple), snd, uncurry)
 import Data.Unfoldable (class Unfoldable, none)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
-import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(CoordSys), Interval, Normalized(Normalized), _Index, _Interval, intervalToScreen, nPointToFrame, normPoint, viewIntervals)
+import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(CoordSys), Interval, Normalized(Normalized), _BrowserIntervals, _CoordSys, _Index, _Interval, intervalToScreen, nPointToFrame, normPoint, viewIntervals)
 import Genetics.Browser.View (Pixels)
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, scale, translate)
 import Graphics.Drawing as Drawing
@@ -181,6 +181,36 @@ drawPureInterval {height} {width, offset} = foldMap render'
   where render' {drawing, point} =
           let {x,y} = nPointToFrame width height $ point
           in translate (x + offset) y drawing
+
+
+
+
+drawFrames :: forall i a.
+              Ord i
+           => CoordSys i BrowserPoint
+           -> { width :: Pixels, height :: Pixels }
+           -> Map i (Array { drawing :: _, point :: _ })
+           -> Interval BrowserPoint
+           -> Drawing
+drawFrames cs@(CoordSys s) canvasBox drawings =
+  let f :: Interval _  -> CoordInterval i _ -> { width :: _, offset :: _ }
+      f iv c = (intervalToScreen canvasBox iv) (c^._Interval)
+
+      g :: CoordInterval i _ -> Array { drawing :: _, point :: _ }
+      g c = fromMaybe [] $ Map.lookup (c^._Index) drawings
+
+      toDraw :: Interval BrowserPoint -> Array (Tuple _ (Array _))
+      toDraw iv = (\x -> Tuple (f iv x) (g x)) <$> (viewIntervals cs iv)
+
+      drawIvs :: Array (Tuple _ (Array _)) -> Drawing
+      drawIvs = foldMap (uncurry $ drawPureInterval canvasBox)
+
+      drawIvs' :: Array (Tuple _ (Array _)) -> Array Drawing
+      drawIvs' = map (uncurry $ drawPureInterval canvasBox)
+
+  in \bView -> translate 0.0 canvasBox.height
+                $ scale 1.0 (-1.0)
+                $ drawIvs (toDraw bView)
 
 
 
@@ -382,6 +412,21 @@ ruler {min, max, sig} color f = outlined outline rulerDrawing
         rulerDrawing = Drawing.path [{x: 0.0, y}, {x: f.width, y}]
 
 
+chrLabels :: forall c.
+             CoordSys ChrId c
+          -> Map ChrId (Array { drawing :: _, point :: _ })
+chrLabels cs = Map.fromFoldable results
+  where mkLabel :: ChrId -> _
+        mkLabel chr = { drawing: chrText chr, point: Normalized {x: 1.0, y: -0.1} }
+
+        font' = font sansSerif 12 mempty
+
+        chrText :: ChrId -> Drawing
+        chrText chr = scale 1.0 (-1.0)
+                    $ Drawing.text font' zero zero (fillColor black) (unwrap chr)
+
+        results :: Array _
+        results = map (\x -> Tuple (x^._Index) [mkLabel (x^._Index)]) $ cs^._BrowserIntervals
 drawDemo :: forall f r.
             Foldable f
          => Filterable f
@@ -531,13 +576,18 @@ demoBrowser cs canvas vpadding vscale sizes vscaleColor legend {gwas, annots} =
       track v = translate sizes.vScaleWidth vpadding
                   $ drawDemo cs vscale trackCanvas {gwas, annots} v
 
+
+      chrs :: _ -> Drawing
+      chrs v = translate zero vpadding
+                 $ drawFrames cs trackCanvas (chrLabels cs) v
+
       legendD :: _ -> Drawing
       legendD _ = let w = sizes.legendWidth
                   in translate (canvas.width - w) vpadding
                     $ bg w height
                    <> drawLegend sizes.legendWidth canvas.height legend
 
-  in \view -> { track: track view
+  in \view -> { track: track view <> chrs view
               , overlay: vScale view <> legendD view }
 
 
