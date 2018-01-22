@@ -25,6 +25,7 @@ import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (unwrap)
+import Data.Profunctor.Strong (fanout)
 import Data.Record as Record
 import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse)
@@ -38,6 +39,7 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class RowLacks)
+import Unsafe.Coerce (unsafeCoerce)
 
 type BrowserView = Interval BrowserPoint
 
@@ -71,6 +73,40 @@ zipMapsWith f a b = uncurry f <$> zipMaps a b
 
 
 type ChrCtx r = Map ChrId (Record r)
+
+-- type Dimensions x = x -> BrowserView -> { x :: Pixels, width :: Pixels }
+
+type ToPixels feature = feature -> BrowserView -> Interval Pixels
+
+type Draw feature = feature -> Interval Pixels -> Drawing
+
+
+geneGlyph :: forall r a.
+            Color
+         -> { min :: BrowserPoint  -- TODO should be `Bp` which gets transformed to `BrowserPoint`s
+            , max :: BrowserPoint | r }
+         -> (BrowserPoint -> Pixels)
+         ->
+geneGlyph color {min, max} scaler =
+  let width = scaler (max - min)
+      rect = rectangle 0.0 0.0 width 10.0
+      out = outlined (outlineColor color) rect
+      fill = filled (fillColor color) rect
+  in out <> fill
+
+
+placeWide :: forall a r.
+             { chrSize :: a -> Maybe Bp
+             , min     :: a -> Bp
+             , max     :: a -> Bp
+             | r }
+          -> a
+          -> Maybe (Interval (Normalized Number))
+placeWide {min, max} get a = do
+  size <- get.chrSize a
+  let l = unwrap $ (get.min a) / size
+      r = unwrap $ (get.min a) / size
+  pure $ Normalized <$> Pair l r
 
 
 type PureRenderer a = a -> Maybe { drawing :: Drawing
@@ -427,6 +463,30 @@ chrLabels cs = Map.fromFoldable results
 
         results :: Array _
         results = map (\x -> Tuple (x^._Index) [mkLabel (x^._Index)]) $ cs^._BrowserIntervals
+
+        results' :: Traversal' (CoordSys ChrId c) ChrId
+        results' = _BrowserIntervals <<< traversed <<< _Index
+
+        test :: forall r. Monoid r => Fold' r _ _
+        test = results' <<< (to (fanout id mkLabel))
+
+        output :: _
+        output = Map.fromFoldable $ (foldMapOf test pure cs :: Array _)
+
+        -- xxx :: Traversal' (CoordSys ChrId _) ChrId
+        -- xxx = results' <<< _Index
+
+        -- results2 :: _ -> Array _
+        -- results2 = traverseOf results' pure
+
+        -- results3 :: _ -> Array _
+        -- results3 = foldMapOf results' pure
+
+        -- results4 :: _
+        -- results4 = foldMapOf results'
+                     -- (fanout id chrText)
+
+
 drawDemo :: forall f r.
             Foldable f
          => Filterable f

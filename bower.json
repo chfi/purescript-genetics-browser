@@ -49,7 +49,8 @@
     "purescript-rationals": "^4.0.0",
     "purescript-bigints": "^3.2.0",
     "purescript-pairs": "^5.0.0",
-    "purescript-dom-classy": "^2.1.0"
+    "purescript-dom-classy": "^2.1.0",
+    "purescript-pairing": "^4.0.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0",

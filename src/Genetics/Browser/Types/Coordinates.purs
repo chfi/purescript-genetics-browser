@@ -139,10 +139,9 @@ newtype CoordSys i c =
 _CoordSys :: forall i c. Lens' (CoordSys i c) (CoordSysRec i c)
 _CoordSys = lens (\(CoordSys x) -> x) (\(CoordSys _) x -> CoordSys x)
 
-_BrowserIntervals :: forall i c. Traversal' (CoordSys i c) (CoordInterval i c)
+_BrowserIntervals :: forall i c. Lens' (CoordSys i c) (Array (CoordInterval i c))
 _BrowserIntervals =   _CoordSys
                   <<< Lens.prop (SProxy :: SProxy "intervals")
-                  <<< traversed
 
 _BrowserSize :: forall i c. Lens' (CoordSys i c) c
 _BrowserSize =   _CoordSys
@@ -168,6 +167,7 @@ findBrowserInterval :: forall i c.
                     -> Maybe (CoordInterval i c)
 findBrowserInterval cs x = previewOn cs
                             (_BrowserIntervals
+                             <<< traversed
                              <<< Lens.filtered
                              (inInterval x <<< view _Interval))
 
@@ -178,6 +178,7 @@ viewIntervals :: forall i c.
               -> Array (CoordInterval i c)
 viewIntervals cs vw = foldMapOf inView pure cs
   where inView = _BrowserIntervals
+                 <<< traversed
                  <<< Lens.filtered
                  (intervalsOverlap vw <<< view _Interval)
 
