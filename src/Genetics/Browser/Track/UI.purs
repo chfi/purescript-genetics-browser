@@ -134,15 +134,13 @@ browserDrawEvent :: CoordSys ChrId BrowserPoint
                  -> { width :: Pixels, height :: Pixels }
                  -> Pixels
                  -> { min :: Number, max :: Number, sig :: Number }
-                 -- -> { vScaleWidth :: Pixels, legendWidth :: Pixels }
+                 -> { vScaleWidth :: Pixels, legendWidth :: Pixels }
                  -> { gwas   :: Map ChrId (List _)
                     , annots :: Map ChrId (List _) }
                  -> Event BrowserView
                  -> Event {track :: Drawing, overlay :: Drawing}
-browserDrawEvent csys canvasSize vpadding vscale dat
-  = let dd = demoBrowser csys canvasSize vpadding vscale {vScaleWidth, legendWidth} black demoLegend dat
-        vScaleWidth = 40.0
-        legendWidth = 100.0
+browserDrawEvent csys canvasSize vpadding vscale uiSize dat
+  = let dd = demoBrowser csys canvasSize vpadding vscale uiSize black demoLegend dat
     in map dd
 
 
@@ -254,6 +252,9 @@ main = launchAff $ do
 
   let height = 200.0
       browserDimensions = {width, height}
+      vScaleWidth = 40.0
+      legendWidth = 100.0
+      trackWidth = width - (vScaleWidth + legendWidth)
 
   bCanvas <- do
     doc <- liftEff $ DOM.htmlDocumentToDocument
@@ -266,7 +267,7 @@ main = launchAff $ do
 
   let browserDragEvent :: Event (Ratio BigInt)
       browserDragEvent = map negate
-                         $ browserDrag {width}
+                         $ browserDrag {width: trackWidth}
                          $ filterMap (_^?_Left) (canvasDrag bCanvas.overlay)
 
 
@@ -344,7 +345,13 @@ main = launchAff $ do
 
   let score = {min: 0.125, max: 0.42, sig: 0.25}
 
-  let ev' = browserDrawEvent coordSys browserDimensions 25.0 score dat viewEvent
+  let ev' = browserDrawEvent
+              coordSys
+              browserDimensions
+              25.0 score
+              {vScaleWidth, legendWidth}
+              dat
+              viewEvent
       bg = filled (fillColor white) $ rectangle 0.0 0.0 width height
 
   -- TODO correctly render the layers
