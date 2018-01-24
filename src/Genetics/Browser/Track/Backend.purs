@@ -176,9 +176,7 @@ annotDraw =
             c = circle zero zero rad
             out  = outlined (outlineColor maroon <> lineWidth 3.0) c
             fill = filled   (fillColor red) c
-            -- the canvas is flipped so y-axis increases upward, need to flip the text too
-            text' = scale 1.0 (-1.0)
-                    $ Drawing.text font' (7.5) (2.5) (fillColor black) f.name
+            text' = Drawing.text font' (7.5) (2.5) (fillColor black) f.name
         in out <> fill <> text'
   in renderer
 
@@ -193,7 +191,6 @@ annotPoint = do
 
         let x = unwrap $ f.pos / size
             y = 0.0
-            -- the canvas is flipped so y-axis increases upward, need to flip the text too
 
         normPoint {x, y}
 
@@ -256,9 +253,10 @@ drawNeue :: forall f r a.
 drawNeue {height} {drawing, point} {width, offset} =
   -- TODO this can be cleaned up quite a bit more
   fromMaybe mempty <<< foldMap \a -> do
-    p <- point a
-    let {x,y} = nPointToFrame width height p
-    pure $ translate (x + offset) y (drawing a)
+    (Normalized {x,y}) <- point a
+                                     -- Flipping y-axis so it increases upward
+    let p = nPointToFrame width height $ Normalized {x, y: 1.0 - y}
+    pure $ translate (p.x + offset) p.y (drawing a)
 
 
 viewportIntervals :: forall i a r.
@@ -286,6 +284,32 @@ renderNeue :: forall f i a r.
            -> Map i (f a)
            -> Map i Drawing
 renderNeue h r = zipMapsWith (drawNeue h r)
+
+
+
+drawDemoNeue :: forall f r.
+                Foldable f
+             => Filterable f
+             => CoordSys ChrId BrowserPoint
+             -> { min :: Number, max :: Number, sig :: Number }
+             -> { width :: Pixels, height :: Pixels }
+             -> { gwas   :: Map ChrId (f (GWASFeature ()))
+                , annots :: Map ChrId (f (Annot (minY :: Number))) }
+             -> Interval BrowserPoint
+             -> Drawing
+drawDemoNeue cs s canvasBox {gwas, annots} =
+  let renderers = renderersDemo' s
+      ivals v = viewportIntervals cs canvasBox v
+      -- ruler' = ruler s red
+
+      drawGwas v   = fold $ renderNeue canvasBox renderers.gwas   (ivals v) gwas
+      drawAnnots v = fold $ renderNeue canvasBox renderers.annots (ivals v) annots
+      -- drawGwas   = drawData cs canvasBox renderers.gwas gwas
+      -- drawAnnots = drawData cs canvasBox renderers.annots annots
+  -- in unsafeCoerce unit
+  in \view -> (drawAnnots view) <> (drawGwas view)
+  -- in foldMap (drawAnnots <> drawGwas)
+  -- in \view -> fold $ (drawGwas view) <> (drawAnnots view)
 
 
 
@@ -515,7 +539,7 @@ renderersDemo' s = { gwas, annots }
 
         annots :: PureRendererNeue (Annot (minY :: Number))
         annots = { drawing: annotDraw
-                  , point:   shiftPlaceFeatureMinY 0.06 s $ annotPoint mouseChrCtx }
+                 , point:   shiftPlaceFeatureMinY 0.06 s $ annotPoint mouseChrCtx }
 
 
 renderersDemo :: forall r.
@@ -731,7 +755,7 @@ demoBrowser cs canvas vpadding vscale sizes vscaleColor legend {gwas, annots} =
                   <> drawVScale w height vscale vscaleColor
 
       track v = translate sizes.vScaleWidth vpadding
-                  $ drawDemo cs vscale trackCanvas {gwas, annots} v
+                  $ drawDemoNeue cs vscale trackCanvas {gwas, annots} v
 
 
       chrs :: _ -> Drawing
