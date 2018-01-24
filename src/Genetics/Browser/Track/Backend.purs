@@ -33,7 +33,7 @@ import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple), snd, uncurry)
 import Data.Unfoldable (class Unfoldable, none)
 import Genetics.Browser.Types (Bp(Bp), ChrId(..), Point)
-import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(CoordSys), Interval, Normalized(Normalized), _BrowserIntervals, _CoordSys, _Index, _Interval, intervalToScreen, nPointToFrame, normPoint, viewIntervals)
+import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(CoordSys), Interval, Normalized(Normalized), _BrowserIntervals, _CoordSys, _Index, _Interval, intervalToScreen, intervalsToMap, nPointToFrame, normPoint, viewIntervals)
 import Genetics.Browser.View (Pixels)
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, scale, translate)
 import Graphics.Drawing as Drawing
@@ -245,6 +245,47 @@ drawPureInterval {height} {width, offset} = foldMap render'
           let {x,y} = nPointToFrame width height $ point
           in translate (x + offset) y drawing
 
+
+drawNeue :: forall f r a.
+            Foldable f
+         => { height :: Pixels | r }
+         -> PureRendererNeue a
+         -> { width :: Pixels, offset :: Pixels }
+         -> f a
+         -> Drawing
+drawNeue {height} {drawing, point} {width, offset} =
+  -- TODO this can be cleaned up quite a bit more
+  fromMaybe mempty <<< foldMap \a -> do
+    p <- point a
+    let {x,y} = nPointToFrame width height p
+    pure $ translate (x + offset) y (drawing a)
+
+
+viewportIntervals :: forall i a r.
+                     Ord i
+                  => CoordSys i BrowserPoint
+                  -> { width :: Pixels | r }
+                  -> Interval BrowserPoint
+                  -> Map i { width :: Pixels, offset :: Pixels }
+viewportIntervals cs@(CoordSys s) canvasBox bView =
+  let f :: Interval BrowserPoint
+        -> CoordInterval i BrowserPoint
+        -> { width :: Pixels, offset :: Pixels }
+      f iv c = (intervalToScreen canvasBox iv) (c^._Interval)
+
+  in f bView <$> intervalsToMap cs
+
+
+
+renderNeue :: forall f i a r.
+              Ord i
+           => Foldable f
+           => { height :: Pixels | r }
+           -> PureRendererNeue a
+           -> Map i {width :: Pixels, offset :: Pixels}
+           -> Map i (f a)
+           -> Map i Drawing
+renderNeue h r = zipMapsWith (drawNeue h r)
 
 
 

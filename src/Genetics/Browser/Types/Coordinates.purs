@@ -11,6 +11,8 @@ import Data.Int as Int
 import Data.Lens (Lens', Traversal', foldMapOf, lens, previewOn, traversed, view)
 import Data.Lens (filtered) as Lens
 import Data.Lens.Record (prop) as Lens
+import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Pair (Pair(..))
@@ -139,6 +141,8 @@ newtype CoordSys i c =
 _CoordSys :: forall i c. Lens' (CoordSys i c) (CoordSysRec i c)
 _CoordSys = lens (\(CoordSys x) -> x) (\(CoordSys _) x -> CoordSys x)
 
+
+
 _BrowserIntervals :: forall i c. Lens' (CoordSys i c) (Array (CoordInterval i c))
 _BrowserIntervals =   _CoordSys
                   <<< Lens.prop (SProxy :: SProxy "intervals")
@@ -150,6 +154,14 @@ _BrowserSize =   _CoordSys
 _BrowserPadding :: forall i c. Lens' (CoordSys i c) c
 _BrowserPadding =   _CoordSys
                 <<< Lens.prop (SProxy :: SProxy "padding")
+
+
+intervalsToMap :: forall i c.
+                  Ord i
+               => CoordSys i c
+               -> Map i (CoordInterval i c)
+intervalsToMap (CoordSys {intervals}) = Map.fromFoldable $ map f intervals
+  where f ci@{index} = Tuple index ci
 
 
 findIntervalFromGlobal :: forall f i c r.
