@@ -75,48 +75,19 @@ zipMapsWith f a b = uncurry f <$> zipMaps a b
 
 type ChrCtx r = Map ChrId (Record r)
 
--- type Dimensions x = x -> BrowserView -> { x :: Pixels, width :: Pixels }
-
-type ToPixels feature = feature -> BrowserView -> Interval Pixels
-
-type Draw feature = feature -> Interval Pixels -> Drawing
-
-
-
-
-placeWide :: forall a r.
-             { chrSize :: a -> Maybe Bp
-             , min     :: a -> Bp
-             , max     :: a -> Bp
-             | r }
-          -> a
-          -> Maybe (Interval (Normalized Number))
-placeWide get a = do
-  size <- get.chrSize a
-  let l = unwrap $ (get.min a) / size
-      r = unwrap $ (get.max a) / size
-  pure $ Normalized <$> Pair l r
 
 
 type DrawFeature a  = a -> Drawing
 type PointFeature a = a -> Maybe (Normalized Point)
 
 
-type PureRenderer a = a -> Maybe { drawing :: Drawing
-                                 , point   :: Normalized Point
-                                 }
-
-
-type PureRendererNeue a = { drawing :: DrawFeature a
-                          , point   :: PointFeature a }
+type PureRenderer a = { drawing :: DrawFeature a
+                      , point   :: PointFeature a }
 
 
 type GWASFeature r = { score :: Number
                      , pos :: Bp
                      , chrId :: ChrId | r }
-
-
-
 
 
 gwasDraw :: Color -> DrawFeature (GWASFeature _)
@@ -134,51 +105,24 @@ gwasPoint :: forall m rf rctx.
           -> m (PointFeature (GWASFeature rf))
 gwasPoint {min, max} = do
   ctx <- ask
-  -- let place f = do
   pure \f -> do
         size <- _.size <$> Map.lookup f.chrId ctx
         let x = unwrap $ f.pos / size
             y = (f.score - min) / (max - min)
         normPoint {x, y}
-  -- pure place
 
 
-
-mkGwasRenderer :: forall m rf rctx.
-                  MonadReader (ChrCtx (size :: Bp, color :: Color | rctx)) m
-               => {min :: Number, max :: Number, sig :: Number}
-               -> m (PureRenderer (GWASFeature rf))
-mkGwasRenderer {min, max} = do
-  ctx <- ask
-  let renderer f = do
-        size <- _.size <$> Map.lookup f.chrId ctx
-        color <- _.color <$> Map.lookup f.chrId ctx
-        let r = 2.2
-            x = unwrap $ f.pos / size
-            y = (f.score - min) / (max - min)
-            c = circle x y r
-            out = outlined (outlineColor color) c
-            fill = filled (fillColor color) c
-            drawing = out <> fill
-
-        point <- normPoint {x, y}
-        pure { drawing, point }
-  pure renderer
-
--- annotDraw
 annotDraw :: forall rf.
              DrawFeature (Annot rf)
-annotDraw =
-  -- ctx <- ask
-  let font' = font sansSerif 12 mempty
-      renderer f =
-        let rad = 5.0
-            c = circle zero zero rad
-            out  = outlined (outlineColor maroon <> lineWidth 3.0) c
-            fill = filled   (fillColor red) c
-            text' = Drawing.text font' (7.5) (2.5) (fillColor black) f.name
-        in out <> fill <> text'
-  in renderer
+annotDraw an = out <> fill <> text'
+  where rad = 5.0
+        c = circle zero zero rad
+        out  = outlined (outlineColor maroon <> lineWidth 3.0) c
+        fill = filled   (fillColor red) c
+        text' = Drawing.text
+                  (font sansSerif 12 mempty)
+                  (7.5) (2.5)
+                  (fillColor black) an.name
 
 
 annotPoint :: forall m rf rctx.
@@ -186,195 +130,11 @@ annotPoint :: forall m rf rctx.
            => m (PointFeature (Annot rf))
 annotPoint = do
   ctx <- ask
-  let place f = do
+  pure \f -> do
         size <- _.size <$> Map.lookup f.chrId ctx
-
         let x = unwrap $ f.pos / size
             y = 0.0
-
         normPoint {x, y}
-
-  pure place
-
-
-mkAnnotRenderer :: forall m rf rctx.
-                   MonadReader (ChrCtx (size :: Bp | rctx)) m
-                => m (PureRenderer (Annot rf))
-mkAnnotRenderer = do
-  ctx <- ask
-  let font' = font sansSerif 12 mempty
-  let renderer f = do
-        size <- _.size <$> Map.lookup f.chrId ctx
-
-        let rad = 5.0
-            x = unwrap $ f.pos / size
-            y = 0.0
-            c = circle x y rad
-            out  = outlined (outlineColor maroon <> lineWidth 3.0) c
-            fill = filled   (fillColor red) c
-            -- the canvas is flipped so y-axis increases upward, need to flip the text too
-            text' = scale 1.0 (-1.0)
-                    $ Drawing.text font' (x+7.5) (y+2.5) (fillColor black) f.name
-            drawing = out <> fill <> text'
-
-        point <- normPoint {x, y}
-        pure { drawing, point }
-
-  pure renderer
-
-
-pureRender :: forall f a.
-              Filterable f
-           => PureRenderer a
-           -> f a
-           -> f { drawing :: Drawing, point :: Normalized Point }
-pureRender r as = filterMap r as
-
-
-drawPureInterval :: forall f r .
-                    Foldable f
-                 => { height :: Pixels | r }
-                 -> { width :: Pixels, offset :: Pixels }
-                 -> f { drawing :: Drawing, point :: Normalized Point }
-                 -> Drawing
-drawPureInterval {height} {width, offset} = foldMap render'
-  where render' {drawing, point} =
-          let {x,y} = nPointToFrame width height $ point
-          in translate (x + offset) y drawing
-
-
-drawNeue :: forall f r a.
-            Foldable f
-         => { height :: Pixels | r }
-         -> PureRendererNeue a
-         -> { width :: Pixels, offset :: Pixels }
-         -> f a
-         -> Drawing
-drawNeue {height} {drawing, point} {width, offset} =
-  -- TODO this can be cleaned up quite a bit more
-  fromMaybe mempty <<< foldMap \a -> do
-    (Normalized {x,y}) <- point a
-                                     -- Flipping y-axis so it increases upward
-    let p = nPointToFrame width height $ Normalized {x, y: 1.0 - y}
-    pure $ translate (p.x + offset) p.y (drawing a)
-
-
-viewportIntervals :: forall i a r.
-                     Ord i
-                  => CoordSys i BrowserPoint
-                  -> { width :: Pixels | r }
-                  -> Interval BrowserPoint
-                  -> Map i { width :: Pixels, offset :: Pixels }
-viewportIntervals cs@(CoordSys s) canvasBox bView =
-  let f :: Interval BrowserPoint
-        -> CoordInterval i BrowserPoint
-        -> { width :: Pixels, offset :: Pixels }
-      f iv c = (intervalToScreen canvasBox iv) (c^._Interval)
-
-  in f bView <$> intervalsToMap cs
-
-
-
-renderNeue :: forall f i a r.
-              Ord i
-           => Foldable f
-           => { height :: Pixels | r }
-           -> PureRendererNeue a
-           -> Map i {width :: Pixels, offset :: Pixels}
-           -> Map i (f a)
-           -> Map i Drawing
-renderNeue h r = zipMapsWith (drawNeue h r)
-
-
-
-drawDemoNeue :: forall f r.
-                Foldable f
-             => Filterable f
-             => CoordSys ChrId BrowserPoint
-             -> { min :: Number, max :: Number, sig :: Number }
-             -> { width :: Pixels, height :: Pixels }
-             -> { gwas   :: Map ChrId (f (GWASFeature ()))
-                , annots :: Map ChrId (f (Annot (minY :: Number))) }
-             -> Interval BrowserPoint
-             -> Drawing
-drawDemoNeue cs s canvasBox {gwas, annots} =
-  let renderers = renderersDemo' s
-      ivals v = viewportIntervals cs canvasBox v
-      -- ruler' = ruler s red
-
-      drawGwas v   = fold $ renderNeue canvasBox renderers.gwas   (ivals v) gwas
-      drawAnnots v = fold $ renderNeue canvasBox renderers.annots (ivals v) annots
-      -- drawGwas   = drawData cs canvasBox renderers.gwas gwas
-      -- drawAnnots = drawData cs canvasBox renderers.annots annots
-  -- in unsafeCoerce unit
-  in \view -> (drawAnnots view) <> (drawGwas view)
-  -- in foldMap (drawAnnots <> drawGwas)
-  -- in \view -> fold $ (drawGwas view) <> (drawAnnots view)
-
-
-
-drawFrames :: forall i a.
-              Ord i
-           => CoordSys i BrowserPoint
-           -> { width :: Pixels, height :: Pixels }
-           -> Map i (Array { drawing :: _, point :: _ })
-           -> Interval BrowserPoint
-           -> Drawing
-drawFrames cs@(CoordSys s) canvasBox drawings =
-  let f :: Interval _  -> CoordInterval i _ -> { width :: _, offset :: _ }
-      f iv c = (intervalToScreen canvasBox iv) (c^._Interval)
-
-      g :: CoordInterval i _ -> Array { drawing :: _, point :: _ }
-      g c = fromMaybe [] $ Map.lookup (c^._Index) drawings
-
-      toDraw :: Interval BrowserPoint -> Array (Tuple _ (Array _))
-      toDraw iv = (\x -> Tuple (f iv x) (g x)) <$> (viewIntervals cs iv)
-
-      drawIvs :: Array (Tuple _ (Array _)) -> Drawing
-      drawIvs = foldMap (uncurry $ drawPureInterval canvasBox)
-
-      drawIvs' :: Array (Tuple _ (Array _)) -> Array Drawing
-      drawIvs' = map (uncurry $ drawPureInterval canvasBox)
-
-  in \bView -> translate 0.0 canvasBox.height
-                $ scale 1.0 (-1.0)
-                $ drawIvs (toDraw bView)
-
-
-
-drawData :: forall i c f a.
-            Ord i
-         => Foldable f
-         => Filterable f
-         => CoordSys i BrowserPoint
-         -> { width :: Pixels, height :: Pixels }
-         -> PureRenderer a
-         -> Map i (f a)
-         -> Interval BrowserPoint
-         -> Drawing
-drawData cs@(CoordSys s) canvasBox renderer dat =
-  let drawings :: Map i (Array { drawing :: _, point :: _ })
-      drawings = map (Array.fromFoldable <<< pureRender renderer) dat
-
-      f :: Interval _  -> CoordInterval i _ -> { width :: _, offset :: _ }
-      f iv c = (intervalToScreen canvasBox iv) (c^._Interval)
-
-      g :: CoordInterval i _ -> Array { drawing :: _, point :: _ }
-      g c = fromMaybe [] $ Map.lookup (c^._Index) drawings
-
-      toDraw :: Interval BrowserPoint -> Array (Tuple _ (Array _))
-      toDraw iv = (\x -> Tuple (f iv x) (g x)) <$> (viewIntervals cs iv)
-
-      drawIvs :: Array (Tuple _ (Array _)) -> Drawing
-      drawIvs = foldMap (uncurry $ drawPureInterval canvasBox)
-
-      drawIvs' :: Array (Tuple _ (Array _)) -> Array Drawing
-      drawIvs' = map (uncurry $ drawPureInterval canvasBox)
-
-  in \bView -> translate 0.0 canvasBox.height
-                $ scale 1.0 (-1.0)
-                $ drawIvs (toDraw bView)
-
 
 shiftPlaceFeatureMinY :: forall rf.
                          RowLacks "minY" rf
@@ -391,32 +151,103 @@ shiftPlaceFeatureMinY dist s pointF f = do
   normPoint {x, y: y'}
 
 
-shiftRendererMinY :: forall rf.
-                      RowLacks "minY" rf
-                   => Number
-                   -> { min :: Number, max :: Number, sig :: Number }
-                   -> PureRenderer (Record rf)
-                   -> PureRenderer (Record (minY :: Number | rf))
-shiftRendererMinY dist s render f = do
-  {drawing, point} <- render (Record.delete (SProxy :: SProxy "minY") f)
-  let {x,y} = unwrap point
-      normY = (f.minY - s.min) / (s.max - s.min)
-      y' = min (normY + dist) 0.95
-
-  point' <- normPoint {x, y: y'}
-  pure {drawing, point: point'}
 
 
+runRenderer :: forall a.
+               PureRenderer a
+            -> a
+            -> Maybe { drawing :: Drawing, point :: Normalized Point }
+runRenderer render a = do
+  point <- render.point a
+  pure { drawing: render.drawing a
+       , point }
 
-groupToChrs :: forall a f rData.
-               Monoid (f {chrId :: ChrId | rData})
-            => Foldable f
-            => Applicative f
-            => f { chrId :: ChrId | rData }
-            -> Map ChrId (f { chrId :: ChrId | rData })
-groupToChrs = foldl (\chrs r@{chrId} -> Map.alter (add r) chrId chrs ) mempty
-  where add x Nothing   = Just $ pure x
-        add x (Just xs) = Just $ pure x <> xs
+runRendererN :: forall f a.
+                Filterable f
+             => PureRenderer a
+             -> f a
+             -> f { drawing :: Drawing, point :: Normalized Point }
+runRendererN r = filterMap (runRenderer r)
+
+
+renderToDrawing :: forall f r .
+                    Foldable f
+                 => { height :: Pixels | r }
+                 -> { width :: Pixels, offset :: Pixels }
+                 -> f { drawing :: Drawing, point :: Normalized Point }
+                 -> Drawing
+renderToDrawing {height} {width, offset} = foldMap render'
+  where render' {drawing, point: Normalized {x, y}} =
+          let p = nPointToFrame width height $ Normalized {x, y: 1.0 - y}
+          in translate (p.x + offset) p.y drawing
+
+
+
+drawInterval :: forall f r a.
+            Foldable f
+         => { height :: Pixels | r }
+         -> { width :: Pixels, offset :: Pixels }
+         -> f { drawing :: Drawing, point :: Normalized Point }
+         -> Drawing
+drawInterval {height} {width, offset} = foldMap drawOne
+  where drawOne {drawing, point: Normalized {x, y} } =
+                                     -- Flipping y-axis so it increases upward
+          let p = nPointToFrame width height $ Normalized {x, y: 1.0 - y}
+          in translate (p.x + offset) p.y drawing
+
+
+-- | Returns the left-hand-edge offset, and width, in pixels,
+-- | of each interval (chromosome) in the provided coordinate system
+viewportIntervals :: forall i a r.
+                     Ord i
+                  => CoordSys i BrowserPoint
+                  -> { width :: Pixels | r }
+                  -> Interval BrowserPoint
+                  -> Map i { width :: Pixels, offset :: Pixels }
+viewportIntervals cs canvasBox bView =
+  let f :: Interval BrowserPoint
+        -> CoordInterval i BrowserPoint
+        -> { width :: Pixels, offset :: Pixels }
+      f iv c = (intervalToScreen canvasBox iv) (c^._Interval)
+
+  in f bView <$> intervalsToMap cs
+
+
+
+drawDemo :: forall f r.
+            Foldable f
+         => Filterable f
+         => CoordSys ChrId BrowserPoint
+         -> { min :: Number, max :: Number, sig :: Number }
+         -> { width :: Pixels, height :: Pixels }
+         -> { gwas   :: Map ChrId (f (GWASFeature ()))
+            , annots :: Map ChrId (f (Annot (minY :: Number))) }
+         -> Interval BrowserPoint
+         -> Drawing
+drawDemo cs s canvasBox {gwas, annots} =
+  let renderers = renderersDemo s
+      ivals v = viewportIntervals cs canvasBox v
+
+      gwasRendered   = runRendererN renderers.gwas   <$> gwas
+      annotsRendered = runRendererN renderers.annots <$> annots
+
+      drawToViewport v x = fold $ zipMapsWith (drawInterval canvasBox) (ivals v) x
+
+      drawGwas v   = drawToViewport v gwasRendered
+      drawAnnots v = drawToViewport v annotsRendered
+      drawRuler    = ruler s red canvasBox
+
+      drawChrLabels v = fold $ zipMapsWith (drawInterval canvasBox) (ivals v) (chrLabels cs)
+
+  in \view -> drawChrLabels view
+           <> drawGwas view
+           <> drawAnnots view
+           <> drawRuler
+
+
+
+
+
 
 
 fetchJSON :: forall a.
@@ -509,6 +340,18 @@ bumpAnnots radius = zipMapsWith (map <<< bumpAnnot)
                        in Record.insert (SProxy :: SProxy "minY") minY g
 
 
+
+groupToChrs :: forall a f rData.
+               Monoid (f {chrId :: ChrId | rData})
+            => Foldable f
+            => Applicative f
+            => f { chrId :: ChrId | rData }
+            -> Map ChrId (f { chrId :: ChrId | rData })
+groupToChrs = foldl (\chrs r@{chrId} -> Map.alter (add r) chrId chrs ) mempty
+  where add x Nothing   = Just $ pure x
+        add x (Just xs) = Just $ pure x <> xs
+
+
 getDataDemo :: { gwas :: String
                , annots :: String }
             -> Aff _ { gwas  :: Map ChrId (List (GWASFeature ()       ))
@@ -527,34 +370,20 @@ getDataDemo urls = do
 
   pure { gwas: gwasChr, annots: bumpedAnnots }
 
-renderersDemo' :: forall r.
-                 { min :: Number, max :: Number, sig :: Number }
-              -> { gwas   :: PureRendererNeue _
-                 , annots :: PureRendererNeue _
-                 }
-renderersDemo' s = { gwas, annots }
-  where gwas :: PureRendererNeue _
+renderersDemo :: forall r.
+                { min :: Number, max :: Number, sig :: Number }
+             -> { gwas   :: PureRenderer _
+                , annots :: PureRenderer _
+                }
+renderersDemo s = { gwas, annots }
+  where gwas :: PureRenderer _
         gwas = { drawing: gwasDraw navy
                 , point:   gwasPoint s mouseChrCtx }
 
-        annots :: PureRendererNeue (Annot (minY :: Number))
+        annots :: PureRenderer (Annot (minY :: Number))
         annots = { drawing: annotDraw
                  , point:   shiftPlaceFeatureMinY 0.06 s $ annotPoint mouseChrCtx }
 
-
-renderersDemo :: forall r.
-                 { min :: Number, max :: Number, sig :: Number }
-              -> { gwas   :: PureRenderer (GWASFeature ()       )
-                 , annots :: PureRenderer (Annot (minY :: Number))
-                 }
-renderersDemo s = { gwas, annots }
-  where colorsCtx = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
-                      mouseChrCtx mouseColors
-        gwas :: PureRenderer (GWASFeature ())
-        gwas = mkGwasRenderer s colorsCtx
-
-        annots :: PureRenderer (Annot (minY :: Number))
-        annots = shiftRendererMinY 0.06 s $ mkAnnotRenderer mouseChrCtx
 
 
 ruler :: forall r r1.
@@ -571,7 +400,7 @@ ruler {min, max, sig} color f = outlined outline rulerDrawing
 
 chrLabels :: forall c.
              CoordSys ChrId c
-          -> Map ChrId (Array { drawing :: _, point :: _ })
+          -> Map ChrId (Array { drawing :: Drawing, point :: Normalized Point })
 chrLabels cs = Map.fromFoldable results
   where mkLabel :: ChrId -> _
         mkLabel chr = { drawing: chrText chr, point: Normalized {x: 1.0, y: -0.1} }
@@ -579,51 +408,11 @@ chrLabels cs = Map.fromFoldable results
         font' = font sansSerif 12 mempty
 
         chrText :: ChrId -> Drawing
-        chrText chr = scale 1.0 (-1.0)
-                    $ Drawing.text font' zero zero (fillColor black) (unwrap chr)
+        chrText chr = Drawing.text font' zero zero (fillColor black) (unwrap chr)
 
         results :: Array _
         results = map (\x -> Tuple (x^._Index) [mkLabel (x^._Index)]) $ cs^._BrowserIntervals
 
-        results' :: Traversal' (CoordSys ChrId c) ChrId
-        results' = _BrowserIntervals <<< traversed <<< _Index
-
-        test :: forall r. Monoid r => Fold' r _ _
-        test = results' <<< (to (fanout id mkLabel))
-
-        output :: _
-        output = Map.fromFoldable $ (foldMapOf test pure cs :: Array _)
-
-        -- xxx :: Traversal' (CoordSys ChrId _) ChrId
-        -- xxx = results' <<< _Index
-
-        -- results2 :: _ -> Array _
-        -- results2 = traverseOf results' pure
-
-        -- results3 :: _ -> Array _
-        -- results3 = foldMapOf results' pure
-
-        -- results4 :: _
-        -- results4 = foldMapOf results'
-                     -- (fanout id chrText)
-
-
-drawDemo :: forall f r.
-            Foldable f
-         => Filterable f
-         => CoordSys _ _
-         -> { min :: Number, max :: Number, sig :: Number }
-         -> { width :: Pixels, height :: Pixels }
-         -> { gwas   :: Map ChrId (f (GWASFeature ()))
-            , annots :: Map ChrId (f (Annot (minY :: Number))) }
-         -> Interval BrowserPoint
-         -> Drawing
-drawDemo cs s canvasBox {gwas, annots} =
-  let renderers = renderersDemo s
-      ruler' = ruler s red
-      drawGwas   = drawData cs canvasBox renderers.gwas gwas
-      drawAnnots = drawData cs canvasBox renderers.annots annots
-  in \view -> (drawGwas view) <> (drawAnnots view) <> ruler' canvasBox
 
 
 
@@ -755,12 +544,7 @@ demoBrowser cs canvas vpadding vscale sizes vscaleColor legend {gwas, annots} =
                   <> drawVScale w height vscale vscaleColor
 
       track v = translate sizes.vScaleWidth vpadding
-                  $ drawDemoNeue cs vscale trackCanvas {gwas, annots} v
-
-
-      chrs :: _ -> Drawing
-      chrs v = translate zero vpadding
-                 $ drawFrames cs trackCanvas (chrLabels cs) v
+                  $ drawDemo cs vscale trackCanvas {gwas, annots} v
 
       legendD :: _ -> Drawing
       legendD _ = let w = sizes.legendWidth
@@ -768,7 +552,7 @@ demoBrowser cs canvas vpadding vscale sizes vscaleColor legend {gwas, annots} =
                     $ bg w height
                    <> drawLegend sizes.legendWidth canvas.height legend
 
-  in \view -> { track: track view <> chrs view
+  in \view -> { track: track view
               , overlay: vScale view <> legendD view }
 
 
@@ -824,17 +608,13 @@ mouseChrs = Map.fromFoldable $ Array.zip mouseChrIds $
             , (Bp 9174469.0)
             ]
 
-
 mouseColors :: ChrCtx (color :: Color)
-mouseColors = Map.fromFoldable $ map (\x -> Tuple x {color: navy}) mouseChrIds
-
-mouseColors' :: ChrCtx (color :: Color)
-mouseColors' = Map.fromFoldable $ Array.zip mouseChrIds $ map (\x -> {color: x})
-               [ navy, blue, aqua, teal, olive
-               , green, lime, yellow, orange, red
-               , maroon, fuchsia, purple, navy, blue
-               , aqua, teal, olive, green, lime
-               , yellow ]
+mouseColors = Map.fromFoldable $ Array.zip mouseChrIds $ map (\x -> {color: x})
+              [ navy, blue, aqua, teal, olive
+              , green, lime, yellow, orange, red
+              , maroon, fuchsia, purple, navy, blue
+              , aqua, teal, olive, green, lime
+              , yellow ]
 
 
 mouseChrCtx :: ChrCtx (size :: Bp)
