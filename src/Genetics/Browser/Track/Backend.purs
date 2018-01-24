@@ -16,7 +16,7 @@ import Data.Filterable (class Filterable, filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens ((^.), (^?))
+import Data.Lens (Fold', Traversal', foldMapOf, to, traversed, (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -24,14 +24,15 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
 import Data.Monoid (class Monoid, mempty)
-import Data.Newtype (unwrap)
+import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.Pair (Pair(..))
 import Data.Profunctor.Strong (fanout)
 import Data.Record as Record
 import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple), snd, uncurry)
 import Data.Unfoldable (class Unfoldable, none)
-import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
+import Genetics.Browser.Types (Bp(Bp), ChrId(..), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(CoordSys), Interval, Normalized(Normalized), _BrowserIntervals, _CoordSys, _Index, _Interval, intervalToScreen, nPointToFrame, normPoint, viewIntervals)
 import Genetics.Browser.View (Pixels)
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, scale, translate)
@@ -81,18 +82,6 @@ type ToPixels feature = feature -> BrowserView -> Interval Pixels
 type Draw feature = feature -> Interval Pixels -> Drawing
 
 
-geneGlyph :: forall r a.
-            Color
-         -> { min :: BrowserPoint  -- TODO should be `Bp` which gets transformed to `BrowserPoint`s
-            , max :: BrowserPoint | r }
-         -> (BrowserPoint -> Pixels)
-         ->
-geneGlyph color {min, max} scaler =
-  let width = scaler (max - min)
-      rect = rectangle 0.0 0.0 width 10.0
-      out = outlined (outlineColor color) rect
-      fill = filled (fillColor color) rect
-  in out <> fill
 
 
 placeWide :: forall a r.
@@ -102,22 +91,35 @@ placeWide :: forall a r.
              | r }
           -> a
           -> Maybe (Interval (Normalized Number))
-placeWide {min, max} get a = do
+placeWide get a = do
   size <- get.chrSize a
   let l = unwrap $ (get.min a) / size
-      r = unwrap $ (get.min a) / size
+      r = unwrap $ (get.max a) / size
   pure $ Normalized <$> Pair l r
+
+
+type DrawFeature a  = a -> Drawing
+type PointFeature a = a -> Maybe (Normalized Point)
 
 
 type PureRenderer a = a -> Maybe { drawing :: Drawing
                                  , point   :: Normalized Point
                                  }
 
+
+type PureRendererNeue a = { drawing :: DrawFeature a
+                          , point   :: PointFeature a }
+
+
 type GWASFeature r = { score :: Number
                      , pos :: Bp
                      , chrId :: ChrId | r }
 
-gwasDraw :: forall a. Color -> a -> Drawing
+
+
+
+
+gwasDraw :: Color -> DrawFeature (GWASFeature _)
 gwasDraw color =
   let r = 2.2
       c = circle 0.0 0.0 r
@@ -126,30 +128,21 @@ gwasDraw color =
   in const $ out <> fill
 
 
-gwasPlace :: forall a r.
-             { min :: Number, max :: Number | r }
-          -> { chrSize :: a -> Maybe Bp
-             , pos     :: a -> Bp
-             , score   :: a -> Number }
-          -> a
-          -> Maybe (Normalized Point)
-gwasPlace {min, max} get a = do
-  size <- get.chrSize a
-  let x = unwrap $ (get.pos a) / size
-      y = (get.score a - min) / (max - min)
-  normPoint {x, y}
+gwasPoint :: forall m rf rctx.
+             MonadReader (ChrCtx (size :: Bp | rctx)) m
+          => {min :: Number, max :: Number, sig :: Number}
+          -> m (PointFeature (GWASFeature rf))
+gwasPoint {min, max} = do
+  ctx <- ask
+  -- let place f = do
+  pure \f -> do
+        size <- _.size <$> Map.lookup f.chrId ctx
+        let x = unwrap $ f.pos / size
+            y = (f.score - min) / (max - min)
+        normPoint {x, y}
+  -- pure place
 
 
-gwasRenderer :: forall r rf.
-                { min :: Number, max :: Number | r }
-             -> Array (GWASFeature rf)
-             -> { drawing :: Drawing
-                , points :: Array (Normalized Point) }
-gwasRenderer vs gwas = { drawing, points }
-  where get = { chrSize: \a -> Map.lookup a.chrId mouseChrs
-              , pos: _.pos, score: _.score }
-        drawing = gwasDraw red unit
-        points = filterMap (gwasPlace vs get) gwas
 
 mkGwasRenderer :: forall m rf rctx.
                   MonadReader (ChrCtx (size :: Bp, color :: Color | rctx)) m
@@ -171,6 +164,40 @@ mkGwasRenderer {min, max} = do
         point <- normPoint {x, y}
         pure { drawing, point }
   pure renderer
+
+-- annotDraw
+annotDraw :: forall rf.
+             DrawFeature (Annot rf)
+annotDraw =
+  -- ctx <- ask
+  let font' = font sansSerif 12 mempty
+      renderer f =
+        let rad = 5.0
+            c = circle zero zero rad
+            out  = outlined (outlineColor maroon <> lineWidth 3.0) c
+            fill = filled   (fillColor red) c
+            -- the canvas is flipped so y-axis increases upward, need to flip the text too
+            text' = scale 1.0 (-1.0)
+                    $ Drawing.text font' (7.5) (2.5) (fillColor black) f.name
+        in out <> fill <> text'
+  in renderer
+
+
+annotPoint :: forall m rf rctx.
+              MonadReader (ChrCtx (size :: Bp | rctx)) m
+           => m (PointFeature (Annot rf))
+annotPoint = do
+  ctx <- ask
+  let place f = do
+        size <- _.size <$> Map.lookup f.chrId ctx
+
+        let x = unwrap $ f.pos / size
+            y = 0.0
+            -- the canvas is flipped so y-axis increases upward, need to flip the text too
+
+        normPoint {x, y}
+
+  pure place
 
 
 mkAnnotRenderer :: forall m rf rctx.
@@ -282,6 +309,21 @@ drawData cs@(CoordSys s) canvasBox renderer dat =
   in \bView -> translate 0.0 canvasBox.height
                 $ scale 1.0 (-1.0)
                 $ drawIvs (toDraw bView)
+
+
+shiftPlaceFeatureMinY :: forall rf.
+                         RowLacks "minY" rf
+                      => Number
+                      -> { min :: Number, max :: Number, sig :: Number }
+                      -> PointFeature (Record rf)
+                      -> PointFeature (Record (minY :: Number | rf))
+shiftPlaceFeatureMinY dist s pointF f = do
+  point <- pointF (Record.delete (SProxy :: SProxy "minY") f)
+  let {x,y} = unwrap point
+      normY = (f.minY - s.min) / (s.max - s.min)
+      y' = min (normY + dist) 0.95
+
+  normPoint {x, y: y'}
 
 
 shiftRendererMinY :: forall rf.
@@ -420,12 +462,26 @@ getDataDemo urls = do
 
   pure { gwas: gwasChr, annots: bumpedAnnots }
 
+renderersDemo' :: forall r.
+                 { min :: Number, max :: Number, sig :: Number }
+              -> { gwas   :: PureRendererNeue _
+                 , annots :: PureRendererNeue _
+                 }
+renderersDemo' s = { gwas, annots }
+  where gwas :: PureRendererNeue _
+        gwas = { drawing: gwasDraw navy
+                , point:   gwasPoint s mouseChrCtx }
+
+        annots :: PureRendererNeue (Annot (minY :: Number))
+        annots = { drawing: annotDraw
+                  , point:   shiftPlaceFeatureMinY 0.06 s $ annotPoint mouseChrCtx }
 
 
 renderersDemo :: forall r.
                  { min :: Number, max :: Number, sig :: Number }
-              -> { gwas  :: PureRenderer (GWASFeature ()       )
-                 , annots :: PureRenderer (Annot (minY :: Number)) }
+              -> { gwas   :: PureRenderer (GWASFeature ()       )
+                 , annots :: PureRenderer (Annot (minY :: Number))
+                 }
 renderersDemo s = { gwas, annots }
   where colorsCtx = zipMapsWith (\r {color} -> Record.insert (SProxy :: SProxy "color") color r)
                       mouseChrCtx mouseColors
