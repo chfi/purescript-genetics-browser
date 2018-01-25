@@ -20,7 +20,7 @@ import Data.Filterable (class Filterable, filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens (Fold', Traversal', foldMapOf, to, traversed, (^.), (^?))
+import Data.Lens (Fold', Traversal', foldMapOf, to, traversed, view, (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -119,7 +119,7 @@ gwasPoint {min, max} = do
         size <- _.size <$> Map.lookup f.chrId ctx
         let x = unwrap $ f.pos / size
             y = (f.score - min) / (max - min)
-        normPoint {x, y}
+        pure $ Normalized {x, y}
 
 
 annotDraw :: forall rf.
@@ -163,15 +163,6 @@ shiftPlaceFeatureMinY dist s pointF f = do
 
 
 
-runRenderer :: forall a.
-               PureRenderer a
-            -> a
-            -> Maybe { drawing :: Drawing, point :: Normalized Point }
-runRenderer render a = do
-  point <- render.point a
-  pure { drawing: render.drawing a
-       , point }
-
 
 type Validated a = V (NonEmptyList String) a
 
@@ -194,27 +185,28 @@ validRender render a =
   <$> (pure $ render.drawing a)
   <*> validPoint render a
 
-runRendererN :: forall f a.
-                Filterable f
-             => PureRenderer a
-             -> f a
-             -> f { drawing :: Drawing, point :: Normalized Point }
-runRendererN r = filterMap (runRenderer r)
 
 
 
+
+type CanvasReadyDrawing = Drawing
+
+type BrowserTrack = Canvas.Dimensions
+                 -> Interval BrowserPoint
+                 -> CanvasReadyDrawing
 
 drawInterval :: forall f r a.
             Foldable f
          => Canvas.Dimensions
          -> { width :: Pixels, offset :: Pixels }
          -> f { drawing :: Drawing, point :: Normalized Point }
-         -> Drawing
-drawInterval {height} {width, offset} = foldMap drawOne
-  where drawOne {drawing, point: Normalized {x, y} } =
-                                     -- Flipping y-axis so it increases upward
-          let p = nPointToFrame width height $ Normalized {x, y: 1.0 - y}
-          in translate (p.x + offset) p.y drawing
+         -> CanvasReadyDrawing
+drawInterval {height} {width, offset} =
+  foldMap \g ->
+          let {x,y} = nPointToFrame width height $ g.point
+                -- Flipping y-axis so it increases upward
+              yFlip = height - y
+          in translate (x + offset) yFlip g.drawing
 
 
 -- | Returns the left-hand-edge offset, and width, in pixels,
@@ -222,57 +214,57 @@ drawInterval {height} {width, offset} = foldMap drawOne
 viewportIntervals :: forall i a r.
                      Ord i
                   => CoordSys i BrowserPoint
-                  -> { width :: Pixels | r }
+                  -> Canvas.Dimensions
                   -> Interval BrowserPoint
                   -> Map i { width :: Pixels, offset :: Pixels }
-viewportIntervals cs canvasBox bView =
-  let f :: Interval BrowserPoint
-        -> CoordInterval i BrowserPoint
-        -> { width :: Pixels, offset :: Pixels }
-      f iv c = (intervalToScreen canvasBox iv) (c^._Interval)
-
-  in f bView <$> intervalsToMap cs
+viewportIntervals cs cdim bView =
+  intervalToScreen cdim bView <$> (view _Interval <$> intervalsToMap cs)
 
 
+pureTrack :: forall f a.
+             Foldable f
+          => CoordSys ChrId BrowserPoint
+          -> Map ChrId (f {drawing :: Drawing, point :: Normalized Point})
+          -> BrowserTrack
+pureTrack cs drawings cd v =
+  fold $ zipMapsWith (drawInterval cd) (viewportIntervals cs cd v) drawings
 
-drawDemo :: forall f r.
-            Foldable f
-         => Filterable f
-         => CoordSys ChrId BrowserPoint
-         -> { min :: Number, max :: Number, sig :: Number }
-         -> { width :: Pixels, height :: Pixels }
-         -> { gwas   :: Map ChrId (f (GWASFeature ()))
-            , annots :: Map ChrId (f (Annot (minY :: Number))) }
-         -> Interval BrowserPoint
-         -> Drawing
-drawDemo cs s canvasBox {gwas, annots} =
+
+validateTrack :: forall f a.
+                 Foldable f
+              => Traversable f
+              => CoordSys ChrId BrowserPoint
+              -> PureRenderer a
+              -> Map ChrId (f a)
+              -> Validated BrowserTrack
+validateTrack cs r chrs =
+  let validDrawings :: Validated (Map ChrId (f {drawing :: Drawing, point :: Normalized Point}))
+      validDrawings = traverse (traverse $ validRender r) chrs
+
+  in pureTrack cs <$> validDrawings
+
+
+demoTrack :: forall f r.
+             Foldable f
+          => Traversable f
+          => CoordSys ChrId BrowserPoint
+          -> { min :: Number, max :: Number, sig :: Number }
+          -> { gwas   :: Map ChrId (f (GWASFeature ()))
+             , annots :: Map ChrId (f (Annot (minY :: Number))) }
+          -> Validated BrowserTrack
+demoTrack cs s {gwas, annots} =
   let renderers = renderersDemo s
-      ivals v = viewportIntervals cs canvasBox v
-type CanvasReadyDrawing = Drawing
 
-      gwasRendered   = runRendererN renderers.gwas   <$> gwas
-      annotsRendered = runRendererN renderers.annots <$> annots
-type BrowserTrack = Canvas.Dimensions
-                 -> Interval BrowserPoint
-                 -> CanvasReadyDrawing
+      gwasTrack   = validateTrack cs renderers.gwas gwas
+      annotsTrack = validateTrack cs renderers.annots annots
 
-      drawToViewport v x = fold $ zipMapsWith (drawInterval canvasBox) (ivals v) x
+      chrLabels = chrLabelTrack cs
+      ruler = horRulerTrack s red
 
-      drawGwas v   = drawToViewport v gwasRendered
-      drawAnnots v = drawToViewport v annotsRendered
-      drawRuler    = ruler s red canvasBox
-
-      drawChrLabels v = fold $ zipMapsWith (drawInterval canvasBox) (ivals v) (chrLabels cs)
-
-  in \view -> drawChrLabels view
-           <> drawGwas view
-           <> drawAnnots view
-           <> drawRuler
-
-
-
-
-
+  in pure chrLabels
+  <> pure ruler
+  <> gwasTrack
+  <> annotsTrack
 
 
 fetchJSON :: forall a.
@@ -395,6 +387,7 @@ getDataDemo urls = do
 
   pure { gwas: gwasChr, annots: bumpedAnnots }
 
+
 renderersDemo :: forall r.
                 { min :: Number, max :: Number, sig :: Number }
              -> { gwas   :: PureRenderer _
@@ -410,23 +403,20 @@ renderersDemo s = { gwas, annots }
                  , point:   shiftPlaceFeatureMinY 0.06 s $ annotPoint mouseChrCtx }
 
 
-
-ruler :: forall r r1.
-         { min :: Number, max :: Number, sig :: Number }
-      -> Color
-      -> { width :: Pixels, height :: Pixels }
-      -> Drawing
-ruler {min, max, sig} color f = outlined outline rulerDrawing
+horRulerTrack :: forall r r1.
+                 { min :: Number, max :: Number, sig :: Number }
+              -> Color
+              -> BrowserTrack
+horRulerTrack {min, max, sig} color f _ = outlined outline rulerDrawing
   where normY = (sig - min) / (max - min)
         y = f.height - (normY * f.height)
         outline = outlineColor color
         rulerDrawing = Drawing.path [{x: 0.0, y}, {x: f.width, y}]
 
 
-chrLabels :: forall c.
-             CoordSys ChrId c
-          -> Map ChrId (Array { drawing :: Drawing, point :: Normalized Point })
-chrLabels cs = Map.fromFoldable results
+chrLabelTrack :: CoordSys ChrId BrowserPoint
+              -> BrowserTrack
+chrLabelTrack cs = pureTrack cs (Map.fromFoldable results)
   where mkLabel :: ChrId -> _
         mkLabel chr = { drawing: chrText chr, point: Normalized {x: 1.0, y: -0.1} }
 
@@ -439,16 +429,6 @@ chrLabels cs = Map.fromFoldable results
         results = map (\x -> Tuple (x^._Index) [mkLabel (x^._Index)]) $ cs^._BrowserIntervals
 
 
-
-
-{-
-TODO
-there is currently no connection between the vertical scale's
-position and the track. Need to take stuff like vertical
-offset and padding into account; calculate once and use
-in both places. However don't just use canvasheight - yoffset
-or whatever; actually derive the top and bottom of the track.
--}
 
 drawVScale :: forall r.
               Number
@@ -531,6 +511,7 @@ demoLegend =
               -- the first 2 are used by all parts of the browser
 demoBrowser :: forall f.
                Foldable f
+            => Traversable f
             => Filterable f
             => CoordSys ChrId BrowserPoint
             -> Canvas.Dimensions
@@ -568,8 +549,11 @@ demoBrowser cs canvas vpadding vscale sizes vscaleColor legend {gwas, annots} =
                    $ bg w height
                   <> drawVScale w height vscale vscaleColor
 
-      track v = translate sizes.vScaleWidth vpadding
-                  $ drawDemo cs vscale trackCanvas {gwas, annots} v
+      -- TODO actually handle/present the validation errors in a good way!
+      track :: Interval BrowserPoint -> Drawing
+      track v = V.unV (\err -> Debug.trace (unsafeCoerce err) \_ -> mempty)
+                       (\f -> f trackCanvas v)
+                       (demoTrack cs vscale {gwas, annots})
 
       legendD :: _ -> Drawing
       legendD _ = let w = sizes.legendWidth
