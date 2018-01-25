@@ -1,4 +1,8 @@
-module Genetics.Browser.Track.Backend where
+module Genetics.Browser.Track.Backend
+       ( demoBrowser
+       , demoLegend
+       , getDataDemo
+       ) where
 
 import Prelude
 
@@ -104,10 +108,11 @@ gwasDraw color =
   in const $ out <> fill
 
 
+
 gwasPoint :: forall m rf rctx.
-             MonadReader (ChrCtx (size :: Bp | rctx)) m
-          => {min :: Number, max :: Number, sig :: Number}
-          -> m (PointFeature (GWASFeature rf))
+             {min :: Number, max :: Number, sig :: Number}
+          -> ChrCtx (size :: Bp | rctx)
+          -> (PointFeature (GWASFeature rf))
 gwasPoint {min, max} = do
   ctx <- ask
   pure \f -> do
@@ -197,22 +202,11 @@ runRendererN :: forall f a.
 runRendererN r = filterMap (runRenderer r)
 
 
-renderToDrawing :: forall f r .
-                    Foldable f
-                 => { height :: Pixels | r }
-                 -> { width :: Pixels, offset :: Pixels }
-                 -> f { drawing :: Drawing, point :: Normalized Point }
-                 -> Drawing
-renderToDrawing {height} {width, offset} = foldMap render'
-  where render' {drawing, point: Normalized {x, y}} =
-          let p = nPointToFrame width height $ Normalized {x, y: 1.0 - y}
-          in translate (p.x + offset) p.y drawing
-
 
 
 drawInterval :: forall f r a.
             Foldable f
-         => { height :: Pixels | r }
+         => Canvas.Dimensions
          -> { width :: Pixels, offset :: Pixels }
          -> f { drawing :: Drawing, point :: Normalized Point }
          -> Drawing
@@ -254,9 +248,13 @@ drawDemo :: forall f r.
 drawDemo cs s canvasBox {gwas, annots} =
   let renderers = renderersDemo s
       ivals v = viewportIntervals cs canvasBox v
+type CanvasReadyDrawing = Drawing
 
       gwasRendered   = runRendererN renderers.gwas   <$> gwas
       annotsRendered = runRendererN renderers.annots <$> annots
+type BrowserTrack = Canvas.Dimensions
+                 -> Interval BrowserPoint
+                 -> CanvasReadyDrawing
 
       drawToViewport v x = fold $ zipMapsWith (drawInterval canvasBox) (ivals v) x
 
@@ -405,7 +403,7 @@ renderersDemo :: forall r.
 renderersDemo s = { gwas, annots }
   where gwas :: PureRenderer _
         gwas = { drawing: gwasDraw navy
-                , point:   gwasPoint s mouseChrCtx }
+               , point:  gwasPoint s mouseChrCtx }
 
         annots :: PureRenderer (Annot (minY :: Number))
         annots = { drawing: annotDraw
@@ -535,7 +533,7 @@ demoBrowser :: forall f.
                Foldable f
             => Filterable f
             => CoordSys ChrId BrowserPoint
-            -> { width :: Pixels, height :: Pixels }
+            -> Canvas.Dimensions
             -> Pixels
             -- this by the vertical scale and the tracks
             -> { min :: Number, max :: Number, sig :: Number }
