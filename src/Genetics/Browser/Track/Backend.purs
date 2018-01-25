@@ -8,10 +8,10 @@ import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Reader (class MonadReader, ask)
+import Control.MonadPlus (guard)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array ((..))
 import Data.Array as Array
-import Data.Bifunctor (bimap)
 import Data.Filterable (class Filterable, filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
 import Data.FunctorWithIndex (mapWithIndex)
@@ -20,6 +20,7 @@ import Data.Lens (Fold', Traversal', foldMapOf, to, traversed, (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
+import Data.List.Types (NonEmptyList(..))
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
@@ -29,12 +30,16 @@ import Data.Pair (Pair(..))
 import Data.Profunctor.Strong (fanout)
 import Data.Record as Record
 import Data.Symbol (SProxy(..))
-import Data.Traversable (traverse)
+import Data.Traversable (class Traversable, sequence, traverse)
 import Data.Tuple (Tuple(Tuple), snd, uncurry)
-import Data.Unfoldable (class Unfoldable, none)
+import Data.Validation.Semigroup (V)
+import Data.Validation.Semigroup as V
+import Debug.Trace as Debug
 import Genetics.Browser.Types (Bp(Bp), ChrId(..), Point)
-import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(CoordSys), Interval, Normalized(Normalized), _BrowserIntervals, _CoordSys, _Index, _Interval, intervalToScreen, intervalsToMap, nPointToFrame, normPoint, viewIntervals)
-import Genetics.Browser.View (Pixels)
+import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(CoordSys), Interval, Normalized(Normalized), _BrowserIntervals, _Index, _Interval, intervalToScreen, intervalsToMap, nPointToFrame, normPoint, viewIntervals)
+import Genetics.Browser.View (Pixels, chrsInRange)
+import Global.Unsafe (unsafeStringify)
+import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, scale, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
@@ -161,6 +166,28 @@ runRenderer render a = do
   point <- render.point a
   pure { drawing: render.drawing a
        , point }
+
+
+type Validated a = V (NonEmptyList String) a
+
+
+validPoint :: forall err a.
+              PureRenderer a
+           -> a
+           -> Validated (Normalized Point)
+validPoint r a = case r.point a of
+  Nothing -> V.invalid $ pure ("Could not place point for feature: " <> unsafeStringify a)
+  Just p  -> pure p
+
+
+validRender :: forall err a.
+               PureRenderer a
+            -> a
+            -> Validated { drawing :: Drawing, point :: Normalized Point }
+validRender render a =
+      {drawing: _, point: _}
+  <$> (pure $ render.drawing a)
+  <*> validPoint render a
 
 runRendererN :: forall f a.
                 Filterable f
