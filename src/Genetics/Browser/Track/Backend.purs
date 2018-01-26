@@ -85,13 +85,20 @@ zipMapsWith f a b = uncurry f <$> zipMaps a b
 type ChrCtx r = Map ChrId (Record r)
 
 
+data HPos =
+    HPt (Normalized Number)
 
-type DrawFeature a  = a -> Drawing
-type PointFeature a = a -> Maybe (Normalized Point)
+type HorPlaceFeature a = a -> Maybe HPos
+type VerPlaceFeature a = a -> Normalized Number
+type DrawFeature a     = a -> Drawing
 
 
 type PureRenderer a = { drawing :: DrawFeature a
-                      , point   :: PointFeature a }
+                      , horPlace :: HorPlaceFeature a
+                      , verPlace :: VerPlaceFeature a
+                      }
+
+
 
 
 type GWASFeature r = { score :: Number
@@ -99,7 +106,7 @@ type GWASFeature r = { score :: Number
                      , chrId :: ChrId | r }
 
 
-gwasDraw :: Color -> DrawFeature (GWASFeature _)
+gwasDraw :: forall a. Color -> DrawFeature a
 gwasDraw color =
   let r = 2.2
       c = circle 0.0 0.0 r
@@ -108,18 +115,19 @@ gwasDraw color =
   in const $ out <> fill
 
 
-
-gwasPoint :: forall m rf rctx.
-             {min :: Number, max :: Number, sig :: Number}
-          -> ChrCtx (size :: Bp | rctx)
-          -> (PointFeature (GWASFeature rf))
-gwasPoint {min, max} = do
+pointHorPlace :: forall rf rctx.
+                 ChrCtx (size :: Bp | rctx)
+              -> HorPlaceFeature { chrId :: ChrId, pos :: Bp | rf }
+pointHorPlace = do
   ctx <- ask
-  pure \f -> do
+  pure $ \f -> do
         size <- _.size <$> Map.lookup f.chrId ctx
-        let x = unwrap $ f.pos / size
-            y = (f.score - min) / (max - min)
-        pure $ Normalized {x, y}
+        pure $ HPt $ Normalized $ unwrap $ f.pos / size
+
+gwasVerPlace :: forall rf.
+              {min :: Number, max :: Number, sig :: Number}
+           -> VerPlaceFeature (GWASFeature rf)
+gwasVerPlace {min, max} f = Normalized $ (f.score - min) / (max - min)
 
 
 annotDraw :: forall rf.
@@ -135,56 +143,43 @@ annotDraw an = out <> fill <> text'
                   (fillColor black) an.name
 
 
-annotPoint :: forall m rf rctx.
-              MonadReader (ChrCtx (size :: Bp | rctx)) m
-           => m (PointFeature (Annot rf))
-annotPoint = do
-  ctx <- ask
-  pure \f -> do
-        size <- _.size <$> Map.lookup f.chrId ctx
-        let x = unwrap $ f.pos / size
-            y = 0.0
-        normPoint {x, y}
-
-shiftPlaceFeatureMinY :: forall rf.
-                         RowLacks "minY" rf
-                      => Number
-                      -> { min :: Number, max :: Number, sig :: Number }
-                      -> PointFeature (Record rf)
-                      -> PointFeature (Record (minY :: Number | rf))
-shiftPlaceFeatureMinY dist s pointF f = do
-  point <- pointF (Record.delete (SProxy :: SProxy "minY") f)
-  let {x,y} = unwrap point
+shiftVerPlaceMinY :: forall rf.
+                     RowLacks "minY" rf
+                  => Number
+                  -> { min :: Number, max :: Number, sig :: Number }
+                  -> VerPlaceFeature (Record rf)
+                  -> VerPlaceFeature (Record (minY :: Number | rf))
+shiftVerPlaceMinY dist s pointF f =
+  let y = pointF (Record.delete (SProxy :: SProxy "minY") f)
       normY = (f.minY - s.min) / (s.max - s.min)
       y' = min (normY + dist) 0.95
-
-  normPoint {x, y: y'}
-
-
+  in Normalized $ y'
 
 
 
 type Validated a = V (NonEmptyList String) a
 
 
-validPoint :: forall err a.
-              PureRenderer a
-           -> a
-           -> Validated (Normalized Point)
-validPoint r a = case r.point a of
-  Nothing -> V.invalid $ pure ("Could not place point for feature: " <> unsafeStringify a)
-  Just p  -> pure p
+validHorPlace :: forall r a.
+                 { horPlace :: HorPlaceFeature a | r }
+              -> a
+              -> Validated HPos
+validHorPlace {horPlace} a =
+  maybe
+    (V.invalid $ pure ("Could not place point for feature: " <> unsafeStringify a))
+    pure
+    (horPlace a)
 
 
 validRender :: forall err a.
                PureRenderer a
             -> a
-            -> Validated { drawing :: Drawing, point :: Normalized Point }
+            -> Validated { drawing :: Drawing, horPos :: HPos, verPos :: Normalized Number }
 validRender render a =
-      {drawing: _, point: _}
+      {drawing: _, horPos: _, verPos: _}
   <$> (pure $ render.drawing a)
-  <*> validPoint render a
-
+  <*> validHorPlace render a
+  <*> (pure $ render.verPlace a)
 
 
 
@@ -195,20 +190,21 @@ type BrowserTrack = Canvas.Dimensions
                  -> Interval BrowserPoint
                  -> CanvasReadyDrawing
 
-drawInterval :: forall f r a.
-            Foldable f
-         => Canvas.Dimensions
-         -> { width :: Pixels, offset :: Pixels }
-         -> f { drawing :: Drawing, point :: Normalized Point }
-         -> CanvasReadyDrawing
-drawInterval {height} {width, offset} =
-  foldMap \g ->
-          let {x,y} = nPointToFrame width height $ g.point
-                -- Flipping y-axis so it increases upward
-              yFlip = height - y
-          in translate (x + offset) yFlip g.drawing
 
 
+
+drawIntervalGlyph :: forall f r a.
+                     Foldable f
+                  => Canvas.Dimensions
+                  -> { width :: Pixels, offset :: Pixels }
+                  -> f { drawing :: Drawing, horPos :: HPos, verPos :: Normalized Number }
+                  -> CanvasReadyDrawing
+drawIntervalGlyph {height} {width, offset} = foldMap drawIt
+  where drawIt {drawing, horPos, verPos} =
+          let x = width * case horPos of
+                    HPt x' -> unwrap x'
+              y = height * (1.0 - unwrap verPos)
+          in translate (x + offset) y drawing
 -- | Returns the left-hand-edge offset, and width, in pixels,
 -- | of each interval (chromosome) in the provided coordinate system
 viewportIntervals :: forall i a r.
@@ -224,10 +220,10 @@ viewportIntervals cs cdim bView =
 pureTrack :: forall f a.
              Foldable f
           => CoordSys ChrId BrowserPoint
-          -> Map ChrId (f {drawing :: Drawing, point :: Normalized Point})
+          -> Map ChrId (f { drawing :: Drawing, horPos :: HPos, verPos :: Normalized Number })
           -> BrowserTrack
 pureTrack cs drawings cd v =
-  fold $ zipMapsWith (drawInterval cd) (viewportIntervals cs cd v) drawings
+  fold $ zipMapsWith (drawIntervalGlyph cd) (viewportIntervals cs cd v) drawings
 
 
 validateTrack :: forall f a.
@@ -238,10 +234,9 @@ validateTrack :: forall f a.
               -> Map ChrId (f a)
               -> Validated BrowserTrack
 validateTrack cs r chrs =
-  let validDrawings :: Validated (Map ChrId (f {drawing :: Drawing, point :: Normalized Point}))
-      validDrawings = traverse (traverse $ validRender r) chrs
-
+  let validDrawings = traverse (traverse $ validRender r) chrs
   in pureTrack cs <$> validDrawings
+
 
 
 demoTrack :: forall f r.
@@ -394,13 +389,14 @@ renderersDemo :: forall r.
                 , annots :: PureRenderer _
                 }
 renderersDemo s = { gwas, annots }
-  where gwas :: PureRenderer _
-        gwas = { drawing: gwasDraw navy
-               , point:  gwasPoint s mouseChrCtx }
+  where gwas = { drawing: gwasDraw navy
+               , horPlace: pointHorPlace mouseChrCtx
+               , verPlace: gwasVerPlace s }
 
         annots :: PureRenderer (Annot (minY :: Number))
         annots = { drawing: annotDraw
-                 , point:   shiftPlaceFeatureMinY 0.06 s $ annotPoint mouseChrCtx }
+                 , horPlace: pointHorPlace mouseChrCtx
+                 , verPlace: shiftVerPlaceMinY 0.06 s $ const (Normalized zero) }
 
 
 horRulerTrack :: forall r r1.
@@ -418,7 +414,9 @@ chrLabelTrack :: CoordSys ChrId BrowserPoint
               -> BrowserTrack
 chrLabelTrack cs = pureTrack cs (Map.fromFoldable results)
   where mkLabel :: ChrId -> _
-        mkLabel chr = { drawing: chrText chr, point: Normalized {x: 1.0, y: -0.1} }
+        mkLabel chr = { drawing: chrText chr
+                      , horPos: (HPt $ Normalized $ one)
+                      , verPos: Normalized (-0.1) }
 
         font' = font sansSerif 12 mempty
 
