@@ -22,6 +22,7 @@ import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Genetics.Browser.Types (Bp, Point)
 import Genetics.Browser.View (Pixels)
+import Graphics.Canvas as Canvas
 
 
 
@@ -290,7 +291,7 @@ canvasToBrowserPoint cw v@(Pair vL vR) x =
 
 
 browserPointToCanvas :: forall r.
-                        { width :: Number | r }
+                        Canvas.Dimensions
                      -> Interval BrowserPoint
                      -> BrowserPoint
                      -> Number
@@ -305,7 +306,7 @@ browserPointToCanvas screenSize v@(Pair vL vR) p = relPointToNumber pixels'
 
 
 intervalToScreen :: forall i c r.
-                    { width :: Number | r }
+                    Canvas.Dimensions
                  -> Interval BrowserPoint
                  -> Interval BrowserPoint
                  -> { width :: Number, offset :: Number }

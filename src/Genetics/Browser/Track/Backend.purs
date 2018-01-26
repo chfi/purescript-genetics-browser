@@ -11,40 +11,37 @@ import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive,
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
-import Control.Monad.Reader (class MonadReader, ask)
-import Control.MonadPlus (guard)
+import Control.Monad.Reader (ask)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array ((..))
 import Data.Array as Array
-import Data.Filterable (class Filterable, filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens (Fold', Traversal', foldMapOf, to, traversed, view, (^.), (^?))
+import Data.Lens (view, (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
-import Data.List.Types (NonEmptyList(..))
+import Data.List.Types (NonEmptyList)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
+import Data.Maybe (Maybe(Just, Nothing), fromMaybe, maybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (class Newtype, unwrap, wrap)
-import Data.Pair (Pair(..))
-import Data.Profunctor.Strong (fanout)
 import Data.Record as Record
 import Data.Symbol (SProxy(..))
-import Data.Traversable (class Traversable, sequence, traverse)
+import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(Tuple), snd, uncurry)
 import Data.Validation.Semigroup (V)
 import Data.Validation.Semigroup as V
+import Data.Variant (Variant)
 import Debug.Trace as Debug
-import Genetics.Browser.Types (Bp(Bp), ChrId(..), Point)
-import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys(CoordSys), Interval, Normalized(Normalized), _BrowserIntervals, _Index, _Interval, intervalToScreen, intervalsToMap, nPointToFrame, normPoint, viewIntervals)
-import Genetics.Browser.View (Pixels, chrsInRange)
+import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
+import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, Normalized(Normalized), _BrowserIntervals, _Index, _Interval, intervalToScreen, intervalsToMap)
+import Genetics.Browser.View (Pixels)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, scale, translate)
+import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
@@ -508,9 +505,7 @@ demoLegend =
 
               -- the first 2 are used by all parts of the browser
 demoBrowser :: forall f.
-               Foldable f
-            => Traversable f
-            => Filterable f
+               Traversable f
             => CoordSys ChrId BrowserPoint
             -> Canvas.Dimensions
             -> Pixels
@@ -525,7 +520,7 @@ demoBrowser :: forall f.
             -- to be drawn in the legend on the RHS
             -> Array { text :: String, icon :: Drawing }
             -- finally, used by the main track
-            -> { gwas :: Map ChrId (f (GWASFeature ()))
+            -> { gwas   :: Map ChrId (f (GWASFeature ()))
                , annots :: Map ChrId (f (Annot (minY :: Number))) }
             -> BrowserView
             -- the drawing produced contains all 3 parts.
