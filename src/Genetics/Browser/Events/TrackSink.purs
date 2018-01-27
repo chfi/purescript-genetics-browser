@@ -10,7 +10,7 @@ module Genetics.Browser.Events.TrackSink where
 import Prelude
 
 import Control.Alternative ((<|>))
-import Control.Monad.Aff (Aff, Canceler, forkAff)
+import Control.Monad.Aff (Aff, Canceler, Fiber, forkAff)
 import Control.Monad.Aff.AVar (AVAR)
 import Control.Monad.Aff.Bus (BusRW)
 import Control.Monad.Aff.Bus as Bus
@@ -75,11 +75,12 @@ runTrackSink (TrackSink sink) event = do
   pure $ f event.evData
 
 
-forkTrackSink :: ∀ env eff.
+
+forkTrackSink :: ∀ env eff a.
                  TrackSink (env -> Eff eff Unit)
               -> env
               -> BusRW Event
-              -> Aff (avar :: AVAR | eff) (Canceler (avar :: AVAR | eff))
+              -> Aff (avar :: AVAR | eff) (Fiber (avar :: AVAR | eff) a)
 forkTrackSink sink env bus = forkAff $ forever do
   event <- Bus.read bus
   let effect :: Maybe (env -> Eff (avar :: AVAR | eff) Unit)

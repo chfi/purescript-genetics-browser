@@ -1,5 +1,5 @@
 {
-  "name": "bd-purs-renderer",
+  "name": "graph-genetics-browser",
   "ignore": [
     "**/.*",
     "node_modules",
@@ -18,25 +18,24 @@
     "purescript-generics-rep": "^5.1.0",
     "purescript-orders": "^3.0.0",
     "purescript-newtype": "^2.0.0",
-    "purescript-halogen": "^2.0.1",
-    "purescript-profunctor": "3.0.0",
+    "purescript-halogen": "^3.1.1",
+    "purescript-profunctor": "^3.2.0",
     "purescript-argonaut": "^3.0.0",
     "purescript-coroutines": "^4.0.0",
-    "purescript-variant": "^3.1.0",
+    "purescript-variant": "^4.0.0",
     "purescript-contravariant": "3.1.0",
-    "purescript-aff-bus": "^2.0.0",
-    "purescript-aff": "^3.0.0",
-    "purescript-affjax": "^4.0.0",
-    "purescript-rx": "^2.0.0",
+    "purescript-aff": "^4.0.2",
+    "purescript-aff-bus": "^3.0.0",
+    "purescript-aff-promise": "^1.0.0",
+    "purescript-affjax": "^5.0.0",
     "purescript-record": "^0.2.0",
     "purescript-foreign": "^4.0.0",
     "purescript-globals": "^3.0.0",
     "purescript-dom": "^4.1.0",
     "purescript-typelevel-prelude": "^2.4.0",
-    "purescript-aff-promise": "^0.7.0",
     "purescript-foreign-generic": "4.1.0",
     "purescript-nullable": "^3.0.0",
-    "purescript-ipfs-api": "^0.0.2",
+    "purescript-ipfs-api": "^0.0.3",
     "purescript-errors": "^3.0.0",
     "purescript-profunctor-lenses": "^3.2.0",
     "purescript-options": "^3.0.0",
@@ -57,10 +56,13 @@
   "devDependencies": {
     "purescript-psci-support": "^3.0.0",
     "purescript-debug": "^3.0.0",
-    "purescript-spec": "^1.0.0",
+    "purescript-spec": "^2.0.0",
+    "purescript-spec-quickcheck": "2.0.0",
     "purescript-jack": "^2.0.0",
     "purescript-quickcheck": "^4.6.0",
-    "purescript-spec-quickcheck": "1.0.0",
     "purescript-quickcheck-laws": "^3.0.1"
+  },
+  "resolutions": {
+    "purescript-aff": "^4.0.2"
   }
 }

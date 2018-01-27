@@ -2,7 +2,7 @@ module Genetics.Browser.Biodalliance.Source.IPFS where
 
 import Prelude
 
-import Control.Monad.Aff (Aff, makeAff)
+import Control.Monad.Aff (Aff, Error, effCanceler, makeAff, nonCanceler)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
 import Data.Argonaut (class DecodeJson, Json, decodeJson, jsonParser)
@@ -15,13 +15,17 @@ import IPFS.Types (IPFSPath(..))
 import Node.Encoding (Encoding(..))
 import Node.Stream (Readable)
 import Node.Stream as Stream
+import Unsafe.Coerce (unsafeCoerce)
+
 
 
 affOnDataString :: Readable _ _
                 -> Encoding
                 -> Aff _ String
 affOnDataString stream encoding =
-  makeAff (\error success -> Stream.onDataString stream encoding success)
+  makeAff \cb -> do
+    Stream.onDataString stream encoding (cb <<< pure)
+    pure nonCanceler
 
 
 fetchIPFSFeatures :: ∀ f a.
