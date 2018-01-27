@@ -6,7 +6,7 @@ import Prelude
 
 import Color (black)
 import Control.Alt ((<|>))
-import Control.Monad.Aff (launchAff)
+import Control.Monad.Aff (launchAff, liftEff')
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Exception (error)
@@ -38,7 +38,7 @@ import Data.Tuple (Tuple(Tuple))
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Backend (demoBrowser, demoLegend, getDataDemo)
+import Genetics.Browser.Track.Demo (demoBrowser, demoLegend, getDataDemo)
 import Genetics.Browser.Types (Bp, ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys, Interval, RelPoint, _BrowserSize, canvasToView, findBrowserInterval, intervalToGlobal, mkCoordSys, shiftIntervalBy, zoomIntervalBy)
 import Genetics.Browser.View (Pixels)
@@ -187,9 +187,9 @@ browserDrag :: forall r.
             -> Event Point
             -> Event (Ratio BigInt)
 browserDrag w ev = f <$> ev
-  where f :: _ -> _
+  where f :: {x::_, y::_} -> Ratio BigInt
         f {x} = let width' = BigInt.fromInt $ Int.round w.width
-                    x' = BigInt.fromInt $ Int.round x
+                    x'     = BigInt.fromInt $ Int.round x
                 in x' % width'
 
 
