@@ -11,7 +11,6 @@ import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive,
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
-import Control.Monad.Reader (ask)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array ((..))
 import Data.Array as Array
@@ -22,33 +21,27 @@ import Data.Lens (Getter', to, view, (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
-import Data.List.Types (NonEmptyList)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(Just, Nothing), fromMaybe, maybe)
+import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
 import Data.Monoid (class Monoid, mempty)
-import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.Newtype (class Newtype, unwrap)
 import Data.Pair (Pair(..))
 import Data.Record as Record
 import Data.Symbol (class IsSymbol, SProxy(..))
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(Tuple), snd, uncurry)
-import Data.Validation.Semigroup (V)
-import Data.Validation.Semigroup as V
-import Data.Variant (Variant, case_, default, inj, on, onMatch)
-import Data.Variant as Variant
-import Debug.Trace as Debug
+import Data.Variant (Variant, case_, inj, on, onMatch)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, Normalized(Normalized), _BrowserIntervals, _Index, _Interval, inInterval, intervalToScreen, intervalsOverlap, intervalsToMap, lookupInterval)
+import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, Normalized(Normalized), _BrowserIntervals, _Index, _Interval, intervalToScreen, intervalsOverlap, intervalsToMap, lookupInterval)
 import Genetics.Browser.View (Pixels)
-import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class RowLacks)
-import Unsafe.Coerce (unsafeCoerce)
+
 
 type BrowserView = Interval BrowserPoint
 
@@ -84,26 +77,17 @@ zipMapsWith f a b = uncurry f <$> zipMaps a b
 type ChrCtx r = Map ChrId (Record r)
 
 
-data HPos =
-    HPt (Normalized Number)
-
-type HorPlaceFeature a = a -> Maybe HPos
-type VerPlaceFeature a = a -> Normalized Number
-type DrawFeature a     = a -> Drawing
-
 _point = SProxy :: SProxy "point"
 _range = SProxy :: SProxy "range"
 
 type GenomePosV = Variant ( point :: Bp
                           , range :: Interval Bp )
 
-
-
 type FeatureR r = ( position :: GenomePosV
                   , frameSize :: Bp
                   | r )
 
-type FeatureV r = Record (FeatureR r)
+type Feature r = Record (FeatureR r)
 
 
 type DrawingR  = ( point :: Drawing
@@ -114,44 +98,26 @@ type DrawingV  = Variant DrawingR
 type HorPlaceR = ( point :: Normalized Number
                  , range :: Interval (Normalized Number) )
 
-type HorPlaceV = Variant HorPlaceR
-
-covers :: forall a. FeatureV a -> Interval Bp
-covers {position} = case_
-  # onMatch
-     { point: (\x -> Pair x x)
-     , range: (\x -> x)
-     }
-  $ position
-
--- Given a frame-normalized drawing, finalize it so it can be rendered to a canvas;
--- `width` is the width in pixels of the frame the drawing resides in.
-resizeDrawing :: forall r.
-                 { width :: Pixels | r }
-              -> DrawingV
-              -> Drawing
-resizeDrawing {width} = case_
-  # onMatch
-     { point: (\x -> x)
-     , range: (_ $ width) }
+type HPos = Variant HorPlaceR
 
 
-type DrawFeatureV a     = a -> DrawingV
-type HorPlaceFeatureV a = a -> Maybe HorPlaceV
-                      , horPlace :: HorPlaceFeature a
-                      , verPlace :: VerPlaceFeature a
+
+type PureRenderer a = { draw     :: a -> DrawingV
+                      , horPlace :: a -> HPos
+                      , verPlace :: a -> Normalized Number
                       }
 
 
+type ReadyGlyph = { drawing :: DrawingV
+                  , horPos  :: HPos
+                  , verPos  :: Normalized Number
+                  }
 
 
-type GWASFeature r = { score :: Number
-                     , pos :: Bp
-                     , chrId :: ChrId | r }
-horPlaceV :: forall r.
-             FeatureV r
-          -> HorPlaceV
-horPlaceV {position, frameSize} =
+horPlace :: forall r.
+            Feature r
+         -> HPos
+horPlace {position, frameSize} =
   let f p = Normalized (unwrap $ p / frameSize)
   in case_
     # onMatch
@@ -161,182 +127,24 @@ horPlaceV {position, frameSize} =
     $ position
 
 
-gwasDraw :: forall a. Color -> DrawFeature a
-gwasDraw color =
-  let r = 2.2
-      c = circle 0.0 0.0 r
-      out = outlined (outlineColor color) c
-      fill = filled (fillColor color) c
-  in const $ out <> fill
-pointHorPlaceV :: forall rf rctx.
-                  ChrCtx (size :: Bp | rctx)
-               -> HorPlaceFeatureV { chrId :: ChrId, pos :: Bp | rf }
-pointHorPlaceV = do
-  ctx <- ask
-  pure $ \f -> do
-        size <- _.size <$> Map.lookup f.chrId ctx
-        pure $ inj _point $ Normalized $ unwrap $ f.pos / size
-
-
-pointHorPlace :: forall rf rctx.
-                 ChrCtx (size :: Bp | rctx)
-              -> HorPlaceFeature { chrId :: ChrId, pos :: Bp | rf }
-pointHorPlace = do
-  ctx <- ask
-  pure $ \f -> do
-        size <- _.size <$> Map.lookup f.chrId ctx
-        pure $ HPt $ Normalized $ unwrap $ f.pos / size
-
-gwasVerPlace :: forall rf.
-              {min :: Number, max :: Number, sig :: Number}
-           -> VerPlaceFeature (GWASFeature rf)
-gwasVerPlace {min, max} f = Normalized $ (f.score - min) / (max - min)
+verPlace :: forall r.
+            (Getter' (Feature r) (Normalized Number))
+         -> Feature r
+         -> Normalized Number
+verPlace f ft = ft ^. f
 
 
 
-annotDrawV :: forall rf.
-              DrawFeatureV (Annot rf)
-annotDrawV an = inj _point $ out <> fill <> text'
-  where rad = 5.0
-        c = circle zero zero rad
-        out  = outlined (outlineColor maroon <> lineWidth 3.0) c
-        fill = filled   (fillColor red) c
-        text' = Drawing.text
-                  (font sansSerif 12 mempty)
-                  (7.5) (2.5)
-                  (fillColor black) an.name
+render :: forall err a.
+          PureRenderer a
+       -> a
+       -> ReadyGlyph
+render render a =
+      { drawing: render.draw a
+      , horPos:  render.horPlace a
+      , verPos:  render.verPlace a
+      }
 
-
-annotDraw :: forall rf.
-             DrawFeature (Annot rf)
-annotDraw an = out <> fill <> text'
-  where rad = 5.0
-        c = circle zero zero rad
-        out  = outlined (outlineColor maroon <> lineWidth 3.0) c
-        fill = filled   (fillColor red) c
-        text' = Drawing.text
-                  (font sansSerif 12 mempty)
-                  (7.5) (2.5)
-                  (fillColor black) an.name
-
-
-shiftVerPlaceMinY :: forall rf.
-                     RowLacks "minY" rf
-                  => Number
-                  -> { min :: Number, max :: Number, sig :: Number }
-                  -> VerPlaceFeature (Record rf)
-                  -> VerPlaceFeature (Record (minY :: Number | rf))
-shiftVerPlaceMinY dist s pointF f =
-  let y = pointF (Record.delete (SProxy :: SProxy "minY") f)
-      normY = (f.minY - s.min) / (s.max - s.min)
-      y' = min (normY + dist) 0.95
-  in Normalized $ y'
-
-
-
-type Validated a = V (NonEmptyList String) a
-
-
-validHorPlace :: forall r a.
-                 { horPlace :: HorPlaceFeature a | r }
-              -> a
-              -> Validated HPos
-validHorPlace {horPlace} a =
-  maybe
-    (V.invalid $ pure ("Could not place point for feature: " <> unsafeStringify a))
-    pure
-    (horPlace a)
-
-
-validRender :: forall err a.
-               PureRenderer a
-            -> a
-            -> Validated { drawing :: Drawing, horPos :: HPos, verPos :: Normalized Number }
-validRender render a =
-      {drawing: _, horPos: _, verPos: _}
-  <$> (pure $ render.drawing a)
-  <*> validHorPlace render a
-  <*> (pure $ render.verPlace a)
-
-
-
-
-type CanvasReadyDrawing = Drawing
-
-type BrowserTrack = Canvas.Dimensions
-                 -> Interval BrowserPoint
-                 -> CanvasReadyDrawing
-
-
-
-
-drawIntervalGlyph :: forall f r a.
-                     Foldable f
-                  => Canvas.Dimensions
-                  -> { width :: Pixels, offset :: Pixels }
-                  -> f { drawing :: Drawing, horPos :: HPos, verPos :: Normalized Number }
-                  -> CanvasReadyDrawing
-drawIntervalGlyph {height} {width, offset} = foldMap drawIt
-  where drawIt {drawing, horPos, verPos} =
-          let x = width * case horPos of
-                    HPt x' -> unwrap x'
-              y = height * (1.0 - unwrap verPos)
-          in translate (x + offset) y drawing
--- | Returns the left-hand-edge offset, and width, in pixels,
--- | of each interval (chromosome) in the provided coordinate system
-viewportIntervals :: forall i a r.
-                     Ord i
-                  => CoordSys i BrowserPoint
-                  -> Canvas.Dimensions
-                  -> Interval BrowserPoint
-                  -> Map i { width :: Pixels, offset :: Pixels }
-viewportIntervals cs cdim bView =
-  intervalToScreen cdim bView <$> (view _Interval <$> intervalsToMap cs)
-
-
-pureTrack :: forall f a.
-             Foldable f
-          => CoordSys ChrId BrowserPoint
-          -> Map ChrId (f { drawing :: Drawing, horPos :: HPos, verPos :: Normalized Number })
-          -> BrowserTrack
-pureTrack cs drawings cd v =
-  fold $ zipMapsWith (drawIntervalGlyph cd) (viewportIntervals cs cd v) drawings
-
-
-validateTrack :: forall f a.
-                 Foldable f
-              => Traversable f
-              => CoordSys ChrId BrowserPoint
-              -> PureRenderer a
-              -> Map ChrId (f a)
-              -> Validated BrowserTrack
-validateTrack cs r chrs =
-  let validDrawings = traverse (traverse $ validRender r) chrs
-  in pureTrack cs <$> validDrawings
-
-
-
-demoTrack :: forall f r.
-             Foldable f
-          => Traversable f
-          => CoordSys ChrId BrowserPoint
-          -> { min :: Number, max :: Number, sig :: Number }
-          -> { gwas   :: Map ChrId (f (GWASFeature ()))
-             , annots :: Map ChrId (f (Annot (minY :: Number))) }
-          -> Validated BrowserTrack
-demoTrack cs s {gwas, annots} =
-  let renderers = renderersDemo s
-
-      gwasTrack   = validateTrack cs renderers.gwas gwas
-      annotsTrack = validateTrack cs renderers.annots annots
-
-      chrLabels = chrLabelTrack cs
-      ruler = horRulerTrack s red
-
-  in pure chrLabels
-  <> pure ruler
-  <> gwasTrack
-  <> annotsTrack
 
 
 fetchJSON :: forall a.
@@ -353,213 +161,82 @@ fetchJSON p url = do
       Just fs -> pure $ fs
 
 
-gemmaJSONParse :: Json -> Maybe (GWASFeature ())
-gemmaJSONParse j = do
-  obj <- j ^? _Object
-  chrId <- ChrId <$> obj ^? ix "chr" <<< _String
-  pos   <- Bp    <$> obj ^? ix "ps"  <<< _Number
-  score <-           obj ^? ix "af"  <<< _Number
-  pure {pos, score, chrId}
 
 
-fetchGemmaJSON :: String -> Aff _ (Array (GWASFeature ()))
-fetchGemmaJSON = fetchJSON gemmaJSONParse
+
+type CanvasReadyDrawing = Drawing
+
+type BrowserTrack = Canvas.Dimensions
+                 -> Interval BrowserPoint
+                 -> CanvasReadyDrawing
 
 
-type GeneRow r = ( geneID :: String
-                 , desc :: String
-                 , start :: Bp
-                 , end :: Bp
-                 , name :: String
-                 , chrId :: ChrId | r )
+-- Given a frame-normalized drawing, finalize it so it can be rendered to a canvas;
+-- `width` is the width in pixels of the frame the drawing resides in.
+resizeDrawing :: forall r.
+                 { width :: Pixels | r }
+              -> DrawingV
+              -> Drawing
+resizeDrawing {width} = case_
+  # onMatch
+     { point: (\x -> x)
+     , range: (_ $ width) }
 
-type Gene r = Record (GeneRow r)
-
-type Gene2 r = FeatureV (GeneRow r)
-
-
-geneJSONParse2 :: CoordSys _ _
-               -> Json
-               -> Maybe (Gene2 ())
-geneJSONParse2 cs j = do
-  obj    <- j ^? _Object
-  geneID <- obj ^? ix "Gene stable ID" <<< _String
-  desc   <- obj ^? ix "Gene description" <<< _String
-  name   <- obj ^? ix "Gene name" <<< _String
-  start  <- Bp    <$> obj ^? ix "Gene start (bp)"  <<< _Number
-  end    <- Bp    <$> obj ^? ix "Gene end (bp)"  <<< _Number
-  chrId  <- ChrId <$> obj ^? ix "ChrId" <<< _String
-
-  {chrSize} <- lookupInterval cs chrId
-
-  pure { position: inj _range (Pair start end)
-       , frameSize: chrSize
-       , geneID
-       , desc
-       , name
-       , start
-       , end
-       , chrId
-       }
-
-
-geneJSONParse :: Json -> Maybe (Gene ())
-geneJSONParse j = do
-  obj    <- j ^? _Object
-  geneID <- obj ^? ix "Gene stable ID" <<< _String
-  desc   <- obj ^? ix "Gene description" <<< _String
-  name   <- obj ^? ix "Gene name" <<< _String
-  start  <- Bp    <$> obj ^? ix "Gene start (bp)"  <<< _Number
-  end    <- Bp    <$> obj ^? ix "Gene end (bp)"  <<< _Number
-  chrId  <- ChrId <$> obj ^? ix "ChrId" <<< _String
-  pure {geneID, desc, name, start, end, chrId}
-
-
-fetchGeneJSON :: String -> Aff _ (Array (Gene ()))
-fetchGeneJSON = fetchJSON geneJSONParse
-
-
-type AnnotRow r = ( geneID :: String
-                  , desc :: String
-                  , pos :: Bp
-                  , name :: String
-                  , chrId :: ChrId | r )
-
-type Annot r = Record (AnnotRow r)
-
-
-type AnnotRow2 r = ( geneID :: String
-                   , desc :: String
-                   , name :: String
-                   , chrId :: ChrId | r )
-
-type Annot2 r = FeatureV (AnnotRow2 r)
-
-
-fetchAnnotJSON2 :: CoordSys _ _
-                -> String
-                -> Aff _ (Array (Annot2 ()))
-fetchAnnotJSON2 cs str = map toAnnot <$> fetchJSON (geneJSONParse2 cs) str
-  where toAnnot :: Gene2 () -> Annot2 ()
-        toAnnot gene = { geneID: gene.geneID
-                       , desc: gene.desc
-                       , position: gene.position
-                       , frameSize: gene.frameSize
-                       , name: gene.name
-                       , chrId: gene.chrId }
-
-
-fetchAnnotJSON :: String -> Aff _ (Array (Annot ()))
-fetchAnnotJSON str = map toAnnot <$> fetchJSON geneJSONParse str
-  where toAnnot :: Gene () -> Annot ()
-        toAnnot gene = { geneID: gene.geneID
-                       , desc: gene.desc
-                       , pos: gene.start
-                       , name: gene.name
-                       , chrId: gene.chrId }
-
-
-bumpFeatures :: forall f a l i o.
-                Foldable f
-             => Functor f
-             => RowCons l Number (FeatureR i) (FeatureR o)
-             => RowLacks l (FeatureR i)
-             => IsSymbol l
-             => Getter' (FeatureV a) Number
-             -> SProxy l
-             -> Bp
-             -> f (FeatureV a)
-             -> f (FeatureV i)
-             -> f (FeatureV o)
-bumpFeatures f l radius other = map bumpAnnot
-  where maxInRadius :: Interval Bp -> Number
-        maxInRadius lr = fromMaybe 0.0 $ maximum
-                          $ map (\g -> if intervalsOverlap (covers g) lr
-                                          then f `view` g else 0.0) other
-
-        bumpAnnot :: Record (FeatureR i) -> Record (FeatureR o)
-        bumpAnnot a =
-          let y = maxInRadius (covers a)
-          in Record.insert l y a
-
-
-bumpAnnots :: Bp
-           -> List (GWASFeature2 ())
-           -> List (Annot2 ())
-           -> List (Annot2 (minY :: Number))
-bumpAnnots =
-  bumpFeatures (to (_.score)) (SProxy :: SProxy "minY")
+drawIntervalFeature :: forall f r a.
+                     Foldable f
+                  => Canvas.Dimensions
+                  -> { width :: Pixels, offset :: Pixels }
+                  -> f ReadyGlyph
+                  -> CanvasReadyDrawing
+drawIntervalFeature {height} {width, offset} = foldMap drawIt
+  where drawIt {drawing, horPos, verPos} =
+          let x' = case_
+                    # on _point (\x -> x)
+                    # on _range (\(Pair l _) -> l)
+                    $ horPos
+              x = width * unwrap x'
+              y = height * (1.0 - unwrap verPos)
+              d = resizeDrawing {width} drawing
+          in translate (x + offset) y d
 
 
 
 
-
--- bumpAnnots :: forall rAnnot rGWAS.
---              RowLacks "minY" (AnnotRow rAnnot)
---           => Bp
---           -> Map ChrId (List (GWASFeature rGWAS))
---           -> Map ChrId (List (Annot rAnnot))
---           -> Map ChrId (List (Annot (minY :: Number | rAnnot)))
--- bumpAnnots radius = zipMapsWith (map <<< bumpAnnot)
---   where maxScoreIn :: Bp -> Bp -> List (GWASFeature rGWAS) -> Number
---         maxScoreIn l r gwas = fromMaybe 0.5 $ maximum
---                               $ map (\g -> if g.pos >= l && g.pos <= r
---                                            then g.score else 0.0) gwas
---         bumpAnnot :: List (GWASFeature rGWAS) -> Annot rAnnot -> Annot (minY :: Number | rAnnot)
---         bumpAnnot l g = let minY = maxScoreIn (g.pos - radius) (g.pos + radius) l
---                        in Record.insert (SProxy :: SProxy "minY") minY g
+-- | Returns the left-hand-edge offset, and width, in pixels,
+-- | of each interval (chromosome) in the provided coordinate system
+viewportIntervals :: forall i a r.
+                     Ord i
+                  => CoordSys i BrowserPoint
+                  -> Canvas.Dimensions
+                  -> Interval BrowserPoint
+                  -> Map i { width :: Pixels, offset :: Pixels }
+viewportIntervals cs cdim bView =
+  intervalToScreen cdim bView <$> (view _Interval <$> intervalsToMap cs)
 
 
 
-
-groupToChrs :: forall a f rData.
-               Monoid (f {chrId :: ChrId | rData})
-            => Foldable f
-            => Applicative f
-            => f { chrId :: ChrId | rData }
-            -> Map ChrId (f { chrId :: ChrId | rData })
-groupToChrs = foldl (\chrs r@{chrId} -> Map.alter (add r) chrId chrs ) mempty
-  where add x Nothing   = Just $ pure x
-        add x (Just xs) = Just $ pure x <> xs
+pureTrack :: forall f a.
+             Foldable f
+          => CoordSys ChrId BrowserPoint
+          -> Map ChrId (f ReadyGlyph)
+          -> BrowserTrack
+pureTrack cs drawings cd v =
+  fold $ zipMapsWith (drawIntervalFeature cd) (viewportIntervals cs cd v) drawings
 
 
-getDataDemo :: CoordSys _ _
-            -> { gwas :: String
-               , annots :: String }
-            -> Aff _ { gwas   :: Map ChrId (List (GWASFeature2 ()       ))
-                     , annots :: Map ChrId (List (Annot2 (minY :: Number)))
-                     }
-getDataDemo cs urls = do
-  gwas <- fetchJSON (gemmaJSONParse' cs) urls.gwas
-  annots' <- fetchAnnotJSON2 cs urls.annots
-  -- Divide data by chromosomes
-  let gwasChr :: Map ChrId (List (GWASFeature2 ()))
-      gwasChr = List.fromFoldable <$> groupToChrs gwas
-  let annotsChr :: Map ChrId (List (Annot2 ()))
-      annotsChr = List.fromFoldable <$> groupToChrs annots'
-  let bumpedAnnots :: Map ChrId (List (Annot2 (minY :: Number)))
-      bumpedAnnots = zipMapsWith (bumpAnnots (Bp 1000000.0)) gwasChr annotsChr
-
-  pure { gwas: gwasChr, annots: bumpedAnnots }
+renderTrack :: forall f a.
+                 Foldable f
+              => Traversable f
+              => CoordSys ChrId BrowserPoint
+              -> PureRenderer a
+              -> Map ChrId (f a)
+              -> BrowserTrack
+renderTrack cs r chrs =
+  let validDrawings :: Map ChrId (f ReadyGlyph)
+      validDrawings = (map <<< map) (render r) chrs
+  in pureTrack cs validDrawings
 
 
--- getDataDemo :: { gwas :: String
---                , annots :: String }
---             -> Aff _ { gwas  :: Map ChrId (List (GWASFeature ()       ))
---                      , annots :: Map ChrId (List (Annot (minY :: Number)))
---                      }
--- getDataDemo urls = do
---   gwas <- fetchGemmaJSON urls.gwas
---   annots' <- fetchAnnotJSON urls.annots
---   -- Divide data by chromosomes
---   let gwasChr :: Map ChrId (List (GWASFeature ()))
---       gwasChr = List.fromFoldable <$> groupToChrs gwas
---   let annotsChr :: Map ChrId (List (Annot ()))
---       annotsChr = List.fromFoldable <$> groupToChrs annots'
---   let bumpedAnnots :: Map ChrId (List (Annot (minY :: Number)))
---       bumpedAnnots = bumpAnnots (Bp 1000000.0) gwasChr annotsChr
-
---   pure { gwas: gwasChr, annots: bumpedAnnots }
 
 
 horRulerTrack :: forall r r1.
@@ -576,9 +253,9 @@ horRulerTrack {min, max, sig} color f _ = outlined outline rulerDrawing
 chrLabelTrack :: CoordSys ChrId BrowserPoint
               -> BrowserTrack
 chrLabelTrack cs = pureTrack cs (Map.fromFoldable results)
-  where mkLabel :: ChrId -> _
-        mkLabel chr = { drawing: chrText chr
-                      , horPos: (HPt $ Normalized $ one)
+  where mkLabel :: ChrId -> ReadyGlyph
+        mkLabel chr = { drawing: inj _point $ chrText chr
+                      , horPos:  inj _point $ Normalized $ one
                       , verPos: Normalized (-0.1) }
 
         font' = font sansSerif 12 mempty
@@ -626,6 +303,7 @@ drawVScale width height vs col =
   <> topLabel <> btmLabel
 
 
+
 drawLegendItem :: Number
                -> { text :: String, icon :: Drawing }
                -> Drawing
@@ -652,13 +330,243 @@ drawLegend width height icons =
   in fold ds
 
 
-
 mkIcon :: Color -> String -> { text :: String, icon :: Drawing }
 mkIcon c text =
   let sh = circle (-2.5) (-2.5) 5.0
       icon = outlined (outlineColor c <> lineWidth 2.0) sh <>
              filled (fillColor c) sh
   in {text, icon}
+
+
+
+
+
+featureInterval :: forall a. Feature a -> Interval Bp
+featureInterval {position} = case_
+  # onMatch
+     { point: (\x -> Pair x x)
+     , range: (\x -> x)
+     }
+  $ position
+
+
+bumpFeatures :: forall f a l i o.
+                Foldable f
+             => Functor f
+             => RowCons l Number (FeatureR i) (FeatureR o)
+             => RowLacks l (FeatureR i)
+             => IsSymbol l
+             => Getter' (Feature a) Number
+             -> SProxy l
+             -> Bp
+             -> f (Feature a)
+             -> f (Feature i)
+             -> f (Feature o)
+bumpFeatures f l radius other = map bumpAnnot
+  where maxInRadius :: Interval Bp -> Number
+        maxInRadius lr = fromMaybe 0.0 $ maximum
+                          $ map (\g -> if intervalsOverlap (featureInterval g) lr
+                                          then f `view` g else 0.0) other
+
+        bumpAnnot :: Record (FeatureR i) -> Record (FeatureR o)
+        bumpAnnot a =
+          let y = maxInRadius (featureInterval a)
+          in Record.insert l y a
+
+
+
+groupToChrs :: forall a f rData.
+               Monoid (f {chrId :: ChrId | rData})
+            => Foldable f
+            => Applicative f
+            => f { chrId :: ChrId | rData }
+            -> Map ChrId (f { chrId :: ChrId | rData })
+groupToChrs = foldl (\chrs r@{chrId} -> Map.alter (add r) chrId chrs ) mempty
+  where add x Nothing   = Just $ pure x
+        add x (Just xs) = Just $ pure x <> xs
+
+-- MOVE TO DEMO.PURS
+
+gwasDraw :: forall a.
+                Color
+             -> a
+             -> DrawingV
+gwasDraw color =
+  let r = 2.2
+      c = circle 0.0 0.0 r
+      out = outlined (outlineColor color) c
+      fill = filled (fillColor color) c
+  in const $ inj _point $ out <> fill
+
+
+annotDraw :: forall r.
+             (Feature (name :: String | r))
+          -> DrawingV
+annotDraw an = inj _point $ out <> fill <> text'
+  where rad = 5.0
+        c = circle zero zero rad
+        out  = outlined (outlineColor maroon <> lineWidth 3.0) c
+        fill = filled   (fillColor red) c
+        text' = Drawing.text
+                  (font sansSerif 12 mempty)
+                  (7.5) (2.5)
+                  (fillColor black) an.name
+scoreVerPlace' :: forall r1 r2.
+                  { min :: Number, max :: Number | r1 }
+               -> Feature (score :: Number | r2)
+               -> Normalized Number
+scoreVerPlace' s =
+  verPlace (to (\x -> Normalized $ (x.score - s.min) / (s.max - s.min)))
+
+
+
+
+type GWASFeature r = Feature ( score :: Number
+                             , chrId :: ChrId | r )
+
+
+
+gemmaJSONParse :: forall a.
+                      CoordSys ChrId a
+                   -> Json
+                   -> Maybe (GWASFeature ())
+gemmaJSONParse cs j = do
+  obj <- j ^? _Object
+  chrId <- ChrId <$> obj ^? ix "chr" <<< _String
+  pos   <- Bp    <$> obj ^? ix "ps"  <<< _Number
+  score <-           obj ^? ix "af"  <<< _Number
+
+  {chrSize} <- lookupInterval cs chrId
+
+  pure { position: inj _point pos
+       , frameSize: chrSize
+       , score
+       , chrId }
+
+
+fetchGemmaJSON :: CoordSys _ _ -> String -> Aff _ (Array (GWASFeature ()))
+fetchGemmaJSON cs = fetchJSON (gemmaJSONParse cs)
+
+
+type GeneRow r = ( geneID :: String
+                 , desc :: String
+                 , start :: Bp
+                 , end :: Bp
+                 , name :: String
+                 , chrId :: ChrId | r )
+
+type Gene r = Feature (GeneRow r)
+
+
+geneJSONParse :: CoordSys _ _
+              -> Json
+              -> Maybe (Gene ())
+geneJSONParse cs j = do
+  obj    <- j ^? _Object
+  geneID <- obj ^? ix "Gene stable ID" <<< _String
+  desc   <- obj ^? ix "Gene description" <<< _String
+  name   <- obj ^? ix "Gene name" <<< _String
+  start  <- Bp    <$> obj ^? ix "Gene start (bp)"  <<< _Number
+  end    <- Bp    <$> obj ^? ix "Gene end (bp)"  <<< _Number
+  chrId  <- ChrId <$> obj ^? ix "ChrId" <<< _String
+
+  {chrSize} <- lookupInterval cs chrId
+
+  pure { position: inj _range (Pair start end)
+       , frameSize: chrSize
+       , geneID
+       , desc
+       , name
+       , start
+       , end
+       , chrId
+       }
+
+
+fetchGeneJSON :: CoordSys _ _ -> String -> Aff _ (Array (Gene ()))
+fetchGeneJSON cs = fetchJSON (geneJSONParse cs)
+
+
+type AnnotRow r = ( geneID :: String
+                   , desc :: String
+                   , name :: String
+                   , chrId :: ChrId | r )
+
+type Annot r = Feature (AnnotRow r)
+
+
+fetchAnnotJSON :: CoordSys _ _
+                -> String
+                -> Aff _ (Array (Annot ()))
+fetchAnnotJSON cs str = map toAnnot <$> fetchJSON (geneJSONParse cs) str
+  where toAnnot :: Gene () -> Annot ()
+        toAnnot gene = { geneID: gene.geneID
+                       , desc: gene.desc
+                       , position: gene.position
+                       , frameSize: gene.frameSize
+                       , name: gene.name
+                       , chrId: gene.chrId }
+
+
+getDataDemo :: CoordSys _ _
+            -> { gwas :: String
+               , annots :: String }
+            -> Aff _ { gwas   :: Map ChrId (List (GWASFeature ()       ))
+                     , annots :: Map ChrId (List (Annot (score :: Number)))
+                     }
+getDataDemo cs urls = do
+  gwas    <- fetchGemmaJSON cs urls.gwas
+  annots' <- fetchAnnotJSON cs urls.annots
+  -- Divide data by chromosomes
+  let gwasChr :: Map ChrId (List (GWASFeature ()))
+      gwasChr = List.fromFoldable <$> groupToChrs gwas
+  let annotsChr :: Map ChrId (List (Annot ()))
+      annotsChr = List.fromFoldable <$> groupToChrs annots'
+  let bumpedAnnots :: Map ChrId (List (Annot (score :: Number)))
+      bumpedAnnots = zipMapsWith
+                     (bumpFeatures (to (_.score)) (SProxy :: SProxy "score")
+                       (Bp 1000000.0))
+                     gwasChr annotsChr
+
+  pure { gwas: gwasChr, annots: bumpedAnnots }
+
+
+demoTrack :: forall f r.
+             Foldable f
+          => Traversable f
+          => CoordSys ChrId BrowserPoint
+          -> { min :: Number, max :: Number, sig :: Number }
+          -> { gwas   :: Map ChrId (f (GWASFeature ()))
+             , annots :: Map ChrId (f (Annot (score :: Number))) }
+          -> BrowserTrack
+demoTrack cs s {gwas, annots} =
+  let renderers = renderersDemo s
+
+      gwasTrack   = renderTrack cs renderers.gwas gwas
+      annotsTrack = renderTrack cs renderers.annots annots
+
+      chrLabels = chrLabelTrack cs
+      ruler = horRulerTrack s red
+
+  in chrLabels
+  <> ruler
+  <> gwasTrack
+  <> annotsTrack
+
+
+renderersDemo :: forall r.
+                 { min :: Number, max :: Number, sig :: Number }
+              -> { gwas   :: PureRenderer _
+                 , annots :: PureRenderer _
+                 }
+renderersDemo s = { gwas, annots }
+  where gwas = { draw:  gwasDraw navy
+               , horPlace
+               , verPlace: scoreVerPlace' s }
+
+        annots = { draw: annotDraw
+                 , horPlace
+                 , verPlace: scoreVerPlace' s }
 
 
 demoLegend :: Array {text :: String, icon :: Drawing}
@@ -687,7 +595,7 @@ demoBrowser :: forall f.
             -> Array { text :: String, icon :: Drawing }
             -- finally, used by the main track
             -> { gwas   :: Map ChrId (f (GWASFeature ()))
-               , annots :: Map ChrId (f (Annot (minY :: Number))) }
+               , annots :: Map ChrId (f (Annot (score :: Number))) }
             -> BrowserView
             -- the drawing produced contains all 3 parts.
             -> { track :: Drawing, overlay :: Drawing }
@@ -702,19 +610,13 @@ demoBrowser cs canvas vpadding vscale sizes vscaleColor legend {gwas, annots} =
 
       -- TODO unify vertical offset by padding further; do it as late as possible
 
-      vScale :: _ -> Drawing
       vScale _ = let w = sizes.vScaleWidth
                  in  translate zero vpadding
                    $ bg w height
                   <> drawVScale w height vscale vscaleColor
 
-      -- TODO actually handle/present the validation errors in a good way!
-      track :: Interval BrowserPoint -> Drawing
-      track v = V.unV (\err -> Debug.trace (unsafeCoerce err) \_ -> mempty)
-                       (\f -> f trackCanvas v)
-                       (demoTrack cs vscale {gwas, annots})
+      track v = demoTrack cs vscale {gwas, annots} trackCanvas v
 
-      legendD :: _ -> Drawing
       legendD _ = let w = sizes.legendWidth
                   in translate (canvas.width - w) vpadding
                     $ bg w height
@@ -750,6 +652,7 @@ mouseChrIds =
             , (ChrId "X")
             , (ChrId "Y")
             ]
+
 
 mouseChrs :: Map ChrId Bp
 mouseChrs = Map.fromFoldable $ Array.zip mouseChrIds $

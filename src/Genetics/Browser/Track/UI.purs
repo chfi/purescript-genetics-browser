@@ -338,8 +338,8 @@ main = launchAff $ do
            )
 
   dat <- do
-    res <- getDataDemo { gwas: "./gwas.json"
-                       , annots: "./annots_fake.json" }
+    res <- getDataDemo coordSys { gwas: "./gwas.json"
+                                , annots: "./annots_fake.json" }
     liftEff $ updateBrowser.push unit
     pure res
 
