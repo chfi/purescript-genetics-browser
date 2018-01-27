@@ -165,6 +165,15 @@ intervalsToMap (CoordSys {intervals}) = Map.fromFoldable $ map f intervals
   where f ci@{index} = Tuple index ci
 
 
+lookupInterval :: forall i c.
+                  Ord i
+               => CoordSys i c
+               -> i
+               -> Maybe (CoordInterval i c)
+lookupInterval cs i = Map.lookup i $ intervalsToMap cs
+
+
+
 findIntervalFromGlobal :: forall f i c r.
                           Ord c
                        => c
