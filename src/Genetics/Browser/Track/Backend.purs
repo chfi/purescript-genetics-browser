@@ -8,6 +8,7 @@ import Prelude
 
 import Color (Color, black, white)
 import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive, orange, purple, red, teal, yellow)
+import Control.Alternative (class Alternative, alt, empty)
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
@@ -17,16 +18,17 @@ import Data.Array as Array
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens (Getter', to, view, (^.), (^?))
+import Data.Lens (Getter', Traversal', Traversal, over, to, traverseOf, traversed, view, viewOn, (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
+import Data.Maybe (Maybe(Just, Nothing), fromMaybe, maybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Pair (Pair(..))
+import Data.Profunctor.Star (Star(..))
 import Data.Record as Record
 import Data.Symbol (class IsSymbol, SProxy(..))
 import Data.Traversable (class Traversable, traverse)
@@ -41,6 +43,7 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class RowLacks)
+import Unsafe.Coerce (unsafeCoerce)
 
 
 type BrowserView = Interval BrowserPoint
@@ -98,16 +101,17 @@ type HorPlaceR = ( point :: Normalized Number
 type HPos = Variant HorPlaceR
 
 
-type PureRenderer a = { draw     :: a -> DrawingV
-                      , horPlace :: a -> HPos
-                      , verPlace :: a -> Normalized Number
-                      }
+type Renderer a = { draw     :: a -> DrawingV
+                  , horPlace :: a -> HPos
+                  , verPlace :: a -> Normalized Number
+                  }
 
 
 type ReadyGlyph = { drawing :: DrawingV
                   , horPos  :: HPos
                   , verPos  :: Normalized Number
                   }
+
 
 
 horPlace :: forall r.
@@ -127,10 +131,10 @@ verPlace :: forall r.
             (Getter' (Feature r) (Normalized Number))
          -> Feature r
          -> Normalized Number
-verPlace f ft = ft ^. f
+verPlace = view
 
 render :: forall err a.
-          PureRenderer a
+          Renderer a
        -> a
        -> ReadyGlyph
 render render a =
@@ -192,32 +196,34 @@ viewportIntervals cs cdim bView =
 
 
 
-pureTrack :: forall f a.
-             Foldable f
-          => CoordSys ChrId BrowserPoint
-          -> Map ChrId (f ReadyGlyph)
+pureTrack :: forall f i a.
+             Ord i
+          => Foldable f
+          => CoordSys i BrowserPoint
+          -> Map i (f ReadyGlyph)
           -> BrowserTrack
 pureTrack cs drawings cd v =
   fold $ zipMapsWith (drawIntervalFeature cd) (viewportIntervals cs cd v) drawings
 
 
-renderTrack :: forall f a.
-                 Foldable f
-              => Traversable f
-              => CoordSys ChrId BrowserPoint
-              -> PureRenderer a
-              -> Map ChrId (f a)
-              -> BrowserTrack
+renderTrack :: forall f i a.
+               Ord i
+            => Foldable f
+            => Traversable f
+            => CoordSys i BrowserPoint
+            -> Renderer a
+            -> Map i (f a)
+            -> BrowserTrack
 renderTrack cs r chrs =
-  let validDrawings :: Map ChrId (f ReadyGlyph)
+  let validDrawings :: Map i (f ReadyGlyph)
       validDrawings = (map <<< map) (render r) chrs
   in pureTrack cs validDrawings
 
 
 
 
-horRulerTrack :: forall r r1.
-                 { min :: Number, max :: Number, sig :: Number }
+horRulerTrack :: forall r.
+                 { min :: Number, max :: Number, sig :: Number | r }
               -> Color
               -> BrowserTrack
 horRulerTrack {min, max, sig} color f _ = outlined outline rulerDrawing
@@ -245,75 +251,6 @@ chrLabelTrack cs = pureTrack cs (Map.fromFoldable results)
 
 
 
-drawVScale :: forall r.
-              Number
-           -> Number
-           -> { min :: Number, max :: Number, sig :: Number }
-           -> Color
-           -> Drawing
-drawVScale width height vs col =
-  -- should have some padding here too; hardcode for now
-  let hPad = width  / 5.0
-      vPad = height / 10.0
-      x = width / 2.0
-
-      y1 = 0.0
-      y2 = height
-
-      n = (_ * 0.1) <<< Int.toNumber <$> (0 .. 10)
-
-      p = Drawing.path [{x, y:y1}, {x, y:y2}]
-
-      bar w y = Drawing.path [{x:x-w, y}, {x, y}]
-
-      ps = foldMap (\i -> bar
-                          (if i == 0.0 || i == 1.0 then 8.0 else 3.0)
-                          (y1 + i*(y2-y1))) n
-
-      ft = font sansSerif 10 mempty
-      mkT y = Drawing.text ft (x-12.0) y (fillColor black)
-
-      topLabel = mkT (y1-(0.5*vPad)) $ show vs.max
-      btmLabel = mkT (y2+vPad) $ show vs.min
-
-  in outlined (outlineColor col <> lineWidth 2.0) (p <> ps)
-  <> topLabel <> btmLabel
-
-
-
-drawLegendItem :: Number
-               -> { text :: String, icon :: Drawing }
-               -> Drawing
-drawLegendItem w {text, icon} =
-  let ft = font sansSerif 12 mempty
-      t = Drawing.text ft 12.0 0.0 (fillColor black) text
-  in icon <> t
-
-
-drawLegend :: Number
-           -> Number
-           -> Array { text :: String, icon :: Drawing }
-           -> Drawing
-drawLegend width height icons =
-  let hPad = width  / 5.0
-      vPad = height / 5.0
-      n :: Int
-      n = length icons
-      x = hPad
-      f :: Number -> { text :: String, icon :: Drawing } -> Drawing
-      f y ic = translate x y $ drawLegendItem (width - 2.0*hPad) ic
-      d = (height - 2.0*vPad) / (length icons)
-      ds = mapWithIndex (\i ic -> f (vPad+(vPad*(Int.toNumber i))) ic) icons
-  in fold ds
-
-
-mkIcon :: Color -> String -> { text :: String, icon :: Drawing }
-mkIcon c text =
-  let sh = circle (-2.5) (-2.5) 5.0
-      icon = outlined (outlineColor c <> lineWidth 2.0) sh <>
-             filled (fillColor c) sh
-  in {text, icon}
-
 
 featureInterval :: forall a. Feature a -> Interval Bp
 featureInterval {position} = case_
@@ -322,6 +259,7 @@ featureInterval {position} = case_
      , range: (\x -> x)
      }
   $ position
+
 
 
 bumpFeatures :: forall f a l i o.
@@ -357,3 +295,141 @@ groupToChrs :: forall a f rData.
 groupToChrs = foldl (\chrs r@{chrId} -> Map.alter (add r) chrId chrs ) mempty
   where add x Nothing   = Just $ pure x
         add x (Just xs) = Just $ pure x <> xs
+
+
+type VScaleRow r = ( min :: Number
+                   , max :: Number
+                   , sig :: Number
+                   | r )
+
+type VScale = { width :: Pixels
+              , color :: Color
+              | VScaleRow () }
+
+drawVScale :: forall r.
+              VScale
+           -> Number
+           -> Drawing
+drawVScale vscale height =
+  -- should have some padding here too; hardcode for now
+  let hPad = vscale.width  / 5.0
+      vPad = height / 10.0
+      x = vscale.width / 2.0
+
+      y1 = 0.0
+      y2 = height
+
+      n = (_ * 0.1) <<< Int.toNumber <$> (0 .. 10)
+
+      p = Drawing.path [{x, y:y1}, {x, y:y2}]
+
+      bar w y = Drawing.path [{x:x-w, y}, {x, y}]
+
+      ps = foldMap (\i -> bar
+                          (if i == 0.0 || i == 1.0 then 8.0 else 3.0)
+                          (y1 + i*(y2-y1))) n
+
+      ft = font sansSerif 10 mempty
+      mkT y = Drawing.text ft (x-12.0) y (fillColor black)
+
+      topLabel = mkT (y1-(0.5*vPad)) $ show vscale.max
+      btmLabel = mkT (y2+vPad)       $ show vscale.min
+
+  in outlined (outlineColor vscale.color <> lineWidth 2.0) (p <> ps)
+     <> topLabel <> btmLabel
+
+
+type LegendEntry = { text :: String, icon :: Drawing }
+
+type Legend = { width :: Pixels
+              , entries :: Array LegendEntry }
+
+
+
+
+
+mkIcon :: Color -> String -> LegendEntry
+mkIcon c text =
+  let sh = circle (-2.5) (-2.5) 5.0
+      icon = outlined (outlineColor c <> lineWidth 2.0) sh <>
+             filled (fillColor c) sh
+  in {text, icon}
+
+
+drawLegendItem :: LegendEntry
+               -> Drawing
+drawLegendItem {text, icon} =
+  let ft = font sansSerif 12 mempty
+      t = Drawing.text ft 12.0 0.0 (fillColor black) text
+  in icon <> t
+
+
+drawLegend :: Legend
+           -> Number
+           -> Drawing
+drawLegend {width, entries} height =
+  let hPad = width  / 5.0
+      vPad = height / 5.0
+      n :: Int
+      n = length entries
+      x = hPad
+      f :: Number -> { text :: String, icon :: Drawing } -> Drawing
+      f y ic = translate x y $ drawLegendItem ic
+      d = (height - 2.0*vPad) / (length entries)
+      ds = mapWithIndex (\i ic -> f (vPad+(vPad*(Int.toNumber i))) ic) entries
+  in fold ds
+
+
+type Padding = { vertical :: Pixels
+               , horizontal :: Pixels
+               }
+
+
+browser :: forall f.
+           Traversable f
+        => CoordSys ChrId BrowserPoint
+        -> Canvas.Dimensions
+        -> Padding
+        -> { legend :: Legend, vscale :: VScale }
+        -> _
+        -- -> { gwas   :: Map ChrId (f (GWASFeature ()))
+        --    , annots :: Map ChrId (f (Annot (score :: Number))) }
+        -> Interval BrowserPoint
+        -> { track :: Drawing, overlay :: Drawing }
+browser cs cdim padding ui input =
+  let height = cdim.height - 2.0 * padding.vertical
+      width  = cdim.width
+
+      trackCanvas = { width: width - ui.vscale.width - ui.legend.width
+                    , height }
+
+      bg w' h' = filled (fillColor white) $ rectangle 0.0 0.0 w' h'
+
+      -- TODO unify vertical offset by padding further; do it as late as possible
+
+      vScale _ = let w = ui.vscale.width
+                 in  translate zero padding.vertical
+                   $ bg w height
+                  <> drawVScale ui.vscale height
+
+      track v = mempty
+
+      legendD _ = let w = ui.legend.width
+                  in translate (cdim.width - w) padding.vertical
+                    $ bg w height
+                   <> drawLegend ui.legend cdim.height
+
+  in \view -> { track: track view
+              , overlay: vScale view <> legendD view }
+
+
+
+eqLegend a b = a.text == b.text
+
+trackLegend :: forall f a.
+               Foldable f
+            => Functor f
+            => (a -> LegendEntry)
+            -> f a
+            -> Array LegendEntry
+trackLegend f as = Array.nubBy eqLegend $ Array.fromFoldable $ map f as
