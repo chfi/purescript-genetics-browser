@@ -1,30 +1,29 @@
-module Genetics.Browser.Track.Demo
-       ( demoBrowser
-       , demoLegend
-       , getDataDemo
-       ) where
+module Genetics.Browser.Track.Demo where
 
 import Prelude
 
 import Color (Color, black, white)
 import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive, orange, purple, red, teal, yellow)
-import Control.Monad.Aff (Aff)
-import Data.Argonaut (Json, _Number, _Object, _String)
+import Control.Monad.Aff (Aff, throwError)
+import Control.Monad.Eff.Exception (error)
+import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
-import Data.Foldable (class Foldable)
+import Data.Foldable (class Foldable, length)
 import Data.Lens (to, (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe)
+import Data.Maybe (Maybe(..))
 import Data.Monoid (mempty)
+import Data.Newtype (unwrap)
 import Data.Pair (Pair(..))
+import Data.String as String
 import Data.Symbol (SProxy(SProxy))
-import Data.Traversable (class Traversable)
+import Data.Traversable (class Traversable, traverse)
 import Data.Variant (inj)
-import Genetics.Browser.Track.Backend (BrowserTrack, ChrCtx, DrawingV, Feature, PureRenderer, _point, _range, bumpFeatures, chrLabelTrack, drawLegend, drawVScale, groupToChrs, horPlace, horRulerTrack, mkIcon, renderTrack, verPlace, zipMapsWith)
+import Genetics.Browser.Track.Backend (BrowserTrack, ChrCtx, DrawingV, Feature, Legend, LegendEntry, Padding, Renderer, VScale, _point, _range, bumpFeatures, chrLabelTrack, drawLegend, drawVScale, featureInterval, groupToChrs, horPlace, horRulerTrack, mkIcon, renderTrack, trackLegend, verPlace, zipMapsWith)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, Normalized(Normalized), lookupInterval)
 import Genetics.Browser.View (Pixels)
@@ -32,6 +31,8 @@ import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
+import Network.HTTP.Affjax as Affjax
+import Unsafe.Coerce (unsafeCoerce)
 
 
 fetchJSON :: forall a.
@@ -59,19 +60,6 @@ gwasDraw color =
       fill = filled (fillColor color) c
   in const $ inj _point $ out <> fill
 
-
-annotDraw :: forall r.
-             (Feature (name :: String | r))
-          -> DrawingV
-annotDraw an = inj _point $ out <> fill <> text'
-  where rad = 5.0
-        c = circle zero zero rad
-        out  = outlined (outlineColor maroon <> lineWidth 3.0) c
-        fill = filled   (fillColor red) c
-        text' = Drawing.text
-                  (font sansSerif 12 mempty)
-                  (7.5) (2.5)
-                  (fillColor black) an.name
 
 
 scoreVerPlace :: forall r1 r2.
@@ -192,7 +180,7 @@ demoTrack :: forall f r.
              Foldable f
           => Traversable f
           => CoordSys ChrId BrowserPoint
-          -> { min :: Number, max :: Number, sig :: Number }
+          -> { min :: Number, max :: Number, sig :: Number | r }
           -> { gwas   :: Map ChrId (f (GWASFeature ()))
              , annots :: Map ChrId (f (Annot (score :: Number))) }
           -> BrowserTrack
@@ -212,17 +200,17 @@ demoTrack cs s {gwas, annots} =
 
 
 
-pointRenderer :: forall r.
-                 { min :: Number, max :: Number, sig :: Number }
-              -> (Feature (score :: Number | r) -> DrawingV)
-              -> PureRenderer (Feature (score :: Number | r))
+pointRenderer :: forall r1 r2.
+                 { min :: Number, max :: Number, sig :: Number | r2 }
+              -> (Feature (score :: Number | r1) -> DrawingV)
+              -> Renderer (Feature (score :: Number | r1))
 pointRenderer s draw = { horPlace, verPlace: scoreVerPlace s, draw }
 
 
 renderersDemo :: forall r.
-                 { min :: Number, max :: Number, sig :: Number }
-              -> { gwas   :: PureRenderer _
-                 , annots :: PureRenderer _
+                 { min :: Number, max :: Number, sig :: Number | r }
+              -> { gwas   :: Renderer _
+                 , annots :: Renderer _
                  }
 renderersDemo s = { gwas:   pointRenderer s (gwasDraw navy)
                   , annots: pointRenderer s annotDraw }
@@ -235,50 +223,69 @@ demoLegend =
   , mkIcon purple "boop"
   ]
 
-              -- the first 2 are used by all parts of the browser
+
+annotLegendEntry :: forall r. Annot r -> LegendEntry
+annotLegendEntry a =
+  if (String.length a.name) `mod` 2 == 0
+    then mkIcon blue "even length name"
+    else mkIcon red  "odd length name"
+
+
+annotLegendTest :: forall f r.
+                   Foldable f
+                => Functor f
+                => Map ChrId (f (Annot r))
+                -> Array LegendEntry
+annotLegendTest fs = trackLegend annotLegendEntry as
+  where as = Array.concat $ Array.fromFoldable $ (Array.fromFoldable <$> Map.values fs)
+
+
+annotDraw :: forall r.
+             Annot r
+          -> DrawingV
+annotDraw an = inj _point $ (lg.icon) <> text'
+  where lg = annotLegendEntry an
+        text' = Drawing.text
+                  (font sansSerif 12 mempty)
+                  (7.5) (2.5)
+                  (fillColor black) an.name
+
+
 demoBrowser :: forall f.
                Traversable f
             => CoordSys ChrId BrowserPoint
             -> Canvas.Dimensions
-            -> Pixels
-            -- this by the vertical scale and the tracks
-            -> { min :: Number, max :: Number, sig :: Number }
-            -- these define the width of the non-track parts of the browser;
-            -- the browser takes up the remaining space.
-            -> { vScaleWidth :: Pixels
-               , legendWidth :: Pixels }
-            -- vScale only
-            -> Color
-            -- to be drawn in the legend on the RHS
-            -> Array { text :: String, icon :: Drawing }
-            -- finally, used by the main track
+            -> Padding
+            -> { legend :: Legend, vscale :: VScale }
             -> { gwas   :: Map ChrId (f (GWASFeature ()))
                , annots :: Map ChrId (f (Annot (score :: Number))) }
             -> Interval BrowserPoint
-            -- the drawing produced contains all 3 parts.
             -> { track :: Drawing, overlay :: Drawing }
-demoBrowser cs canvas vpadding vscale sizes vscaleColor legend {gwas, annots} =
-  let height = canvas.height - 2.0 * vpadding
-      width  = canvas.width
+demoBrowser cs cdim padding ui input =
+  let height = cdim.height - 2.0 * padding.vertical
+      width  = cdim.width
 
-      trackCanvas = { width: canvas.width - sizes.vScaleWidth - sizes.legendWidth
+      trackCanvas = { width: width - ui.vscale.width - ui.legend.width
                     , height }
 
       bg w' h' = filled (fillColor white) $ rectangle 0.0 0.0 w' h'
 
       -- TODO unify vertical offset by padding further; do it as late as possible
 
-      vScale _ = let w = sizes.vScaleWidth
-                 in  translate zero vpadding
+      vScale :: _
+      vScale _ = let w = ui.vscale.width
+                 in  translate zero padding.vertical
                    $ bg w height
-                  <> drawVScale w height vscale vscaleColor
+                  <> drawVScale ui.vscale height
 
-      track v = demoTrack cs vscale {gwas, annots} trackCanvas v
+      track :: _
+      track v = demoTrack cs ui.vscale input trackCanvas v
 
-      legendD _ = let w = sizes.legendWidth
-                  in translate (canvas.width - w) vpadding
+      legendD :: _
+      legendD _ = let w = ui.legend.width
+                  in translate (cdim.width - w) padding.vertical
                     $ bg w height
-                   <> drawLegend sizes.legendWidth canvas.height legend
+                   <> drawLegend ui.legend cdim.height
 
   in \view -> { track: track view
               , overlay: vScale view <> legendD view }

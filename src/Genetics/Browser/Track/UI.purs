@@ -38,12 +38,13 @@ import Data.Tuple (Tuple(Tuple))
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Demo (demoBrowser, demoLegend, getDataDemo)
+import Genetics.Browser.Track.Demo (annotLegendTest, demoBrowser, demoLegend, getDataDemo)
 import Genetics.Browser.Types (Bp, ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys, Interval, RelPoint, _BrowserSize, canvasToView, findBrowserInterval, intervalToGlobal, mkCoordSys, shiftIntervalBy, zoomIntervalBy)
 import Genetics.Browser.View (Pixels)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth)
+import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
 import Graphics.Drawing as Drawing
 import Partial.Unsafe (unsafePartial)
@@ -131,7 +132,7 @@ browserViewEvent cs start ev =
 
 
 browserDrawEvent :: CoordSys ChrId BrowserPoint
-                 -> { width :: Pixels, height :: Pixels }
+                 -> Canvas.Dimensions
                  -> Pixels
                  -> { min :: Number, max :: Number, sig :: Number }
                  -> { vScaleWidth :: Pixels, legendWidth :: Pixels }
@@ -139,8 +140,14 @@ browserDrawEvent :: CoordSys ChrId BrowserPoint
                     , annots :: Map ChrId (List _) }
                  -> Event BrowserView
                  -> Event {track :: Drawing, overlay :: Drawing}
-browserDrawEvent csys canvasSize vpadding vscale uiSize dat
-  = let dd = demoBrowser csys canvasSize vpadding vscale uiSize black demoLegend dat
+browserDrawEvent csys cdim vpadding {min,max,sig} uiSize dat
+  = let entries = annotLegendTest dat.annots
+        legend = { width: uiSize.legendWidth, entries }
+
+        vscale = { width: uiSize.vScaleWidth, color: black, min, max, sig }
+
+        dd = demoBrowser csys cdim { vertical: vpadding, horizontal: zero } {legend, vscale} dat
+
     in map dd
 
 
