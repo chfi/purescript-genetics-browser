@@ -104,6 +104,28 @@ type GeneRow r = ( geneID :: String
 type Gene r = Feature (GeneRow r)
 
 
+
+
+geneDraw :: forall r.
+            (Gene r)
+         -> DrawingV
+geneDraw gene = inj _range \w ->
+  let (Pair l r) = featureInterval gene
+      glyphW = unwrap $ (r - l) / gene.frameSize
+      rect = rectangle 0.0 0.0 (w * glyphW) 5.0
+      out  = outlined (outlineColor maroon <> lineWidth 3.0) rect
+      fill = filled   (fillColor white) rect
+
+  in out <> fill
+
+
+geneRenderer :: forall r. Renderer (Gene r)
+geneRenderer =
+  { draw: geneDraw
+  , horPlace
+  , verPlace: const (Normalized 0.5) }
+
+
 geneJSONParse :: CoordSys _ _
               -> Json
               -> Maybe (Gene ())
