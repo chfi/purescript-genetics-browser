@@ -105,7 +105,6 @@ type Gene r = Feature (GeneRow r)
 
 
 
-
 geneDraw :: forall r.
             (Gene r)
          -> DrawingV
@@ -198,6 +197,32 @@ getDataDemo cs urls = do
   pure { gwas: gwasChr, annots: bumpedAnnots }
 
 
+
+getDataDemoGenes :: CoordSys _ _
+                 -> { genes :: String }
+                 -> Aff _ { genes :: Map ChrId (List (Gene ())) }
+getDataDemoGenes cs urls = do
+  geneData <- fetchJSON (geneJSONParse cs) urls.genes
+  let genesGrouped = List.fromFoldable <$> groupToChrs geneData
+
+  pure { genes: genesGrouped }
+
+
+geneDemoTrack :: forall f r.
+             Foldable f
+          => Traversable f
+          => CoordSys ChrId BrowserPoint
+          -> { min :: Number, max :: Number, sig :: Number | r }
+          -> { genes :: Map ChrId (f (Gene ())) }
+          -> BrowserTrack
+geneDemoTrack cs s {genes} =
+  let genesTrack = renderTrack cs geneRenderer genes
+      chrLabels = chrLabelTrack cs
+
+  in chrLabels
+  <> genesTrack
+
+
 demoTrack :: forall f r.
              Foldable f
           => Traversable f
@@ -279,8 +304,9 @@ demoBrowser :: forall f.
             -> Canvas.Dimensions
             -> Padding
             -> { legend :: Legend, vscale :: VScale }
-            -> { gwas   :: Map ChrId (f (GWASFeature ()))
-               , annots :: Map ChrId (f (Annot (score :: Number))) }
+            -> { genes  :: Map ChrId (f (Gene ())) }
+            -- -> { gwas   :: Map ChrId (f (GWASFeature ()))
+            --    , annots :: Map ChrId (f (Annot (score :: Number))) }
             -> Interval BrowserPoint
             -> { track :: Drawing, overlay :: Drawing }
 demoBrowser cs cdim padding ui input =
@@ -301,7 +327,7 @@ demoBrowser cs cdim padding ui input =
                   <> drawVScale ui.vscale height
 
       track :: _
-      track v = demoTrack cs ui.vscale input trackCanvas v
+      track v = geneDemoTrack cs ui.vscale input trackCanvas v
 
       legendD :: _
       legendD _ = let w = ui.legend.width

@@ -38,7 +38,7 @@ import Data.Tuple (Tuple(Tuple))
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Demo (annotLegendTest, demoBrowser, demoLegend, getDataDemo)
+import Genetics.Browser.Track.Demo (annotLegendTest, demoBrowser, demoLegend, getDataDemo, getDataDemoGenes)
 import Genetics.Browser.Types (Bp, ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys, Interval, RelPoint, _BrowserSize, canvasToView, findBrowserInterval, intervalToGlobal, mkCoordSys, shiftIntervalBy, zoomIntervalBy)
 import Genetics.Browser.View (Pixels)
@@ -136,12 +136,15 @@ browserDrawEvent :: CoordSys ChrId BrowserPoint
                  -> Pixels
                  -> { min :: Number, max :: Number, sig :: Number }
                  -> { vScaleWidth :: Pixels, legendWidth :: Pixels }
-                 -> { gwas   :: Map ChrId (List _)
-                    , annots :: Map ChrId (List _) }
+                 -- -> { gwas   :: Map ChrId (List _)
+                 --    , annots :: Map ChrId (List _) }
+                 -> { genes :: Map ChrId (List _) }
                  -> Event BrowserView
                  -> Event {track :: Drawing, overlay :: Drawing}
 browserDrawEvent csys cdim vpadding {min,max,sig} uiSize dat
-  = let entries = annotLegendTest dat.annots
+  = let
+        -- entries = annotLegendTest dat.annots
+        entries = []
         legend = { width: uiSize.legendWidth, entries }
 
         vscale = { width: uiSize.vScaleWidth, color: black, min, max, sig }
@@ -149,6 +152,7 @@ browserDrawEvent csys cdim vpadding {min,max,sig} uiSize dat
         dd = demoBrowser csys cdim { vertical: vpadding, horizontal: zero } {legend, vscale} dat
 
     in map dd
+
 
 
 clickEvent :: forall r. CanvasElement -> Event Pixels
@@ -344,9 +348,15 @@ main = launchAff $ do
                     <> "<p>Chr click: " <> sChr ev.cClick <> "</p>"
            )
 
+  -- dat <- do
+  --   res <- getDataDemo coordSys { gwas: "./gwas.json"
+  --                               , annots: "./annots_fake.json" }
+  --   liftEff $ updateBrowser.push unit
+  --   pure res
+
+
   dat <- do
-    res <- getDataDemo coordSys { gwas: "./gwas.json"
-                                , annots: "./annots_fake.json" }
+    res <- getDataDemoGenes coordSys { genes: "./annots_fake.json" }
     liftEff $ updateBrowser.push unit
     pure res
 

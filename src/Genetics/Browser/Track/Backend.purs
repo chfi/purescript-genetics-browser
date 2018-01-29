@@ -424,6 +424,53 @@ browser cs cdim padding ui input =
 
 
 
+
+groupToMap :: forall i a f rData.
+              Monoid (f a)
+           => Ord i
+           => Foldable f
+           => Applicative f
+           => (a -> i)
+           -> f a
+           -> Map i (f a)
+groupToMap f = foldl (\grp a -> Map.alter (add a) (f a) grp ) mempty
+  where add :: a -> Maybe (f a) -> Maybe (f a)
+        add x xs = (pure $ pure x) <> xs
+
+
+getData :: forall a i c.
+           CoordSys i c
+        -> (CoordSys i c -> Json -> Maybe a)
+        -> String
+        -> Aff _ (Array a)
+getData cs p url = do
+  json <- _.response <$> Affjax.get url
+
+  maybe (throwError $ error $ "Error when parsing features from " <> url)
+        pure
+        $ json ^? _Array >>= traverse (p cs)
+
+
+
+getDataGrouped :: forall a i c.
+                  CoordSys ChrId c
+               -> (CoordSys ChrId c -> Json -> Maybe _)
+               -> String
+               -> Aff _ (Map ChrId (Array _))
+getDataGrouped cs p url = groupToChrs <$> getData cs p url
+
+
+
+type TrackRow c a = ( url :: String
+                    , parse :: c -> Json -> Maybe a
+                    , render :: Renderer a )
+
+type GWASTrack c a  = { vscale :: { | VScaleRow () }
+                      | TrackRow c a }
+
+type AnnotTrack c a = { getEntry :: a -> LegendEntry | TrackRow c a }
+
+
 eqLegend a b = a.text == b.text
 
 trackLegend :: forall f a.
