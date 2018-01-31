@@ -6,7 +6,7 @@ import Prelude
 
 import Color (black)
 import Control.Alt ((<|>))
-import Control.Monad.Aff (launchAff, liftEff')
+import Control.Monad.Aff (launchAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Exception (error)
@@ -25,8 +25,9 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(..))
 import Data.Filterable (filterMap)
+import Data.Foldable (foldMap)
 import Data.Int as Int
-import Data.Lens (_Left, (^?), (^.))
+import Data.Lens (_Left, to, (^.), (^?))
 import Data.List (List)
 import Data.Map (Map)
 import Data.Maybe (Maybe(Nothing, Just), fromJust, fromMaybe)
@@ -34,16 +35,18 @@ import Data.Newtype (unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
 import Data.Ratio (Ratio, (%))
+import Data.Symbol (SProxy(..))
 import Data.Tuple (Tuple(Tuple))
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Demo (annotLegendTest, demoBrowser, demoLegend, getDataDemo, getDataDemoGenes)
-import Genetics.Browser.Types (Bp, ChrId(ChrId), Point)
+import Genetics.Browser.Track.Backend (bumpFeatures, zipMapsWith)
+import Genetics.Browser.Track.Demo (annotLegendTest, demoBrowser, getAnnotations, getGWAS, getGenes)
+import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys, Interval, RelPoint, _BrowserSize, canvasToView, findBrowserInterval, intervalToGlobal, mkCoordSys, shiftIntervalBy, zoomIntervalBy)
 import Genetics.Browser.View (Pixels)
 import Global.Unsafe (unsafeStringify)
-import Graphics.Canvas (CanvasElement, getCanvasElementById, getCanvasHeight, getContext2D, setCanvasWidth)
+import Graphics.Canvas (CanvasElement, getContext2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
 import Graphics.Drawing as Drawing
@@ -131,20 +134,20 @@ browserViewEvent cs start ev =
           = Pair (max lhs l) (min r rhs)
 
 
+
 browserDrawEvent :: CoordSys ChrId BrowserPoint
                  -> Canvas.Dimensions
                  -> Pixels
                  -> { min :: Number, max :: Number, sig :: Number }
                  -> { vScaleWidth :: Pixels, legendWidth :: Pixels }
-                 -- -> { gwas   :: Map ChrId (List _)
-                 --    , annots :: Map ChrId (List _) }
-                 -> { genes :: Map ChrId (List _) }
+                 -> { gwas        :: Maybe (Map ChrId (List _))
+                    , annotations :: Maybe (Map ChrId (List _))
+                    , genes       :: Maybe (Map ChrId (List _)) }
                  -> Event BrowserView
                  -> Event {track :: Drawing, overlay :: Drawing}
 browserDrawEvent csys cdim vpadding {min,max,sig} uiSize dat
   = let
-        -- entries = annotLegendTest dat.annots
-        entries = []
+        entries = foldMap annotLegendTest dat.annotations
         legend = { width: uiSize.legendWidth, entries }
 
         vscale = { width: uiSize.vScaleWidth, color: black, min, max, sig }
@@ -152,7 +155,6 @@ browserDrawEvent csys cdim vpadding {min,max,sig} uiSize dat
         dd = demoBrowser csys cdim { vertical: vpadding, horizontal: zero } {legend, vscale} dat
 
     in map dd
-
 
 
 clickEvent :: forall r. CanvasElement -> Event Pixels
@@ -256,6 +258,8 @@ createBrowserCanvas el dim = do
   pure { buffer, track, overlay }
 
 
+
+
 main :: Eff _ _
 main = launchAff $ do
 
@@ -333,7 +337,7 @@ main = launchAff $ do
 
 
   void $ liftEff $ Event.subscribe clickEvs
-       (\ev -> do
+       \ev -> do
            let sF (Just x) = "Frame: " <> show (unsafeStringify x)
                sF Nothing = "No Frame"
                sChr x = "Chr: " <> unsafeStringify x
@@ -346,20 +350,31 @@ main = launchAff $ do
                     <> "<p>" <> "Global click:" <> show (unwrap ev.gClick) <> "</p>"
                     <> "<p>Frame click: " <> sF ev.fClick <> "</p>"
                     <> "<p>Chr click: " <> sChr ev.cClick <> "</p>"
-           )
 
-  -- dat <- do
-  --   res <- getDataDemo coordSys { gwas: "./gwas.json"
-  --                               , annots: "./annots_fake.json" }
-  --   liftEff $ updateBrowser.push unit
-  --   pure res
+
+
+  -- TODO configgable URLs
+  let urls = { genes: "./sample_genes_chr.json"
+             , gwas: "./gwas.json"
+             , annotations: "./annots_fake.json" }
 
 
   dat <- do
-    res <- getDataDemoGenes coordSys { genes: "./annots_fake.json" }
-    liftEff $ updateBrowser.push unit
-    pure res
+    gwas  <- getGWAS  coordSys urls.gwas
+    genes <- getGenes coordSys urls.genes
+    rawAnnotations <- getAnnotations coordSys urls.annotations
 
+    let annotations = zipMapsWith
+                      (bumpFeatures (to _.score) (SProxy :: SProxy "score")
+                        (Bp 1000000.0))
+                      gwas rawAnnotations
+
+    liftEff $ updateBrowser.push unit
+    pure { genes: pure genes
+         , gwas:  pure gwas
+         , annotations: pure annotations }
+
+  -- TODO configgable score
   let score = {min: 0.125, max: 0.42, sig: 0.25}
 
   let ev' = browserDrawEvent

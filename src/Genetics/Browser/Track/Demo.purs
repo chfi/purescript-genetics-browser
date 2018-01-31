@@ -112,9 +112,9 @@ geneDraw :: forall r.
 geneDraw gene = inj _range \w ->
   let (Pair l r) = featureInterval gene
       glyphW = unwrap $ (r - l) / gene.frameSize
-      rect = rectangle 0.0 0.0 (w * glyphW) 5.0
-      out  = outlined (outlineColor maroon <> lineWidth 3.0) rect
-      fill = filled   (fillColor white) rect
+      rect = rectangle 0.0 0.0 (w * glyphW) 12.0
+      out  = outlined (outlineColor aqua <> lineWidth 4.0) rect
+      fill = filled   (fillColor teal) rect
 
   in out <> fill
 
@@ -123,7 +123,7 @@ geneRenderer :: forall r. Renderer (Gene r)
 geneRenderer =
   { draw: geneDraw
   , horPlace
-  , verPlace: const (Normalized 0.5) }
+  , verPlace: const (Normalized 0.1) }
 
 
 geneJSONParse :: CoordSys _ _
@@ -142,13 +142,7 @@ geneJSONParse cs j = do
 
   pure { position: inj _range (Pair start end)
        , frameSize: chrSize
-       , geneID
-       , desc
-       , name
-       , start
-       , end
-       , chrId
-       }
+       , geneID, desc, name, start, end, chrId }
 
 
 fetchGeneJSON :: CoordSys _ _ -> String -> Aff _ (Array (Gene ()))
@@ -207,24 +201,20 @@ pointRenderer :: forall r1 r2.
               -> Renderer (Feature (score :: Number | r1))
 pointRenderer s draw = { horPlace, verPlace: scoreVerPlace s, draw }
 
-
-renderersDemo :: forall r.
-                 { min :: Number, max :: Number, sig :: Number | r }
-              -> { gwas   :: Renderer _
-                 , annots :: Renderer _
-                 }
-renderersDemo s = { gwas:   pointRenderer s (gwasDraw navy)
-                  , annots: pointRenderer s annotDraw }
-
-
-demoLegend :: Array {text :: String, icon :: Drawing}
-demoLegend =
-  [ mkIcon red "Red thing"
-  , mkIcon blue "blue thing"
-  , mkIcon purple "boop"
-  ]
+basicRenderers :: forall r.
+                  { min :: Number, max :: Number, sig :: Number | r }
+               -> { gwas        :: Renderer (GWASFeature _)
+                  , annotations :: Renderer (Annot _)
+                  , genes       :: Renderer (Gene _)
+                  }
+basicRenderers s = { gwas:        pointRenderer s (gwasDraw navy)
+                   , annotations: pointRenderer s annotDraw
+                   , genes:       geneRenderer
+                   }
 
 
+
+-- TODO Configgable Annotation -> LegendEntry function (somehow?!)
 annotLegendEntry :: forall r. Annot r -> LegendEntry
 annotLegendEntry a =
   if (String.length a.name) `mod` 2 == 0
@@ -238,7 +228,9 @@ annotLegendTest :: forall f r.
                 => Map ChrId (f (Annot r))
                 -> Array LegendEntry
 annotLegendTest fs = trackLegend annotLegendEntry as
-  where as = Array.concat $ Array.fromFoldable $ (Array.fromFoldable <$> Map.values fs)
+  where as = Array.concat
+             $ Array.fromFoldable
+             $ Array.fromFoldable <$> Map.values fs
 
 
 annotDraw :: forall r.
@@ -252,15 +244,18 @@ annotDraw an = inj _point $ (lg.icon) <> text'
                   (fillColor black) an.name
 
 
+
+
+
 demoBrowser :: forall f.
                Traversable f
             => CoordSys ChrId BrowserPoint
             -> Canvas.Dimensions
             -> Padding
             -> { legend :: Legend, vscale :: VScale }
-            -> { genes  :: Map ChrId (f (Gene ())) }
-            -- -> { gwas   :: Map ChrId (f (GWASFeature ()))
-            --    , annots :: Map ChrId (f (Annot (score :: Number))) }
+            -> { gwas        :: Maybe (Map ChrId (f (GWASFeature ()         )))
+               , annotations :: Maybe (Map ChrId (f (Annot (score :: Number))))
+               , genes       :: Maybe (Map ChrId (f (Gene ()                ))) }
             -> Interval BrowserPoint
             -> { track :: Drawing, overlay :: Drawing }
 demoBrowser cs cdim padding ui input =
@@ -274,23 +269,41 @@ demoBrowser cs cdim padding ui input =
 
       -- TODO unify vertical offset by padding further; do it as late as possible
 
-      vScale :: _
-      vScale _ = let w = ui.vscale.width
+      vScale  = let w = ui.vscale.width
                  in  translate zero padding.vertical
-                   $ bg w height
+                   $ bg w cdim.height
                   <> drawVScale ui.vscale height
 
-      track :: _
-      track v = geneDemoTrack cs ui.vscale input trackCanvas v
-
-      legendD :: _
-      legendD _ = let w = ui.legend.width
+      legendD = let w = ui.legend.width
                   in translate (cdim.width - w) padding.vertical
-                    $ bg w height
+                    $ bg w cdim.height
                    <> drawLegend ui.legend cdim.height
 
-  in \view -> { track: track view
-              , overlay: vScale view <> legendD view }
+      overlay = vScale <> legendD
+
+
+      renderer = basicRenderers ui.vscale
+
+      render :: forall a. Interval BrowserPoint -> Renderer a -> Map ChrId (f a) -> Drawing
+      render v r d = renderTrack cs r d trackCanvas v
+
+      tracks :: Interval BrowserPoint -> Drawing
+      tracks v = let r = basicRenderers ui.vscale
+                 in translate 0.0 padding.vertical
+                  $ foldMap (render v r.gwas) input.gwas
+                 <> foldMap (render v r.annotations) input.annotations
+                 <> foldMap (render v r.genes) input.genes
+
+
+      chrLabels = chrLabelTrack cs cdim
+      ruler     = horRulerTrack ui.vscale red cdim
+      boxes     = boxesTrack height cs cdim
+
+      trackUI = chrLabels
+              <> translate 0.0 padding.vertical <<< (ruler <> boxes)
+
+  in \view -> { track: trackUI <> tracks $ view
+              , overlay }
 
 
 
