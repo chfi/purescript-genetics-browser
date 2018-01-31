@@ -238,8 +238,8 @@ chrLabelTrack :: CoordSys ChrId BrowserPoint
 chrLabelTrack cs = pureTrack cs (Map.fromFoldable results)
   where mkLabel :: ChrId -> ReadyGlyph
         mkLabel chr = { drawing: inj _point $ chrText chr
-                      , horPos:  inj _point $ Normalized $ one
-                      , verPos: Normalized (-0.1) }
+                      , horPos:  inj _point $ Normalized (0.5)
+                      , verPos: Normalized (0.05) }
 
         font' = font sansSerif 12 mempty
 
@@ -249,6 +249,18 @@ chrLabelTrack cs = pureTrack cs (Map.fromFoldable results)
         results :: Array _
         results = map (\x -> Tuple (x^._Index) [mkLabel (x^._Index)]) $ cs^._BrowserIntervals
 
+
+boxesTrack :: Number
+           -> CoordSys ChrId BrowserPoint
+           -> BrowserTrack
+boxesTrack h cs = pureTrack cs $ map (const [glyph]) $ intervalsToMap cs
+  where glyph :: ReadyGlyph
+        glyph = { drawing: inj _range draw
+                , horPos:  inj _range $ Normalized <$> (Pair zero one)
+                , verPos: Normalized one }
+        draw = \w ->
+             let rect = rectangle 0.0 0.0 w h
+             in outlined (outlineColor black <> lineWidth 1.5) rect
 
 
 
