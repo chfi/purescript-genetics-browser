@@ -77,17 +77,17 @@ gwasItemParse name v
   | otherwise = Nothing
 
 
-gwasParse :: Template (Variant GWASFeatureRow)
-          -> Json
-          -> Maybe (Record GWASFeatureRow)
-gwasParse tmp j = do
-  pointT <- SM.lookup "point" tmp
-  scoreT <- SM.lookup "score" tmp
-  chrIdT <- SM.lookup "chrId" tmp
-  point <- cursorGet pointT.path j >>= prj (SProxy :: SProxy "point")
-  score <- cursorGet scoreT.path j >>= prj (SProxy :: SProxy "score")
-  chrId <- cursorGet chrIdT.path j >>= prj (SProxy :: SProxy "chrId")
-  pure { point, score, chrId }
+-- gwasParse :: Template (Variant GWASFeatureRow)
+--           -> Json
+--           -> Maybe (Record GWASFeatureRow)
+-- gwasParse tmp j = do
+--   pointT <- SM.lookup "point" tmp
+--   scoreT <- SM.lookup "score" tmp
+--   chrIdT <- SM.lookup "chrId" tmp
+--   point <- cursorGet pointT.path j >>= prj (SProxy :: SProxy "point")
+--   score <- cursorGet scoreT.path j >>= prj (SProxy :: SProxy "score")
+--   chrId <- cursorGet chrIdT.path j >>= prj (SProxy :: SProxy "chrId")
+--   pure { point, score, chrId }
 
 
 

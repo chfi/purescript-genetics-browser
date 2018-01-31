@@ -8,7 +8,8 @@ import Control.Monad.Aff (Aff, throwError)
 import Control.Monad.Eff.Exception (error)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
-import Data.Foldable (class Foldable, length)
+import Data.Either (Either, note)
+import Data.Foldable (class Foldable, foldMap, length)
 import Data.Lens (to, (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
@@ -22,8 +23,8 @@ import Data.Pair (Pair(..))
 import Data.String as String
 import Data.Symbol (SProxy(SProxy))
 import Data.Traversable (class Traversable, traverse)
-import Data.Variant (inj)
-import Genetics.Browser.Track.Backend (BrowserTrack, ChrCtx, DrawingV, Feature, Legend, LegendEntry, Padding, Renderer, VScale, _point, _range, bumpFeatures, chrLabelTrack, drawLegend, drawVScale, featureInterval, groupToChrs, horPlace, horRulerTrack, mkIcon, renderTrack, trackLegend, verPlace, zipMapsWith)
+import Data.Variant (Variant, case_, inj, on)
+import Genetics.Browser.Track.Backend (BrowserTrack, ChrCtx, DrawingV, Feature, Legend, LegendEntry, Padding, Renderer, VScale, VScaleRow, _point, _range, boxesTrack, bumpFeatures, chrLabelTrack, drawLegend, drawVScale, featureInterval, groupToChrs, horPlace, horRulerTrack, mkIcon, renderTrack, trackLegend, verPlace, zipMapsWith)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, Normalized(Normalized), lookupInterval)
 import Genetics.Browser.View (Pixels)
@@ -174,76 +175,29 @@ fetchAnnotJSON cs str = map toAnnot <$> fetchJSON (geneJSONParse cs) str
                        , chrId: gene.chrId }
 
 
-getDataDemo :: CoordSys _ _
-            -> { gwas :: String
-               , annots :: String }
-            -> Aff _ { gwas   :: Map ChrId (List (GWASFeature ()       ))
-                     , annots :: Map ChrId (List (Annot (score :: Number)))
-                     }
-getDataDemo cs urls = do
-  gwas    <- fetchJSON (gemmaJSONParse cs) urls.gwas
-  annots' <- fetchAnnotJSON cs urls.annots
-  -- Divide data by chromosomes
-  let gwasChr :: Map ChrId (List (GWASFeature ()))
-      gwasChr = List.fromFoldable <$> groupToChrs gwas
-  let annotsChr :: Map ChrId (List (Annot ()))
-      annotsChr = List.fromFoldable <$> groupToChrs annots'
-  let bumpedAnnots :: Map ChrId (List (Annot (score :: Number)))
-      bumpedAnnots = zipMapsWith
-                     (bumpFeatures (to (_.score)) (SProxy :: SProxy "score")
-                       (Bp 1000000.0))
-                     gwasChr annotsChr
-
-  pure { gwas: gwasChr, annots: bumpedAnnots }
+getGWAS :: CoordSys ChrId _
+        -> String
+        -> Aff _ (Map ChrId (List (GWASFeature ())))
+getGWAS cs url = map List.fromFoldable
+                  <$> groupToChrs
+                  <$> fetchJSON (gemmaJSONParse cs) url
 
 
-
-getDataDemoGenes :: CoordSys _ _
-                 -> { genes :: String }
-                 -> Aff _ { genes :: Map ChrId (List (Gene ())) }
-getDataDemoGenes cs urls = do
-  geneData <- fetchJSON (geneJSONParse cs) urls.genes
-  let genesGrouped = List.fromFoldable <$> groupToChrs geneData
-
-  pure { genes: genesGrouped }
+getAnnotations :: CoordSys ChrId _
+               -> String
+               -> Aff _ (Map ChrId (List (Annot ())))
+getAnnotations cs url = map List.fromFoldable
+                  <$> groupToChrs
+                  <$> fetchAnnotJSON cs url
 
 
-geneDemoTrack :: forall f r.
-             Foldable f
-          => Traversable f
-          => CoordSys ChrId BrowserPoint
-          -> { min :: Number, max :: Number, sig :: Number | r }
-          -> { genes :: Map ChrId (f (Gene ())) }
-          -> BrowserTrack
-geneDemoTrack cs s {genes} =
-  let genesTrack = renderTrack cs geneRenderer genes
-      chrLabels = chrLabelTrack cs
+getGenes :: CoordSys ChrId _
+         -> String
+         -> Aff _ (Map ChrId (List (Gene ())))
+getGenes cs url = map List.fromFoldable
+                  <$> groupToChrs
+                  <$> fetchJSON (geneJSONParse cs) url
 
-  in chrLabels
-  <> genesTrack
-
-
-demoTrack :: forall f r.
-             Foldable f
-          => Traversable f
-          => CoordSys ChrId BrowserPoint
-          -> { min :: Number, max :: Number, sig :: Number | r }
-          -> { gwas   :: Map ChrId (f (GWASFeature ()))
-             , annots :: Map ChrId (f (Annot (score :: Number))) }
-          -> BrowserTrack
-demoTrack cs s {gwas, annots} =
-  let renderers = renderersDemo s
-
-      gwasTrack   = renderTrack cs renderers.gwas gwas
-      annotsTrack = renderTrack cs renderers.annots annots
-
-      chrLabels = chrLabelTrack cs
-      ruler = horRulerTrack s red
-
-  in chrLabels
-  <> ruler
-  <> gwasTrack
-  <> annotsTrack
 
 
 
