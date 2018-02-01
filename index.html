@@ -16,5 +16,19 @@
     </div>
     <div id="view"></div>
     <script src="./app.js"></script>
+    <script>
+      var config =
+      { browserHeight: 200.0,
+        padding: { vertical: 25.0, horizontal: 0.0 },
+        score: { min: 0.125, max: 0.42, sig: 0.25 },
+        urls: { genes: "./sample_genes_chr.json",
+                gwas: "./gwas.json",
+                annotations: "./annots_fake.json"
+        }
+      };
+
+      GGB.initBrowser(config)();
+
+    </script>
   </body>
 </html>
