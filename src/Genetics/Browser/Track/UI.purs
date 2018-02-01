@@ -1,6 +1,4 @@
-module Genetics.Browser.Track.UI
-       ( main
-       ) where
+module Genetics.Browser.Track.UI where
 
 import Prelude
 
@@ -9,6 +7,7 @@ import Control.Alt ((<|>))
 import Control.Monad.Aff (launchAff)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
 import Control.Monad.Error.Class (throwError)
@@ -21,13 +20,15 @@ import DOM.Node.Element as DOM
 import DOM.Node.Node (appendChild) as DOM
 import DOM.Node.ParentNode (querySelector) as DOM
 import DOM.Node.Types (Element, Node)
+import Data.Argonaut (Json, _Number, _Object, _String)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Either (Either(..))
+import Data.Either (Either(..), note)
 import Data.Filterable (filterMap)
 import Data.Foldable (foldMap)
 import Data.Int as Int
 import Data.Lens (_Left, to, (^.), (^?))
+import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.Map (Map)
 import Data.Maybe (Maybe(Nothing, Just), fromJust, fromMaybe)
@@ -36,11 +37,12 @@ import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
 import Data.Ratio (Ratio, (%))
 import Data.Symbol (SProxy(..))
+import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple))
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Backend (bumpFeatures, zipMapsWith)
+import Genetics.Browser.Track.Backend (Padding, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Demo (annotLegendTest, demoBrowser, getAnnotations, getGWAS, getGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys, Interval, RelPoint, _BrowserSize, canvasToView, findBrowserInterval, intervalToGlobal, mkCoordSys, shiftIntervalBy, zoomIntervalBy)
@@ -50,7 +52,7 @@ import Graphics.Canvas (CanvasElement, getContext2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
 import Graphics.Drawing as Drawing
-import Partial.Unsafe (unsafePartial)
+import Partial.Unsafe (unsafeCrashWith, unsafePartial)
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -137,7 +139,7 @@ browserViewEvent cs start ev =
 
 browserDrawEvent :: CoordSys ChrId BrowserPoint
                  -> Canvas.Dimensions
-                 -> Pixels
+                 -> Padding
                  -> { min :: Number, max :: Number, sig :: Number }
                  -> { vScaleWidth :: Pixels, legendWidth :: Pixels }
                  -> { gwas        :: Maybe (Map ChrId (List _))
@@ -145,14 +147,14 @@ browserDrawEvent :: CoordSys ChrId BrowserPoint
                     , genes       :: Maybe (Map ChrId (List _)) }
                  -> Event BrowserView
                  -> Event {track :: Drawing, overlay :: Drawing}
-browserDrawEvent csys cdim vpadding {min,max,sig} uiSize dat
+browserDrawEvent csys cdim padding {min,max,sig} uiSize dat
   = let
         entries = foldMap annotLegendTest dat.annotations
         legend = { width: uiSize.legendWidth, entries }
 
         vscale = { width: uiSize.vScaleWidth, color: black, min, max, sig }
 
-        dd = demoBrowser csys cdim { vertical: vpadding, horizontal: zero } {legend, vscale} dat
+        dd = demoBrowser csys cdim padding {legend, vscale} dat
 
     in map dd
 
@@ -259,13 +261,53 @@ createBrowserCanvas el dim = do
 
 
 
+coordSys :: CoordSys ChrId BrowserPoint
+coordSys = mkCoordSys mouseChrSizes (BigInt.fromInt 2000000)
 
-main :: Eff _ _
-main = launchAff $ do
+mouseChrSizes :: Array (Tuple ChrId BigInt)
+mouseChrSizes =
+            [ Tuple (ChrId "1")   (unsafePartial $ fromJust $ BigInt.fromString "195471971")
+            , Tuple (ChrId "2")   (unsafePartial $ fromJust $ BigInt.fromString "182113224")
+            , Tuple (ChrId "3")   (unsafePartial $ fromJust $ BigInt.fromString "160039680")
+            , Tuple (ChrId "4")   (unsafePartial $ fromJust $ BigInt.fromString "156508116")
+            , Tuple (ChrId "5")   (unsafePartial $ fromJust $ BigInt.fromString "151834684")
+            , Tuple (ChrId "6")   (unsafePartial $ fromJust $ BigInt.fromString "149736546")
+            , Tuple (ChrId "7")   (unsafePartial $ fromJust $ BigInt.fromString "145441459")
+            , Tuple (ChrId "8")   (unsafePartial $ fromJust $ BigInt.fromString "129401213")
+            , Tuple (ChrId "9")   (unsafePartial $ fromJust $ BigInt.fromString "124595110")
+            , Tuple (ChrId "10")  (unsafePartial $ fromJust $ BigInt.fromString "130694993")
+            , Tuple (ChrId "11")  (unsafePartial $ fromJust $ BigInt.fromString "122082543")
+            , Tuple (ChrId "12")  (unsafePartial $ fromJust $ BigInt.fromString "120129022")
+            , Tuple (ChrId "13")  (unsafePartial $ fromJust $ BigInt.fromString "120421639")
+            , Tuple (ChrId "14")  (unsafePartial $ fromJust $ BigInt.fromString "124902244")
+            , Tuple (ChrId "15")  (unsafePartial $ fromJust $ BigInt.fromString "104043685")
+            , Tuple (ChrId "16")  (unsafePartial $ fromJust $ BigInt.fromString "98207768")
+            , Tuple (ChrId "17")  (unsafePartial $ fromJust $ BigInt.fromString "94987271")
+            , Tuple (ChrId "18")  (unsafePartial $ fromJust $ BigInt.fromString "90702639")
+            , Tuple (ChrId "19")  (unsafePartial $ fromJust $ BigInt.fromString "61431566")
+            , Tuple (ChrId "X")   (unsafePartial $ fromJust $ BigInt.fromString "17103129")
+            , Tuple (ChrId "Y")   (unsafePartial $ fromJust $ BigInt.fromString "9174469")
+            ]
+
+
+
+
+type Conf = { browserHeight :: Pixels
+            , padding :: Padding
+            , score :: { min :: Number, max :: Number, sig :: Number }
+            , urls :: { gwas        :: Maybe String
+                      , annotations :: Maybe String
+                      , genes       :: Maybe String
+                      }
+            }
+
+
+runBrowser :: Conf -> Eff _ _
+runBrowser config = launchAff $ do
 
   {width} <- liftEff $ getScreenSize
 
-  let height = 200.0
+  let height = config.browserHeight
       browserDimensions = {width, height}
       vScaleWidth = 40.0
       legendWidth = 100.0
@@ -352,39 +394,36 @@ main = launchAff $ do
                     <> "<p>Chr click: " <> sChr ev.cClick <> "</p>"
 
 
-
-  -- TODO configgable URLs
-  let urls = { genes: "./sample_genes_chr.json"
-             , gwas: "./gwas.json"
-             , annotations: "./annots_fake.json" }
-
-
-  dat <- do
-    gwas  <- getGWAS  coordSys urls.gwas
-    genes <- getGenes coordSys urls.genes
-    rawAnnotations <- getAnnotations coordSys urls.annotations
+  trackData <- do
+    gwas  <- traverse (getGWAS  coordSys) config.urls.gwas
+    genes <- traverse (getGenes coordSys) config.urls.genes
+    rawAnnotations <-
+      traverse (getAnnotations coordSys) config.urls.annotations
 
     let annotations = zipMapsWith
-                      (bumpFeatures (to _.score) (SProxy :: SProxy "score")
-                        (Bp 1000000.0))
-                      gwas rawAnnotations
+                       (bumpFeatures (to _.score) (SProxy :: SProxy "score")
+                         (Bp 1000000.0))
+                      <$> gwas
+                      <*> rawAnnotations
 
     liftEff $ updateBrowser.push unit
-    pure { genes: pure genes
-         , gwas:  pure gwas
-         , annotations: pure annotations }
 
-  -- TODO configgable score
-  let score = {min: 0.125, max: 0.42, sig: 0.25}
+    pure { genes, gwas, annotations }
+
+
+
 
   let ev' = browserDrawEvent
               coordSys
               browserDimensions
-              25.0 score
+              config.padding
+              config.score
               {vScaleWidth, legendWidth}
-              dat
+              trackData
               viewEvent
+
       bg = filled (fillColor white) $ rectangle 0.0 0.0 width height
+
 
   -- TODO correctly render the layers
   trackCtx <- liftEff $ getContext2D bCanvas.track
@@ -397,30 +436,49 @@ main = launchAff $ do
   liftEff $ updateBrowser.push unit
 
 
-coordSys :: CoordSys ChrId BrowserPoint
-coordSys = mkCoordSys mouseChrSizes (BigInt.fromInt 2000000)
 
-mouseChrSizes :: Array (Tuple ChrId BigInt)
-mouseChrSizes =
-            [ Tuple (ChrId "1")   (unsafePartial $ fromJust $ BigInt.fromString "195471971")
-            , Tuple (ChrId "2")   (unsafePartial $ fromJust $ BigInt.fromString "182113224")
-            , Tuple (ChrId "3")   (unsafePartial $ fromJust $ BigInt.fromString "160039680")
-            , Tuple (ChrId "4")   (unsafePartial $ fromJust $ BigInt.fromString "156508116")
-            , Tuple (ChrId "5")   (unsafePartial $ fromJust $ BigInt.fromString "151834684")
-            , Tuple (ChrId "6")   (unsafePartial $ fromJust $ BigInt.fromString "149736546")
-            , Tuple (ChrId "7")   (unsafePartial $ fromJust $ BigInt.fromString "145441459")
-            , Tuple (ChrId "8")   (unsafePartial $ fromJust $ BigInt.fromString "129401213")
-            , Tuple (ChrId "9")   (unsafePartial $ fromJust $ BigInt.fromString "124595110")
-            , Tuple (ChrId "10")  (unsafePartial $ fromJust $ BigInt.fromString "130694993")
-            , Tuple (ChrId "11")  (unsafePartial $ fromJust $ BigInt.fromString "122082543")
-            , Tuple (ChrId "12")  (unsafePartial $ fromJust $ BigInt.fromString "120129022")
-            , Tuple (ChrId "13")  (unsafePartial $ fromJust $ BigInt.fromString "120421639")
-            , Tuple (ChrId "14")  (unsafePartial $ fromJust $ BigInt.fromString "124902244")
-            , Tuple (ChrId "15")  (unsafePartial $ fromJust $ BigInt.fromString "104043685")
-            , Tuple (ChrId "16")  (unsafePartial $ fromJust $ BigInt.fromString "98207768")
-            , Tuple (ChrId "17")  (unsafePartial $ fromJust $ BigInt.fromString "94987271")
-            , Tuple (ChrId "18")  (unsafePartial $ fromJust $ BigInt.fromString "90702639")
-            , Tuple (ChrId "19")  (unsafePartial $ fromJust $ BigInt.fromString "61431566")
-            , Tuple (ChrId "X")   (unsafePartial $ fromJust $ BigInt.fromString "17103129")
-            , Tuple (ChrId "Y")   (unsafePartial $ fromJust $ BigInt.fromString "9174469")
-            ]
+-- TODO do this parsing better. good enough for now, but jesus.
+--              do it applicative. semiring or at least semigroup
+parseConfig :: Json -> Either String Conf
+parseConfig j = do
+  obj <- note "Provide a JSON object as configuration" $ j ^? _Object
+  browserHeight <-
+    note "`browserHeight` should be a Number" $ obj ^? ix "browserHeight" <<< _Number
+
+  padding <- do
+    p <- note "`padding` should be an object" $ obj ^? ix "padding" <<< _Object
+    vertical <-
+      note "`padding.vertical` should be a Number" $ p ^? ix "vertical" <<< _Number
+    horizontal <-
+      note "`padding.horizontal` should be a Number" $ p ^? ix "horizontal" <<< _Number
+    pure {vertical, horizontal}
+
+  score <- do
+    s <- note "`score` should be an object" $ obj ^? ix "score" <<< _Object
+    min <-
+      note "`score.min` should be a Number" $ s ^? ix "min" <<< _Number
+    max <-
+      note "`score.max` should be a Number" $ s ^? ix "max" <<< _Number
+    sig <-
+      note "`score.sig` should be a Number" $ s ^? ix "sig" <<< _Number
+
+    pure {min, max, sig}
+
+  urls <- do
+    u <- note "`urls` should be an object" $ obj ^? ix "urls" <<< _Object
+
+    let gwas = u ^? ix "gwas" <<< _String
+        annotations = u ^? ix "annotations" <<< _String
+        genes = u ^? ix "genes" <<< _String
+
+    pure {gwas, annotations, genes}
+
+  pure {browserHeight, padding, score, urls}
+
+
+initBrowser :: Json -> Eff _ _
+initBrowser conf = do
+
+  case parseConfig conf of
+    Left err -> unsafeCrashWith err
+    Right c  -> runBrowser c
