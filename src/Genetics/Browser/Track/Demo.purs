@@ -265,21 +265,26 @@ demoBrowser cs cdim padding ui input =
       trackCanvas = { width: width - ui.vscale.width - ui.legend.width
                     , height }
 
-      bg w' h' = filled (fillColor white) $ rectangle 0.0 0.0 w' h'
+      -- TODO make a type that corresponds to left-of-track and right-of-track to make this dynamic
+      drawOverlay x w d =
+        (translate x zero
+         $ filled (fillColor white)
+         $ rectangle zero zero w cdim.height )
+        <> translate x padding.vertical
+           d
 
-      -- TODO unify vertical offset by padding further; do it as late as possible
+      vScale = drawOverlay
+                 zero
+                 ui.vscale.width
+                 (drawVScale ui.vscale height)
 
-      vScale  = let w = ui.vscale.width
-                 in  translate zero padding.vertical
-                   $ bg w cdim.height
-                  <> drawVScale ui.vscale height
+      legend = drawOverlay
+                 (cdim.width - ui.legend.width)
+                 ui.legend.width
+                 (drawLegend ui.legend height)
 
-      legendD = let w = ui.legend.width
-                  in translate (cdim.width - w) padding.vertical
-                    $ bg w cdim.height
-                   <> drawLegend ui.legend cdim.height
 
-      overlay = vScale <> legendD
+      overlay = vScale <> legend
 
 
       renderer = basicRenderers ui.vscale
@@ -303,7 +308,8 @@ demoBrowser cs cdim padding ui input =
               <> translate 0.0 padding.vertical <<< (ruler <> boxes)
 
   in \view -> { track: trackUI <> tracks $ view
-              , overlay }
+              , overlay
+              }
 
 
 

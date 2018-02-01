@@ -397,46 +397,6 @@ type Padding = { vertical :: Pixels
                }
 
 
-browser :: forall f.
-           Traversable f
-        => CoordSys ChrId BrowserPoint
-        -> Canvas.Dimensions
-        -> Padding
-        -> { legend :: Legend, vscale :: VScale }
-        -> _
-        -- -> { gwas   :: Map ChrId (f (GWASFeature ()))
-        --    , annots :: Map ChrId (f (Annot (score :: Number))) }
-        -> Interval BrowserPoint
-        -> { track :: Drawing, overlay :: Drawing }
-browser cs cdim padding ui input =
-  let height = cdim.height - 2.0 * padding.vertical
-      width  = cdim.width
-
-      trackCanvas = { width: width - ui.vscale.width - ui.legend.width
-                    , height }
-
-      bg w' h' = filled (fillColor white) $ rectangle 0.0 0.0 w' h'
-
-      -- TODO unify vertical offset by padding further; do it as late as possible
-
-      vScale _ = let w = ui.vscale.width
-                 in  translate zero padding.vertical
-                   $ bg w height
-                  <> drawVScale ui.vscale height
-
-      track v = mempty
-
-      legendD _ = let w = ui.legend.width
-                  in translate (cdim.width - w) padding.vertical
-                    $ bg w height
-                   <> drawLegend ui.legend cdim.height
-
-  in \view -> { track: track view
-              , overlay: vScale view <> legendD view }
-
-
-
-
 groupToMap :: forall i a f rData.
               Monoid (f a)
            => Ord i
