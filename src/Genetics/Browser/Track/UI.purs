@@ -306,6 +306,29 @@ type Conf = { browserHeight :: Pixels
 
 foreign import timeFun :: forall eff a. (Unit -> a) -> Eff eff Unit
 
+
+renderBatch :: CanvasElement
+            -> { drawing :: Drawing, points :: Array Point }
+            -> Context2D
+            -> Eff _ Unit
+renderBatch buffer {drawing, points} ctx = do
+  -- hardcoded radius for now.
+  let r = 25.0
+      d = r * 2.0
+  _ <- Canvas.setCanvasDimensions { width: d, height: d } buffer
+  bfrCtx <- Canvas.getContext2D buffer
+  Drawing.render bfrCtx $ Drawing.translate r r drawing
+  let img = Canvas.canvasElementToImageSource buffer
+  foreachE points \ {x,y} ->
+    void $ Canvas.drawImageFull ctx img 0.0 0.0 d d x y d d
+
+
+
+
+
+
+
+
 runBrowser :: Conf -> Eff _ _
 runBrowser config = launchAff $ do
 
@@ -430,6 +453,30 @@ runBrowser config = launchAff $ do
     traverse_ (\a -> timeFun (\_ -> rt renderers.annotations a)) annotations'
     log "Benching genes track:"
     traverse_ (\a -> timeFun (\_ -> rt renderers.genes a)) genes'
+
+    trackCtx <- getContext2D bCanvas.track
+
+    let renderers = basicRenderers config.score
+        rtBatch :: forall a. Renderer a -> Map _ (Array a) -> _
+        rtBatch r d = renderBatchTrack coordSys r d browserDimensions initialView
+
+    let gwasDs :: Maybe (Array _)
+        gwasDs   = rtBatch renderers.gwas <$> gwas'
+        annotsDs = rtBatch renderers.annotations <$> annotations'
+        genesDs  = rtBatch renderers.genes <$> genes'
+
+    let batchDraw ds _ = unsafePerformEff $ (foreachE ds \d -> renderBatch bCanvas.buffer d trackCtx)
+
+    Canvas.withContext trackCtx do
+        _ <- Canvas.translate {translateX: 0.0, translateY: (-config.padding.vertical)} trackCtx
+        log "Benching GWAS drawing:"
+        traverse_ (\d -> timeFun (batchDraw d)) gwasDs
+
+        log "Benching annotations drawing:"
+        traverse_ (\d -> timeFun (batchDraw d)) annotsDs
+
+        log "Benching genes drawing:"
+        traverse_ (\d -> timeFun (batchDraw d)) genesDs
 
 {-
 No. elements per track

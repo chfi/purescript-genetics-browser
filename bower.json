@@ -12,7 +12,7 @@
     "purescript-transformers": "^3.4.0",
     "purescript-eff": "^3.1.0",
     "purescript-functions": "^3.0.0",
-    "purescript-canvas": "^3.0.0",
+    "purescript-canvas": "^3.3.0",
     "purescript-math": "^2.0.0",
     "purescript-free": "^4.0.1",
     "purescript-generics-rep": "^5.1.0",
