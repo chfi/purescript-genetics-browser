@@ -22,6 +22,15 @@ exports.getScreenSize = function() {
 };
 
 
+exports.timeFun = function(f) {
+    return function() {
+        console.time();
+        f();
+        console.timeEnd();
+    }
+}
+
+
 // scrolls a canvas, given a "back buffer" canvas to copy the current context to
 // TODO: later, do all heavy lifting on the backcanvas and just draw that to the screen
 exports.scrollCanvas = function(backCanvas) {
