@@ -10,12 +10,14 @@ import Color (Color, black, white)
 import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive, orange, purple, red, teal, yellow)
 import Control.Alternative (class Alternative, alt, empty)
 import Control.Monad.Aff (Aff)
+import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array ((..))
 import Data.Array as Array
-import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
+import Data.Filterable (partition)
+import Data.Foldable (class Foldable, fold, foldMap, foldl, foldr, length, maximum)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
 import Data.Lens (Getter', Traversal', Traversal, over, to, traverseOf, traversed, view, viewOn, (^.), (^?))
@@ -33,8 +35,10 @@ import Data.Record as Record
 import Data.Symbol (class IsSymbol, SProxy(..))
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(Tuple), snd, uncurry)
+import Data.Unfoldable (unfoldr)
 import Data.Variant (Variant, case_, inj, on, onMatch)
-import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
+import Debug.Trace as Debug
+import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, Normalized(Normalized), _BrowserIntervals, _Index, _Interval, intervalToScreen, intervalsOverlap, intervalsToMap, lookupInterval)
 import Genetics.Browser.View (Pixels)
 import Graphics.Canvas as Canvas
@@ -145,6 +149,12 @@ render render a =
 
 
 
+
+type CanvasSingleGlyph = { drawing :: Drawing, point :: Point }
+type CanvasBatchGlyph  = { drawing :: Drawing, points :: Array Point }
+
+type BatchedTrack = Array CanvasBatchGlyph
+
 type CanvasReadyDrawing = Drawing
 
 type BrowserTrack = Canvas.Dimensions
@@ -163,12 +173,40 @@ resizeDrawing {width} = case_
      { point: (\x -> x)
      , range: (_ $ width) }
 
+
+renderGlyphs :: forall f r a.
+                Canvas.Dimensions
+             -> { width :: Pixels, offset :: Pixels }
+             -> Array ReadyGlyph
+             -> Array CanvasSingleGlyph
+renderGlyphs {height} {width, offset} gs = map drawIt gs
+  where drawIt {drawing, horPos, verPos} =
+          let x' = case_
+                    # on _point (\x -> x)
+                    # on _range (\(Pair l _) -> l)
+                    $ horPos
+              x = width * unwrap x'
+              y = height * (1.0 - unwrap verPos)
+              d = resizeDrawing {width} drawing
+          in { drawing: d, point: { x: (x + offset), y } }
+
+
+batchGlyphs :: Array CanvasSingleGlyph
+            -> Array CanvasBatchGlyph
+batchGlyphs = unfoldr f
+  where f gs = Array.uncons gs >>= \ {head, tail} ->
+                 let { no, yes } = partition (\ {drawing} -> head.drawing == drawing) tail
+                     points = Array.cons head.point $ map _.point yes
+                 in pure $ Tuple { drawing: head.drawing, points } no
+
+
+
 drawIntervalFeature :: forall f r a.
-                     Foldable f
-                  => Canvas.Dimensions
-                  -> { width :: Pixels, offset :: Pixels }
-                  -> f ReadyGlyph
-                  -> CanvasReadyDrawing
+                       Foldable f
+                    => Canvas.Dimensions
+                    -> { width :: Pixels, offset :: Pixels }
+                    -> f ReadyGlyph
+                    -> CanvasReadyDrawing
 drawIntervalFeature {height} {width, offset} = foldMap drawIt
   where drawIt {drawing, horPos, verPos} =
           let x' = case_
@@ -206,6 +244,34 @@ pureTrack cs drawings cd v =
   fold $ zipMapsWith (drawIntervalFeature cd) (viewportIntervals cs cd v) drawings
 
 
+
+pureBatchTrack :: forall f i a.
+                  Ord i
+               => CoordSys i BrowserPoint
+               -> Map i (Array ReadyGlyph)
+               -> Canvas.Dimensions
+               -> Interval BrowserPoint
+               -> Map i (Array CanvasBatchGlyph)
+pureBatchTrack cs glyphs cd v =
+  zipMapsWith (\v gs -> batchGlyphs $ renderGlyphs cd v gs) (viewportIntervals cs cd v) glyphs
+
+
+renderBatchTrack ::  forall f i a.
+                     Ord i
+                  => Foldable f
+                  => Traversable f
+                  => CoordSys i BrowserPoint
+                  -> Renderer a
+                  -> Map i (f a)
+                  -> Canvas.Dimensions
+                  -> Interval BrowserPoint
+                  -> Array CanvasBatchGlyph
+renderBatchTrack cs r trackData =
+  let data' = map Array.fromFoldable trackData
+      glyphs = (map <<< map) (render r) data'
+  in \cd v -> fold $ pureBatchTrack cs glyphs cd v
+
+
 renderTrack :: forall f i a.
                Ord i
             => Foldable f
@@ -214,11 +280,11 @@ renderTrack :: forall f i a.
             -> Renderer a
             -> Map i (f a)
             -> BrowserTrack
-renderTrack cs r chrs =
+renderTrack cs r trackData =
   let validDrawings :: Map i (f ReadyGlyph)
-      validDrawings = (map <<< map) (render r) chrs
+      validDrawings = Debug.trace ("Creating ReadyGlyphs for some track")
+                      \_ -> (map <<< map) (render r) trackData
   in pureTrack cs validDrawings
-
 
 
 
