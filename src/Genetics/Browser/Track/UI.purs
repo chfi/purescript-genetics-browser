@@ -41,11 +41,12 @@ import Data.Ratio (Ratio, (%))
 import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
+import Data.Variant (case_, on, onMatch)
 import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
-import Genetics.Browser.Track.Backend (Padding, Renderer, bumpFeatures, renderBatchTrack, renderTrack, zipMapsWith)
-import Genetics.Browser.Track.Demo (annotLegendTest, basicRenderers, demoBatchBrowser, demoBrowser, getAnnotations, getGWAS, getGenes)
+import Genetics.Browser.Track.Backend (Glyph, Padding, bumpFeatures, zipMapsWith)
+import Genetics.Browser.Track.Demo (annotLegendTest, demoBatchBrowser, getAnnotations, getGWAS, getGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys, Interval, RelPoint, _BrowserSize, canvasToView, findBrowserInterval, intervalToGlobal, mkCoordSys, shiftIntervalBy, zoomIntervalBy)
 import Genetics.Browser.View (Pixels)
@@ -55,7 +56,6 @@ import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
 import Graphics.Drawing as Drawing
 import Partial.Unsafe (unsafeCrashWith, unsafePartial)
-import Performance.Minibench (bench)
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -150,7 +150,9 @@ browserBatchDrawEvent :: CoordSys ChrId BrowserPoint
                          , annotations :: Maybe (Map ChrId (List _))
                          , genes       :: Maybe (Map ChrId (List _)) }
                       -> Event BrowserView
-                      -> Event {track :: Array _, overlay :: Drawing}
+                      -> Event { tracks :: Array Glyph
+                               , relativeUI :: Drawing
+                               , fixedUI :: Drawing }
 browserBatchDrawEvent csys cdim padding {min,max,sig} uiSize dat
   = let
         entries = foldMap annotLegendTest dat.annotations
@@ -464,9 +466,13 @@ runBrowser config = launchAff $ do
   overlayCtx <- liftEff $ getContext2D bCanvas.overlay
   void $ liftEff $ Event.subscribe ev' \d -> do
     Drawing.render trackCtx bg
-    foreachE d.track \t ->
-      renderBatch bCanvas.buffer t trackCtx
-    Drawing.render overlayCtx d.overlay
+    foreachE d.tracks $ case_ # onMatch
+      { batched: (\t -> renderBatch bCanvas.buffer t trackCtx)
+      , single: (\s -> Drawing.render trackCtx
+                         $ Drawing.translate s.point.x s.point.y
+                         $ s.drawing) }
+    Drawing.render trackCtx d.relativeUI
+    Drawing.render overlayCtx d.fixedUI
 
 
   liftEff $ updateBrowser.push unit

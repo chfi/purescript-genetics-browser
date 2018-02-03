@@ -24,7 +24,7 @@ import Data.String as String
 import Data.Symbol (SProxy(SProxy))
 import Data.Traversable (class Traversable, traverse)
 import Data.Variant (Variant, case_, inj, on)
-import Genetics.Browser.Track.Backend (BrowserTrack, CanvasBatchGlyph, ChrCtx, DrawingV, Feature, Legend, LegendEntry, Padding, Renderer, VScale, VScaleRow, _point, _range, boxesTrack, bumpFeatures, chrLabelTrack, drawLegend, drawVScale, featureInterval, groupToChrs, horPlace, horRulerTrack, mkIcon, renderBatchTrack, renderTrack, trackLegend, verPlace, zipMapsWith)
+import Genetics.Browser.Track.Backend (BrowserTrack, CanvasBatchGlyph, ChrCtx, DrawingR, DrawingV, Feature, Glyph, Legend, LegendEntry, Padding, Renderer, VScale, VScaleRow, _point, _range, boxesTrack, bumpFeatures, chrLabelTrack, drawLegend, drawVScale, featureInterval, groupToChrs, horPlace, horRulerTrack, mkIcon, renderTrackGlyphs, trackLegend, verPlace, zipMapsWith)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, Normalized(Normalized), lookupInterval)
 import Genetics.Browser.View (Pixels)
@@ -256,7 +256,9 @@ demoBatchBrowser :: forall f.
                     , annotations :: Maybe (Map ChrId (f (Annot (score :: Number))))
                     , genes       :: Maybe (Map ChrId (f (Gene ()                ))) }
                  -> Interval BrowserPoint
-                 -> { track :: Array (CanvasBatchGlyph), overlay :: Drawing }
+                 -> { tracks :: Array Glyph
+                    , relativeUI :: Drawing
+                    , fixedUI :: Drawing }
 demoBatchBrowser cs cdim padding ui input =
   let height = cdim.height - 2.0 * padding.vertical
       width  = cdim.width
@@ -288,21 +290,15 @@ demoBatchBrowser cs cdim padding ui input =
 
       renderer = basicRenderers ui.vscale
 
-      render :: forall a. Interval BrowserPoint -> Renderer a -> Map ChrId (f a) -> Drawing
-      render v r d = renderTrack cs r d trackCanvas v
-
-      batchR :: forall a. Interval BrowserPoint -> Renderer a -> Map _ (Array a) -> Array CanvasBatchGlyph
-      batchR v r d = renderBatchTrack cs r d trackCanvas v
-
-      gwas :: _
       gwas        = foldMap (map Array.fromFoldable) input.gwas
       annotations = foldMap (map Array.fromFoldable) input.annotations
       genes       = foldMap (map Array.fromFoldable) input.genes
 
-      tracks :: Interval BrowserPoint -> Array CanvasBatchGlyph
-      tracks v = batchR v renderer.gwas gwas
-              <> batchR v renderer.annotations annotations
-              <> batchR v renderer.genes genes
+
+      tracks :: Interval BrowserPoint -> Array Glyph
+      tracks v =   renderTrackGlyphs cs renderer.gwas gwas trackCanvas v
+                <> renderTrackGlyphs cs renderer.genes genes trackCanvas v
+                <> renderTrackGlyphs cs renderer.annotations annotations trackCanvas v
 
 
       chrLabels = chrLabelTrack cs cdim
@@ -312,74 +308,9 @@ demoBatchBrowser cs cdim padding ui input =
       trackUI = chrLabels
               <> translate 0.0 padding.vertical <<< (ruler <> boxes)
 
-  in \view -> { track: tracks view
-              , overlay
-              }
-
-
-
-demoBrowser :: forall f.
-               Traversable f
-            => CoordSys ChrId BrowserPoint
-            -> Canvas.Dimensions
-            -> Padding
-            -> { legend :: Legend, vscale :: VScale }
-            -> { gwas        :: Maybe (Map ChrId (f (GWASFeature ()         )))
-               , annotations :: Maybe (Map ChrId (f (Annot (score :: Number))))
-               , genes       :: Maybe (Map ChrId (f (Gene ()                ))) }
-            -> Interval BrowserPoint
-            -> { track :: Drawing, overlay :: Drawing }
-demoBrowser cs cdim padding ui input =
-  let height = cdim.height - 2.0 * padding.vertical
-      width  = cdim.width
-
-      trackCanvas = { width: width - ui.vscale.width - ui.legend.width
-                    , height }
-
-      -- TODO make a type that corresponds to left-of-track and right-of-track to make this dynamic
-      drawOverlay x w d =
-        (translate x zero
-         $ filled (fillColor white)
-         $ rectangle zero zero w cdim.height )
-        <> translate x padding.vertical
-           d
-
-      vScale = drawOverlay
-                 zero
-                 ui.vscale.width
-                 (drawVScale ui.vscale height)
-
-      legend = drawOverlay
-                 (cdim.width - ui.legend.width)
-                 ui.legend.width
-                 (drawLegend ui.legend height)
-
-
-      overlay = vScale <> legend
-
-
-      renderer = basicRenderers ui.vscale
-
-      render :: forall a. Interval BrowserPoint -> Renderer a -> Map ChrId (f a) -> Drawing
-      render v r d = renderTrack cs r d trackCanvas v
-
-      tracks :: Interval BrowserPoint -> Drawing
-      tracks v = let r = basicRenderers ui.vscale
-                 in translate 0.0 padding.vertical
-                  $ foldMap (render v r.gwas) input.gwas
-                 <> foldMap (render v r.annotations) input.annotations
-                 <> foldMap (render v r.genes) input.genes
-
-
-      chrLabels = chrLabelTrack cs cdim
-      ruler     = horRulerTrack ui.vscale red cdim
-      boxes     = boxesTrack height cs cdim
-
-      trackUI = chrLabels
-              <> translate 0.0 padding.vertical <<< (ruler <> boxes)
-
-  in \view -> { track: trackUI <> tracks $ view
-              , overlay
+  in \view -> { tracks: tracks view
+              , relativeUI: trackUI view
+              , fixedUI: overlay
               }
 
 
