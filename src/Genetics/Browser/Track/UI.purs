@@ -9,6 +9,7 @@ import Control.Monad.Eff (Eff, forE, foreachE)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
+import Control.Monad.Eff.Uncurried (EffFn4, runEffFn4)
 import Control.Monad.Eff.Unsafe (unsafeCoerceEff, unsafePerformEff)
 import Control.Monad.Error.Class (throwError)
 import DOM.Classy.Node (toNode)
@@ -140,31 +141,6 @@ browserViewEvent cs start ev =
 
 
 
-
-
-browserDrawEvent :: CoordSys ChrId BrowserPoint
-                 -> Canvas.Dimensions
-                 -> Padding
-                 -> { min :: Number, max :: Number, sig :: Number }
-                 -> { vScaleWidth :: Pixels, legendWidth :: Pixels }
-                 -> { gwas        :: Maybe (Map ChrId (List _))
-                    , annotations :: Maybe (Map ChrId (List _))
-                    , genes       :: Maybe (Map ChrId (List _)) }
-                 -> Event BrowserView
-                 -> Event {track :: Drawing, overlay :: Drawing}
-browserDrawEvent csys cdim padding {min,max,sig} uiSize dat
-  = let
-        entries = foldMap annotLegendTest dat.annotations
-        legend = { width: uiSize.legendWidth, entries }
-
-        vscale = { width: uiSize.vScaleWidth, color: black, min, max, sig }
-
-        dd = demoBrowser csys cdim padding {legend, vscale} dat
-
-    in map dd
-
-
-
 browserBatchDrawEvent :: CoordSys ChrId BrowserPoint
                       -> Canvas.Dimensions
                       -> Padding
@@ -230,7 +206,7 @@ browserDrag :: forall r.
             -> Event Point
             -> Event (Ratio BigInt)
 browserDrag w ev = f <$> ev
-  where f :: {x::_, y::_} -> Ratio BigInt
+  where f :: _ -> Ratio BigInt
         f {x} = let width' = BigInt.fromInt $ Int.round w.width
                     x'     = BigInt.fromInt $ Int.round x
                 in x' % width'
@@ -333,24 +309,32 @@ type Conf = { browserHeight :: Pixels
 foreign import timeFun :: forall eff a. (Unit -> a) -> Eff eff Unit
 
 
+
+foreign import drawImageMany :: forall eff a.
+                                EffFn4 eff
+                                CanvasElement
+                                Context2D
+                                { width :: Number, height :: Number }
+                                (Array Point)
+                                Unit
+
+
+
 renderBatch :: CanvasElement
             -> { drawing :: Drawing, points :: Array Point }
             -> Context2D
             -> Eff _ Unit
 renderBatch buffer {drawing, points} ctx = do
-  -- hardcoded radius for now.
-  let r = 25.0
+  -- hardcoded glyph sizes for now.
+  let r = 13.0
       d = r * 2.0
-  _ <- Canvas.setCanvasDimensions { width: d, height: d } buffer
+      dim = { width: 100.0, height: d }
+                          -- width even more hardcoded to deal with long text!
+  _ <- Canvas.setCanvasDimensions dim buffer
   bfrCtx <- Canvas.getContext2D buffer
   Drawing.render bfrCtx $ Drawing.translate r r drawing
   let img = Canvas.canvasElementToImageSource buffer
-  foreachE points \ {x,y} ->
-    void $ Canvas.drawImageFull ctx img 0.0 0.0 d d x y d d
-
-
-
-
+  runEffFn4 drawImageMany buffer ctx dim points
 
 
 
@@ -456,71 +440,12 @@ runBrowser config = launchAff $ do
     let annotations = zipMapsWith
                        (bumpFeatures (to _.score) (SProxy :: SProxy "score")
                          (Bp 1000000.0))
-                      <$> gwas
-                      <*> rawAnnotations
+                       <$> gwas <*> rawAnnotations
 
     liftEff $ updateBrowser.push unit
 
     pure { genes, gwas, annotations }
 
-
-  let renderers = basicRenderers config.score
-      rt :: forall a. Renderer a -> Map _ (Array a) -> _
-      rt r d = renderTrack coordSys r d browserDimensions initialView
-
-
-  liftEff do
-    let gwas' = (map <<< map) Array.fromFoldable $ trackData.gwas
-        annotations' = (map <<< map) Array.fromFoldable $ trackData.annotations
-        genes' = (map <<< map) Array.fromFoldable $ trackData.genes
-    log "Benching GWAS track:"
-    traverse_ (\a -> timeFun (\_ -> rt renderers.gwas a)) gwas'
-    log "Benching annotations track:"
-    traverse_ (\a -> timeFun (\_ -> rt renderers.annotations a)) annotations'
-    log "Benching genes track:"
-    traverse_ (\a -> timeFun (\_ -> rt renderers.genes a)) genes'
-
-    trackCtx <- getContext2D bCanvas.track
-
-    let renderers = basicRenderers config.score
-        rtBatch :: forall a. Renderer a -> Map _ (Array a) -> _
-        rtBatch r d = renderBatchTrack coordSys r d browserDimensions initialView
-
-    let gwasDs :: Maybe (Array _)
-        gwasDs   = rtBatch renderers.gwas <$> gwas'
-        annotsDs = rtBatch renderers.annotations <$> annotations'
-        genesDs  = rtBatch renderers.genes <$> genes'
-
-    let batchDraw ds _ = unsafePerformEff $ (foreachE ds \d -> renderBatch bCanvas.buffer d trackCtx)
-
-    Canvas.withContext trackCtx do
-        _ <- Canvas.translate {translateX: 0.0, translateY: (-config.padding.vertical)} trackCtx
-        log "Benching GWAS drawing:"
-        traverse_ (\d -> timeFun (batchDraw d)) gwasDs
-
-        log "Benching annotations drawing:"
-        traverse_ (\d -> timeFun (batchDraw d)) annotsDs
-
-        log "Benching genes drawing:"
-        traverse_ (\d -> timeFun (batchDraw d)) genesDs
-
-{-
-No. elements per track
-  GWAS:   7317 elements
-  Annots:   17 elements
-  Genes:    25 elements
-
-Desktop renderTrack times (not to canvas, only to Drawing!):
-(however ATM this is done every canvas update!)
-  GWAS   ~ 120-215ms
-  Annots ~ 30-50ms
-  Genes  ~ 20-40ms
-
-Desktop canvas rendering times (whole screen)
-  GWAS   ~ 750-1200ms (closer to 1000)
-  Annots ~     5-18ms (closer to    8)
-  Genes  ~     5-15ms (closer to    5)
--}
 
   let ev' = browserBatchDrawEvent
               coordSys

@@ -27,8 +27,14 @@ exports.timeFun = function(f) {
         console.time();
         f();
         console.timeEnd();
-    }
-}
+    };
+};
+
+exports.drawImageMany = function(bfr, ctx, dim, ps) {
+    ps.forEach(function(p) {
+        ctx.drawImage(bfr, 0, 0, dim.width, dim.height, p.x, p.y, dim.width, dim.height);
+    });
+};
 
 
 // scrolls a canvas, given a "back buffer" canvas to copy the current context to
