@@ -44,7 +44,7 @@ import FRP.Event (Event)
 import FRP.Event as Event
 import FRP.Event as FRP
 import Genetics.Browser.Track.Backend (Padding, Renderer, bumpFeatures, renderBatchTrack, renderTrack, zipMapsWith)
-import Genetics.Browser.Track.Demo (annotLegendTest, basicRenderers, demoBrowser, getAnnotations, getGWAS, getGenes)
+import Genetics.Browser.Track.Demo (annotLegendTest, basicRenderers, demoBatchBrowser, demoBrowser, getAnnotations, getGWAS, getGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordInterval, CoordSys, Interval, RelPoint, _BrowserSize, canvasToView, findBrowserInterval, intervalToGlobal, mkCoordSys, shiftIntervalBy, zoomIntervalBy)
 import Genetics.Browser.View (Pixels)
@@ -56,6 +56,7 @@ import Graphics.Drawing as Drawing
 import Partial.Unsafe (unsafeCrashWith, unsafePartial)
 import Performance.Minibench (bench)
 import Unsafe.Coerce (unsafeCoerce)
+
 
 
 foreign import getScreenSize :: forall eff. Eff eff { width :: Number, height :: Number }
@@ -139,6 +140,8 @@ browserViewEvent cs start ev =
 
 
 
+
+
 browserDrawEvent :: CoordSys ChrId BrowserPoint
                  -> Canvas.Dimensions
                  -> Padding
@@ -157,6 +160,29 @@ browserDrawEvent csys cdim padding {min,max,sig} uiSize dat
         vscale = { width: uiSize.vScaleWidth, color: black, min, max, sig }
 
         dd = demoBrowser csys cdim padding {legend, vscale} dat
+
+    in map dd
+
+
+
+browserBatchDrawEvent :: CoordSys ChrId BrowserPoint
+                      -> Canvas.Dimensions
+                      -> Padding
+                      -> { min :: Number, max :: Number, sig :: Number }
+                      -> { vScaleWidth :: Pixels, legendWidth :: Pixels }
+                      -> { gwas        :: Maybe (Map ChrId (List _))
+                         , annotations :: Maybe (Map ChrId (List _))
+                         , genes       :: Maybe (Map ChrId (List _)) }
+                      -> Event BrowserView
+                      -> Event {track :: Array _, overlay :: Drawing}
+browserBatchDrawEvent csys cdim padding {min,max,sig} uiSize dat
+  = let
+        entries = foldMap annotLegendTest dat.annotations
+        legend = { width: uiSize.legendWidth, entries }
+
+        vscale = { width: uiSize.vScaleWidth, color: black, min, max, sig }
+
+        dd = demoBatchBrowser csys cdim padding {legend, vscale} dat
 
     in map dd
 
@@ -496,27 +522,29 @@ Desktop canvas rendering times (whole screen)
   Genes  ~     5-15ms (closer to    5)
 -}
 
-  -- let ev' = browserDrawEvent
-  --             coordSys
-  --             browserDimensions
-  --             config.padding
-  --             config.score
-  --             {vScaleWidth, legendWidth}
-  --             trackData
-  --             viewEvent
+  let ev' = browserBatchDrawEvent
+              coordSys
+              browserDimensions
+              config.padding
+              config.score
+              {vScaleWidth, legendWidth}
+              trackData
+              viewEvent
 
-  --     bg = filled (fillColor white) $ rectangle 0.0 0.0 width height
+      bg = filled (fillColor white) $ rectangle 0.0 0.0 width height
 
 
   -- -- TODO correctly render the layers
-  -- trackCtx <- liftEff $ getContext2D bCanvas.track
-  -- overlayCtx <- liftEff $ getContext2D bCanvas.overlay
-  -- void $ liftEff $ Event.subscribe ev' \d -> do
-  --   Drawing.render trackCtx (bg <> d.track)
-  --   Drawing.render overlayCtx d.overlay
+  trackCtx <- liftEff $ getContext2D bCanvas.track
+  overlayCtx <- liftEff $ getContext2D bCanvas.overlay
+  void $ liftEff $ Event.subscribe ev' \d -> do
+    Drawing.render trackCtx bg
+    foreachE d.track \t ->
+      renderBatch bCanvas.buffer t trackCtx
+    Drawing.render overlayCtx d.overlay
 
 
-  -- liftEff $ updateBrowser.push unit
+  liftEff $ updateBrowser.push unit
 
 
 
