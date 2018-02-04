@@ -255,10 +255,9 @@ demoBatchBrowser :: forall f.
                  -> { gwas        :: Maybe (Map ChrId (f (GWASFeature ()         )))
                     , annotations :: Maybe (Map ChrId (f (Annot (score :: Number))))
                     , genes       :: Maybe (Map ChrId (f (Gene ()                ))) }
-                 -> Interval BrowserPoint
-                 -> { tracks :: Array Glyph
-                    , relativeUI :: Drawing
-                    , fixedUI :: Drawing }
+                 -> { tracks     :: Interval BrowserPoint -> Array Glyph
+                    , relativeUI :: Interval BrowserPoint -> Drawing
+                    , fixedUI    :: Drawing }
 demoBatchBrowser cs cdim padding ui input =
   let height = cdim.height - 2.0 * padding.vertical
       width  = cdim.width
@@ -308,10 +307,10 @@ demoBatchBrowser cs cdim padding ui input =
       trackUI = chrLabels
               <> translate 0.0 padding.vertical <<< (ruler <> boxes)
 
-  in \view -> { tracks: tracks view
-              , relativeUI: trackUI view
-              , fixedUI: overlay
-              }
+  in { tracks
+     , relativeUI: trackUI
+     , fixedUI: overlay
+     }
 
 
 

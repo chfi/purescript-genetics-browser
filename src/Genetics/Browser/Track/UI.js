@@ -7,11 +7,13 @@ exports.clearCanvas = function(canvas) {
 };
 
 exports.buttonEvent = function(id) {
-    return function(sub) {
-        var el = document.getElementById(id);
-        el.addEventListener('click', function(ev) {
-            sub();
-        });
+    return function(cb) {
+        return function() {
+            var el = document.getElementById(id);
+            el.addEventListener('click', function(ev) {
+                cb();
+            });
+        }
     };
 };
 
@@ -38,7 +40,6 @@ exports.drawImageMany = function(bfr, ctx, dim, ps) {
 
 
 // scrolls a canvas, given a "back buffer" canvas to copy the current context to
-// TODO: later, do all heavy lifting on the backcanvas and just draw that to the screen
 exports.scrollCanvas = function(backCanvas) {
     return function(canvas) {
         return function(p) {
@@ -95,31 +96,33 @@ exports.canvasEvent = function(type) {
 
 
 exports.canvasDragImpl = function(canvas) {
-    return function(sub) {
-        var cb = function(e) {
-            var startX = e.clientX;
-            var startY = e.clientY;
-            var lastX = e.clientX;
-            var lastY = e.clientY;
+    return function(cb) {
+        return function() {
+            var cbInner = function(e) {
+                var startX = e.clientX;
+                var startY = e.clientY;
+                var lastX = e.clientX;
+                var lastY = e.clientY;
 
-            var f = function(e2) {
-                sub({during: {x: lastX - e2.clientX, y: lastY - e2.clientY}});
-                lastX = e2.clientX;
-                lastY = e2.clientY;
+                var f = function(e2) {
+                    cb({during: {x: lastX - e2.clientX, y: lastY - e2.clientY}})();
+                    lastX = e2.clientX;
+                    lastY = e2.clientY;
+                };
+
+                document.addEventListener('mousemove', f);
+
+                document.addEventListener('mouseup', function(e2) {
+                    document.removeEventListener('mousemove', f);
+                    cb({total: {x: e2.clientX-startX, y: e2.clientY-startY}})();
+                }, { once: true });
             };
 
-            document.addEventListener('mousemove', f);
-
-            document.addEventListener('mouseup', function(e2) {
-                document.removeEventListener('mousemove', f);
-                sub({total: {x: e2.clientX-startX, y: e2.clientY-startY}});
-            }, { once: true });
+            canvas.addEventListener('mousedown', cbInner);
+            return function() {
+                canvas.removeEventListener('mousedown', cbInner);
+            }
         };
-
-        canvas.addEventListener('mousedown', cb);
-        return function() {
-            canvas.removeEventListener('mousedown', cb);
-        }
     };
 };
 
