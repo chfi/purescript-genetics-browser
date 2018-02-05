@@ -2,14 +2,15 @@ module Genetics.Browser.Track.Demo where
 
 import Prelude
 
-import Color (Color, black, white)
+import Color (Color, black)
 import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive, orange, purple, red, teal, yellow)
 import Control.Monad.Aff (Aff, throwError)
 import Control.Monad.Eff.Exception (error)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
-import Data.Either (Either, note)
-import Data.Foldable (class Foldable, foldMap, length)
+import Data.Exists (Exists, mkExists)
+import Data.Filterable (filtered)
+import Data.Foldable (class Foldable)
 import Data.Lens (to, (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
@@ -21,19 +22,16 @@ import Data.Monoid (mempty)
 import Data.Newtype (unwrap)
 import Data.Pair (Pair(..))
 import Data.String as String
-import Data.Symbol (SProxy(SProxy))
-import Data.Traversable (class Traversable, traverse)
-import Data.Variant (Variant, case_, inj, on)
-import Genetics.Browser.Track.Backend (BrowserTrack, CanvasBatchGlyph, ChrCtx, DrawingR, DrawingV, Feature, Glyph, Legend, LegendEntry, Padding, Renderer, VScale, VScaleRow, _point, _range, boxesTrack, bumpFeatures, chrLabelTrack, drawLegend, drawVScale, featureInterval, groupToChrs, horPlace, horRulerTrack, mkIcon, renderTrackGlyphs, trackLegend, verPlace, zipMapsWith)
+import Data.Traversable (traverse)
+import Data.Variant (inj)
+import Genetics.Browser.Track.Backend (ChrCtx, DrawingV, Feature, LegendEntry, Renderer, Track(Track), VScale, _point, _range, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend, verPlace)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, Normalized(Normalized), lookupInterval)
-import Genetics.Browser.View (Pixels)
-import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), lookupInterval)
+import Graphics.Drawing (circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
-import Unsafe.Coerce (unsafeCoerce)
+
 
 
 fetchJSON :: forall a.
@@ -171,28 +169,23 @@ fetchAnnotJSON cs str = map toAnnot <$> fetchJSON (geneJSONParse cs) str
 
 getGWAS :: CoordSys ChrId _
         -> String
-        -> Aff _ (Map ChrId (List (GWASFeature ())))
-getGWAS cs url = map List.fromFoldable
-                  <$> groupToChrs
+        -> Aff _ (Map ChrId (Array (GWASFeature ())))
+getGWAS cs url = groupToChrs
                   <$> fetchJSON (gemmaJSONParse cs) url
 
 
 getAnnotations :: CoordSys ChrId _
                -> String
-               -> Aff _ (Map ChrId (List (Annot ())))
-getAnnotations cs url = map List.fromFoldable
-                  <$> groupToChrs
-                  <$> fetchAnnotJSON cs url
+               -> Aff _ (Map ChrId (Array (Annot ())))
+getAnnotations cs url = groupToChrs
+                        <$> fetchAnnotJSON cs url
 
 
 getGenes :: CoordSys ChrId _
          -> String
-         -> Aff _ (Map ChrId (List (Gene ())))
-getGenes cs url = map List.fromFoldable
-                  <$> groupToChrs
+         -> Aff _ (Map ChrId (Array (Gene ())))
+getGenes cs url = groupToChrs
                   <$> fetchJSON (geneJSONParse cs) url
-
-
 
 
 pointRenderer :: forall r1 r2.
@@ -200,6 +193,7 @@ pointRenderer :: forall r1 r2.
               -> (Feature (score :: Number | r1) -> DrawingV)
               -> Renderer (Feature (score :: Number | r1))
 pointRenderer s draw = { horPlace, verPlace: scoreVerPlace s, draw }
+
 
 basicRenderers :: forall r.
                   { min :: Number, max :: Number, sig :: Number | r }
@@ -244,75 +238,34 @@ annotDraw an = inj _point $ (lg.icon) <> text'
                   (fillColor black) an.name
 
 
+gwasTrack :: VScale
+          -> Map ChrId (Array (GWASFeature ()))
+          -> Track (GWASFeature ())
+gwasTrack vs dat = Track dat ((basicRenderers vs).gwas)
+
+annotationsTrack :: VScale
+                 -> Map ChrId (Array (Annot (score :: Number)))
+                 -> Track (Annot (score :: Number))
+annotationsTrack vs dat = Track dat ((basicRenderers vs).annotations)
+
+genesTrack :: VScale
+           -> Map ChrId (Array (Gene ()))
+           -> Track (Gene ())
+genesTrack vs dat = Track dat ((basicRenderers vs).genes)
 
 
-demoBatchBrowser :: forall f.
-                    Traversable f
-                 => CoordSys ChrId BrowserPoint
-                 -> Canvas.Dimensions
-                 -> Padding
-                 -> { legend :: Legend, vscale :: VScale }
-                 -> { gwas        :: Maybe (Map ChrId (f (GWASFeature ()         )))
-                    , annotations :: Maybe (Map ChrId (f (Annot (score :: Number))))
-                    , genes       :: Maybe (Map ChrId (f (Gene ()                ))) }
-                 -> { tracks     :: Interval BrowserPoint -> Array Glyph
-                    , relativeUI :: Interval BrowserPoint -> Drawing
-                    , fixedUI    :: Drawing }
-demoBatchBrowser cs cdim padding ui input =
-  let height = cdim.height - 2.0 * padding.vertical
-      width  = cdim.width
 
-      trackCanvas = { width: width - ui.vscale.width - ui.legend.width
-                    , height }
-
-      -- TODO make a type that corresponds to left-of-track and right-of-track to make this dynamic
-      drawOverlay x w d =
-        (translate x zero
-         $ filled (fillColor white)
-         $ rectangle zero zero w cdim.height )
-        <> translate x padding.vertical
-           d
-
-      vScale = drawOverlay
-                 zero
-                 ui.vscale.width
-                 (drawVScale ui.vscale height)
-
-      legend = drawOverlay
-                 (cdim.width - ui.legend.width)
-                 ui.legend.width
-                 (drawLegend ui.legend height)
-
-
-      overlay = vScale <> legend
-
-
-      renderer = basicRenderers ui.vscale
-
-      gwas        = foldMap (map Array.fromFoldable) input.gwas
-      annotations = foldMap (map Array.fromFoldable) input.annotations
-      genes       = foldMap (map Array.fromFoldable) input.genes
-
-
-      tracks :: Interval BrowserPoint -> Array Glyph
-      tracks v =   renderTrackGlyphs cs renderer.gwas gwas trackCanvas v
-                <> renderTrackGlyphs cs renderer.genes genes trackCanvas v
-                <> renderTrackGlyphs cs renderer.annotations annotations trackCanvas v
-
-
-      chrLabels = chrLabelTrack cs cdim
-      ruler     = horRulerTrack ui.vscale red cdim
-      boxes     = boxesTrack height cs cdim
-
-      trackUI = chrLabels
-              <> translate 0.0 padding.vertical <<< (ruler <> boxes)
-
-  in { tracks
-     , relativeUI: trackUI
-     , fixedUI: overlay
-     }
-
-
+demoTracks :: VScale
+           -> { gwas        :: Maybe (Map ChrId (Array (GWASFeature ()         )))
+              , annotations :: Maybe (Map ChrId (Array (Annot (score :: Number))))
+              , genes       :: Maybe (Map ChrId (Array (Gene ()                ))) }
+           -> List (Exists Track)
+demoTracks vs {gwas, annotations, genes} =
+  List.fromFoldable $ filtered
+  $ [ mkExists <$> gwasTrack vs        <$> gwas
+    , mkExists <$> annotationsTrack vs <$> annotations
+    , mkExists <$> genesTrack vs       <$> genes
+    ]
 
 
 mouseChrIds :: Array ChrId

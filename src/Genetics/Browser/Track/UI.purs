@@ -39,8 +39,8 @@ import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (case_, onMatch)
 import FRP.Event (Event)
-import Genetics.Browser.Track.Backend (Glyph, Padding, bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Demo (annotLegendTest, demoBatchBrowser, getAnnotations, getGWAS, getGenes)
+import Genetics.Browser.Track.Backend (Glyph, Padding, browser, bumpFeatures, zipMapsWith)
+import Genetics.Browser.Track.Demo (annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, _BrowserSize, mkCoordSys, shiftIntervalBy, zoomIntervalBy)
 import Genetics.Browser.View (Pixels)
@@ -363,6 +363,7 @@ runBrowser config = launchAff $ do
     pure { genes, gwas, annotations }
 
 
+
   let initialView :: Interval BrowserPoint
       initialView = Pair zero (coordSys^._BrowserSize)
 
@@ -383,9 +384,10 @@ runBrowser config = launchAff $ do
       s = config.score
       vscale = { width: vScaleWidth, color: black
                , min: s.min, max: s.max, sig: s.sig }
-      browser = demoBatchBrowser coordSys browserDimensions config.padding {legend, vscale} trackData
+      tracks = demoTracks vscale trackData
+      mainBrowser = browser coordSys browserDimensions config.padding {legend, vscale} tracks
 
-  browserLoop browser bCanvas { viewCmds, viewState, renderFiber }
+  browserLoop mainBrowser bCanvas { viewCmds, viewState, renderFiber }
 
 
 
