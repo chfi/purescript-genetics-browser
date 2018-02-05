@@ -7,41 +7,35 @@ module Genetics.Browser.Track.Backend where
 import Prelude
 
 import Color (Color, black, white)
-import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive, orange, purple, red, teal, yellow)
-import Control.Alternative (class Alternative, alt, empty)
+import Color.Scheme.Clrs (red)
 import Control.Monad.Aff (Aff)
-import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
-import Data.Argonaut (Json, _Array, _Number, _Object, _String)
+import Data.Argonaut (Json, _Array)
 import Data.Array ((..))
 import Data.Array as Array
 import Data.Either (Either(..))
+import Data.Exists (Exists, runExists)
 import Data.Filterable (partition, partitioned)
-import Data.Foldable (class Foldable, fold, foldMap, foldl, foldr, length, maximum)
+import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens (Getter', Traversal, Traversal', over, re, to, traverseOf, traversed, view, viewOn, (^.), (^?))
-import Data.Lens.Index (ix)
-import Data.Lens.Iso.Newtype (_Newtype)
+import Data.Lens (Getter', to, view, (^.), (^?))
 import Data.List (List)
-import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing), fromMaybe, isJust, maybe)
 import Data.Monoid (class Monoid, mempty)
-import Data.Newtype (class Newtype, unwrap)
+import Data.Newtype (unwrap)
 import Data.Pair (Pair(..))
-import Data.Profunctor.Star (Star(..))
 import Data.Record as Record
 import Data.Symbol (class IsSymbol, SProxy(..))
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(Tuple), snd, uncurry)
 import Data.Unfoldable (unfoldr)
 import Data.Variant (Variant, case_, inj, on, onMatch, prj)
-import Debug.Trace as Debug
-import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), Point)
-import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, Normalized(Normalized), _BrowserIntervals, _Index, _Interval, intervalToScreen, intervalsOverlap, intervalsToMap, lookupInterval)
+import Genetics.Browser.Types (Bp, ChrId, Point)
+import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, Normalized(Normalized), _BrowserIntervals, _Index, _Interval, intervalToScreen, intervalsOverlap, intervalsToMap)
 import Genetics.Browser.View (Pixels)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
@@ -49,7 +43,7 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class RowLacks)
-import Unsafe.Coerce (unsafeCoerce)
+
 
 
 type BrowserView = Interval BrowserPoint
@@ -237,7 +231,8 @@ batchNormalizedGlyphs h wo gs =
   in batched <> single
 
 
-
+-- TODO rewrite relative UI features to use renderNormalizedglyphs;
+--      this one seems kinda broken with the horizontal shifting
 drawIntervalFeature :: forall f r a.
                        Foldable f
                     => Canvas.Dimensions
@@ -542,3 +537,69 @@ trackLegend :: forall f a.
             -> f a
             -> Array LegendEntry
 trackLegend f as = Array.nubBy eqLegend $ Array.fromFoldable $ map f as
+
+
+
+data Track a = Track (Map ChrId (Array a)) (Renderer a)
+
+
+-- TODO handle vertical offsets of tracks here
+renderTrack :: forall a.
+               CoordSys ChrId BrowserPoint
+            -> Canvas.Dimensions
+            -> Interval BrowserPoint
+            -> Track a
+            -> Array Glyph
+renderTrack cs cd v (Track as r) = renderTrackGlyphs cs r as cd v
+
+
+browser :: CoordSys ChrId BrowserPoint
+        -> Canvas.Dimensions
+        -> Padding
+        -> { legend :: Legend, vscale :: VScale }
+        -> List (Exists Track)
+        -> { tracks     :: Interval BrowserPoint -> Array Glyph
+           , relativeUI :: Interval BrowserPoint -> Drawing
+           , fixedUI    :: Drawing }
+browser cs cdim padding ui inputTracks =
+  let height = cdim.height - 2.0 * padding.vertical
+      width  = cdim.width
+
+      trackCanvas = { width: width - ui.vscale.width - ui.legend.width
+                    , height }
+
+      -- TODO make a type that corresponds to left-of-track and right-of-track to make this dynamic
+      drawOverlay x w d =
+        (translate x zero
+         $ filled (fillColor white)
+         $ rectangle zero zero w cdim.height )
+        <> translate x padding.vertical
+           d
+
+      vScale = drawOverlay
+                 zero
+                 ui.vscale.width
+                 (drawVScale ui.vscale height)
+
+      legend = drawOverlay
+                 (cdim.width - ui.legend.width)
+                 ui.legend.width
+                 (drawLegend ui.legend height)
+
+
+      fixedUI = vScale <> legend
+
+      tracks :: Interval BrowserPoint -> Array Glyph
+      tracks v = foldMap (runExists (\t -> renderTrack cs trackCanvas v t)) inputTracks
+
+      chrLabels = chrLabelTrack cs cdim
+      ruler     = horRulerTrack ui.vscale red cdim
+      boxes     = boxesTrack height cs cdim
+
+      relativeUI = chrLabels
+                <> translate 0.0 padding.vertical <<< (ruler <> boxes)
+
+  in { tracks
+     , relativeUI
+     , fixedUI
+     }
