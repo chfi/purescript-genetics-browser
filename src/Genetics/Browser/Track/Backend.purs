@@ -251,8 +251,6 @@ drawIntervalFeature {height} {width, offset} = foldMap drawIt
           in translate (x + offset) y d
 
 
-
-
 -- | Returns the left-hand-edge offset, and width, in pixels,
 -- | of each interval (chromosome) in the provided coordinate system
 viewportIntervals :: forall i a r.
@@ -263,7 +261,6 @@ viewportIntervals :: forall i a r.
                   -> Map i { width :: Pixels, offset :: Pixels }
 viewportIntervals cs cdim bView =
   intervalToScreen cdim bView <$> (view _Interval <$> intervalsToMap cs)
-
 
 
 drawRelativeUI :: forall f i a.
@@ -443,8 +440,6 @@ type Legend = { width :: Pixels
 
 
 
-
-
 mkIcon :: Color -> String -> LegendEntry
 mkIcon c text =
   let sh = circle (-2.5) (-2.5) 5.0
@@ -572,7 +567,7 @@ browser cs cdim padding ui inputTracks =
       drawOverlay x w d =
         (translate x zero
          $ filled (fillColor white)
-         $ rectangle zero zero w cdim.height )
+         $ rectangle zero zero w height )
         <> translate x padding.vertical
            d
 
@@ -592,9 +587,9 @@ browser cs cdim padding ui inputTracks =
       tracks :: Interval BrowserPoint -> Array Glyph
       tracks v = foldMap (runExists (\t -> renderTrack cs trackCanvas v t)) inputTracks
 
-      chrLabels = chrLabelTrack cs cdim
-      ruler     = horRulerTrack ui.vscale red cdim
-      boxes     = boxesTrack height cs cdim
+      chrLabels = chrLabelTrack cs trackCanvas
+      ruler     = horRulerTrack ui.vscale red trackCanvas
+      boxes     = boxesTrack height cs trackCanvas
 
       relativeUI = chrLabels
                 <> translate 0.0 padding.vertical <<< (ruler <> boxes)
