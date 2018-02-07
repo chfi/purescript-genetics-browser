@@ -8,7 +8,7 @@ import Data.BigInt as BigInt
 import Data.Filterable (class Filterable, filter)
 import Data.Foldable (length, sum)
 import Data.Int as Int
-import Data.Lens (Lens', Traversal', foldMapOf, lens, previewOn, traversed, view)
+import Data.Lens (Lens', Traversal', Lens, foldMapOf, lens, previewOn, traversed, view, (%~))
 import Data.Lens (filtered) as Lens
 import Data.Lens.Record (prop) as Lens
 import Data.Map (Map)
@@ -93,12 +93,6 @@ intervalsOverlap (Pair l1 r1) (Pair l2 r2) =
       (Pair l2' r2') = Pair (max l1 l2) (max r1 r2)
   in r1' >= l2'
 
-p0 = Pair 0 0
-p1 = Pair 0 2
-p2 = Pair 2 4
-p3 = Pair 3 4
-p4 = Pair (-2) (-1)
-
 
 coveringIntervals :: forall f i c.
                      Ord c
@@ -109,19 +103,19 @@ coveringIntervals :: forall f i c.
 coveringIntervals iv = filter (intervalsOverlap iv)
 
 
--- type ChrInterval c = { interval :: Interval c, chrSize :: Number }
-
 
 type CoordInterval i c = { index :: i
                          , interval :: Interval c
                          , chrSize :: Bp }
 
 
-
 _Index :: forall i c. Lens' (CoordInterval i c) i
 _Index = Lens.prop (SProxy :: SProxy "index")
 
-_Interval :: forall i c. Lens' (CoordInterval i c) (Interval c)
+_Interval :: forall i a b.
+             Lens
+             (CoordInterval i a) (CoordInterval i b)
+             (Interval a) (Interval b)
 _Interval = Lens.prop (SProxy :: SProxy "interval")
 
 _ChrSize :: forall i c. Lens' (CoordInterval i c) Bp
@@ -138,7 +132,14 @@ type CoordSysRec i c =
 newtype CoordSys i c =
   CoordSys (CoordSysRec i c)
 
--- traversed :: forall t a b. Traversable t => Traversal (t a) (t b) a b
+
+instance functorCoordSys :: Functor (CoordSys i) where
+  map :: forall a b. (a -> b) -> CoordSys i a -> CoordSys i b
+  map f (CoordSys r) = CoordSys $ { size: f r.size
+                                  , padding: f r.padding
+                                  , intervals: map (_Interval %~ (map f)) r.intervals }
+
+
 _CoordSys :: forall i c. Lens' (CoordSys i c) (CoordSysRec i c)
 _CoordSys = lens (\(CoordSys x) -> x) (\(CoordSys _) x -> CoordSys x)
 
@@ -155,6 +156,22 @@ _BrowserSize =   _CoordSys
 _BrowserPadding :: forall i c. Lens' (CoordSys i c) c
 _BrowserPadding =   _CoordSys
                 <<< Lens.prop (SProxy :: SProxy "padding")
+
+
+
+screenScaledIntervals :: forall i a r.
+                         Ord i
+                      => CoordSys i BrowserPoint
+                      -> Pixels
+                      -> BrowserPoint
+                      -> Map i (Interval Pixels)
+screenScaledIntervals cs canvasWidth viewWidth =
+  let width :: Pixels
+      width = BigInt.toNumber (unwrap viewWidth)
+      scale :: BrowserPoint -> Pixels
+      scale p = ((BigInt.toNumber $ unwrap p) * canvasWidth) / width
+  in (map <<< map) scale $ (view _Interval <$> intervalsToMap cs)
+
 
 
 intervalsToMap :: forall i c.
@@ -282,6 +299,7 @@ mkCoordSys chrs pad = CoordSys { size
         padding = wrap pad
 
 
+
 canvasToView :: forall r.
                 { width :: Number | r }
              -> Number
@@ -312,6 +330,8 @@ browserPointToCanvas screenSize v@(Pair vL vR) p = relPointToNumber pixels'
         scale :: Ratio BigInt
         scale = width' % viewSize
         pixels' = (unwrap (p - vL) % one) * scale
+
+
 
 
 intervalToScreen :: forall i c r.
