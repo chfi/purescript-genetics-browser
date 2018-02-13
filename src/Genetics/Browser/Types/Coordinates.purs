@@ -3,382 +3,58 @@ module Genetics.Browser.Types.Coordinates where
 import Prelude
 
 import Data.Array as Array
-import Data.BigInt (BigInt)
-import Data.BigInt as BigInt
-import Data.Filterable (class Filterable, filter)
-import Data.Foldable (length, sum)
+import Data.Foldable (any, foldMap, sum)
+import Data.Generic.Rep (class Generic)
 import Data.Int as Int
-import Data.Lens (Lens', Traversal', Lens, foldMapOf, lens, previewOn, traversed, view, (%~))
-import Data.Lens (filtered) as Lens
-import Data.Lens.Record (prop) as Lens
+import Data.Lens (Getter', Lens, _2, findOf, folded, to, view, (^.))
+import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
-import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.Maybe (Maybe)
+import Data.Monoid.Additive (Additive(..))
+import Data.Newtype (class Newtype, alaF)
 import Data.Pair (Pair(..))
-import Data.Ratio (Ratio, (%))
-import Data.Ratio as Ratio
-import Data.Symbol (SProxy(..))
-import Data.Tuple (Tuple(Tuple), uncurry)
-import Genetics.Browser.Types (Bp, Point)
-import Genetics.Browser.View (Pixels)
-import Graphics.Canvas as Canvas
+import Data.Tuple (Tuple(Tuple))
+import Genetics.Browser.Types (Point)
 
 
+-- | The global coordinate system works by taking the sum of the chromosome sizes,
+-- | for now mainly represented as an Int.
+-- | Subsets of the global coordinate system are defined by some interval, namely a Pair of Ints
 
 
--- The global coordinate system works by taking the sum of the chromosome sizes;
--- we represent it using a BigInt
-
--- Consider making it a wrapper on Ratio BigInt instead.
--- Would ensure exactness when moving between global & interval points...
--- ... while that shouldn't be a problem anyway, it would make things feel safer.
-newtype BrowserPoint = BPoint BigInt
-
-derive instance eqBrowserPoint :: Eq BrowserPoint
-derive instance ordBrowserPoint :: Ord BrowserPoint
-derive instance newtypeBrowserPoint :: Newtype BrowserPoint _
-
-derive newtype instance ringBrowserPoint :: Ring BrowserPoint
-derive newtype instance semiringBrowserPoint :: Semiring BrowserPoint
-derive newtype instance commutativeringBrowserPoint :: CommutativeRing BrowserPoint
-derive newtype instance euclideanringBrowserPoint :: EuclideanRing BrowserPoint
+-- | Helper function to calculate the size of the stretch covered by a pair.
+pairSize :: forall c.
+            Ring c
+         => Pair c
+         -> c
+pairSize (Pair l r) = r - l
 
 
--- Subsets of the global coordinate system are defined by some interval,
---
-
--- data Interval c = Interval c c
-
-type Interval = Pair
-
-type RelPoint = Ratio BigInt
--- data IntervalPoint c = IntervalPoint (Interval c) RelPoint
-
-relPointToNumber :: RelPoint -> Number
-relPointToNumber p =
-  let d = Ratio.denominator p
-      n = Ratio.numerator p
-      qt = BigInt.toNumber $ n / d
-      -- rm = BigInt.toNumber $ case n `mod` d of
-      --                          0 -> 1
-      --                          x -> x
-      -- TODO be safer by using Number.EPSILON etc.
-      -- eps =  2.220446049250313e-16
-      -- epsD =  BigInt.fromString "22204460492503130000000000000000"
-  in qt -- + (rm / (BigInt.toNumber d))
-
-intervalSize :: forall c.
-                Ring c
-             => Interval c
-             -> c
-intervalSize (Pair l r) = r - l
-
-inInterval :: forall c.
-               Ord c
-            => c
-            -> Interval c
-            -> Boolean
-inInterval p (Pair l r) = l <= p && p <= r
+-- | Helper function for defining predicates on pairs that contain a given point.
+inPair :: forall c.
+          Ord c
+       => c
+       -> Pair c
+       -> Boolean
+inPair p (Pair l r) = l <= p && p <= r
 
 
--- TODO test this
-intervalsOverlap :: forall c.
-                    Ord c
-                 => Interval c
-                 -> Interval c
-                 -> Boolean
-intervalsOverlap (Pair l1 r1) (Pair l2 r2) =
+-- TODO test this one
+
+-- | Helper function for defining predicates on pairs that overlap with a given pair.
+pairsOverlap :: forall c.
+                Ord c
+             => Pair c
+             -> Pair c
+             -> Boolean
+pairsOverlap (Pair l1 r1) (Pair l2 r2) =
   let (Pair l1' r1') = Pair (min l1 l2) (min r1 r2)
       (Pair l2' r2') = Pair (max l1 l2) (max r1 r2)
   in r1' >= l2'
 
 
-coveringIntervals :: forall f i c.
-                     Ord c
-                  => Filterable f
-                  => Interval c
-                  -> f (Interval c)
-                  -> f (Interval c)
-coveringIntervals iv = filter (intervalsOverlap iv)
-
-
-
-type CoordInterval i c = { index :: i
-                         , interval :: Interval c
-                         , chrSize :: Bp }
-
-
-_Index :: forall i c. Lens' (CoordInterval i c) i
-_Index = Lens.prop (SProxy :: SProxy "index")
-
-_Interval :: forall i a b.
-             Lens
-             (CoordInterval i a) (CoordInterval i b)
-             (Interval a) (Interval b)
-_Interval = Lens.prop (SProxy :: SProxy "interval")
-
-_ChrSize :: forall i c. Lens' (CoordInterval i c) Bp
-_ChrSize = Lens.prop (SProxy :: SProxy "chrSize")
-
-
-
-type CoordSysRec i c =
-  { size :: c
-  , padding :: c
-  , intervals :: Array (CoordInterval i c)
-  }
-
-newtype CoordSys i c =
-  CoordSys (CoordSysRec i c)
-
-
-instance functorCoordSys :: Functor (CoordSys i) where
-  map :: forall a b. (a -> b) -> CoordSys i a -> CoordSys i b
-  map f (CoordSys r) = CoordSys $ { size: f r.size
-                                  , padding: f r.padding
-                                  , intervals: map (_Interval %~ (map f)) r.intervals }
-
-
-_CoordSys :: forall i c. Lens' (CoordSys i c) (CoordSysRec i c)
-_CoordSys = lens (\(CoordSys x) -> x) (\(CoordSys _) x -> CoordSys x)
-
-
-
-_BrowserIntervals :: forall i c. Lens' (CoordSys i c) (Array (CoordInterval i c))
-_BrowserIntervals =   _CoordSys
-                  <<< Lens.prop (SProxy :: SProxy "intervals")
-
-_BrowserSize :: forall i c. Lens' (CoordSys i c) c
-_BrowserSize =   _CoordSys
-             <<< Lens.prop (SProxy :: SProxy "size")
-
-_BrowserPadding :: forall i c. Lens' (CoordSys i c) c
-_BrowserPadding =   _CoordSys
-                <<< Lens.prop (SProxy :: SProxy "padding")
-
-
-
-screenScaledIntervals :: forall i a r.
-                         Ord i
-                      => CoordSys i BrowserPoint
-                      -> Pixels
-                      -> BrowserPoint
-                      -> Map i (Interval Pixels)
-screenScaledIntervals cs canvasWidth viewWidth =
-  let width :: Pixels
-      width = BigInt.toNumber (unwrap viewWidth)
-      scale :: BrowserPoint -> Pixels
-      scale p = ((BigInt.toNumber $ unwrap p) * canvasWidth) / width
-  in (map <<< map) scale $ (view _Interval <$> intervalsToMap cs)
-
-
-
-intervalsToMap :: forall i c.
-                  Ord i
-               => CoordSys i c
-               -> Map i (CoordInterval i c)
-intervalsToMap (CoordSys {intervals}) = Map.fromFoldable $ map f intervals
-  where f ci@{index} = Tuple index ci
-
-
-lookupInterval :: forall i c.
-                  Ord i
-               => CoordSys i c
-               -> i
-               -> Maybe (CoordInterval i c)
-lookupInterval cs i = Map.lookup i $ intervalsToMap cs
-
-
-
-findIntervalFromGlobal :: forall f i c r.
-                          Ord c
-                       => c
-                       -> Array { interval :: Interval c | r }
-                       -> Maybe { interval :: Interval c | r }
-findIntervalFromGlobal x = Array.find (inInterval x <<< _.interval)
-
-
-findBrowserInterval :: forall i c.
-                       Ord c
-                    => CoordSys i c
-                    -> c
-                    -> Maybe (CoordInterval i c)
-findBrowserInterval cs x = previewOn cs
-                            (_BrowserIntervals
-                             <<< traversed
-                             <<< Lens.filtered
-                             (inInterval x <<< view _Interval))
-
-viewIntervals :: forall i c.
-                 Ord c
-              => CoordSys i c
-              -> Interval c
-              -> Array (CoordInterval i c)
-viewIntervals cs vw = foldMapOf inView pure cs
-  where inView = _BrowserIntervals
-                 <<< traversed
-                 <<< Lens.filtered
-                 (intervalsOverlap vw <<< view _Interval)
-
-
-globalToInterval :: forall c.
-                    Newtype c BigInt
-                 => Interval c
-                 -> c
-                 -> RelPoint
-globalToInterval v x = globalToInterval' (map unwrap v) (unwrap x)
-
-globalToInterval' :: forall c.
-                     Ord c
-                  => EuclideanRing c
-                  => Interval c
-                  -> c
-                  -> Ratio c
-globalToInterval' (Pair l r) x =
-  let n = x - l
-      d = max one (r - l)
-  in n % d
-
-
--- Global <-> Interval are isomorphic for big enough intervals...
-intervalToGlobal :: forall c.
-                    Newtype c BigInt
-                 => Interval c
-                 -> RelPoint
-                 -> c
-intervalToGlobal v x = wrap $ intervalToGlobal' (map unwrap v) x
-
-intervalToGlobal' :: forall c.
-                     Ord c
-                  => Show c
-                  => EuclideanRing c
-                  => Interval c
-                  -> Ratio c
-                  -> c
-intervalToGlobal' iv@(Pair l r) p =
-  let d1 = max one (r - l)
-      d2 = Ratio.denominator p
-      a = d1 / d2
-      n = a * Ratio.numerator p
-  in l + n
-
-
-
-offsets :: BigInt -> Array BigInt -> Array (Pair BigInt)
-offsets pad xs = ivals
-  where os = Array.scanl (\x y -> pad + x + y) zero xs
-        ivals = Array.zipWith Pair (zero `Array.cons` os) os
-
-
-mkCoordSys :: forall i c.
-           Array (Tuple i BigInt)
-        -> BigInt
-        -> CoordSys i BrowserPoint
-mkCoordSys chrs pad = CoordSys { size
-                               , intervals
-                               , padding
-                               }
-  where (Tuple ids sizes) = Array.unzip chrs
-        ivals = (map <<< map) wrap $ offsets pad sizes
-
-
-        f :: i -> BigInt -> { index :: i, chrSize :: Bp }
-        f index s = { index, chrSize: wrap $ BigInt.toNumber s }
-
-        g :: Interval BrowserPoint -> { index :: i, chrSize :: _ } -> _
-        g interval { index, chrSize } = { interval, index, chrSize }
-
-        intervals :: Array (CoordInterval i _)
-        intervals = Array.zipWith g ivals (uncurry f <$> chrs)
-
-        size' = (sum sizes) + (length sizes * pad)
-        size :: BrowserPoint
-        size = wrap size'
-        padding :: BrowserPoint
-        padding = wrap pad
-
-
-
-canvasToView :: forall r.
-                { width :: Number | r }
-             -> Number
-             -> RelPoint
-canvasToView {width} x = globalToInterval' (Pair zero w') x'
-  where (Pair x' w') = BigInt.fromInt <<< Int.round <$> Pair x width
-
-
-canvasToBrowserPoint :: forall r.
-                        { width :: Number | r }
-                     -> Interval BrowserPoint
-                     -> Number
-                     -> BrowserPoint
-canvasToBrowserPoint cw v@(Pair vL vR) x =
-  intervalToGlobal v $ (canvasToView cw x)
-
-
-browserPointToCanvas :: forall r.
-                        Canvas.Dimensions
-                     -> Interval BrowserPoint
-                     -> BrowserPoint
-                     -> Number
-browserPointToCanvas screenSize v@(Pair vL vR) p = relPointToNumber pixels'
-  where viewSize :: BigInt
-        viewSize = unwrap $ intervalSize v
-        width' = BigInt.fromInt $ Int.round screenSize.width
-        -- Pixels/BrowserPoint
-        scale :: Ratio BigInt
-        scale = width' % viewSize
-        pixels' = (unwrap (p - vL) % one) * scale
-
-
-
-
-intervalToScreen :: forall i c r.
-                    Canvas.Dimensions
-                 -> Interval BrowserPoint
-                 -> Interval BrowserPoint
-                 -> { width :: Number, offset :: Number }
-intervalToScreen screen v interval = {width, offset}
-  where (Pair l r) = browserPointToCanvas screen v <$> interval
-        width = r - l
-        offset = l
-
-
-shiftIntervalBy :: forall c.
-                   Newtype c BigInt
-                => Interval c
-                -> Ratio BigInt
-                -> Interval c
-shiftIntervalBy v rat = wrap <$> shiftIntervalBy' (unwrap <$> v) rat
-
-shiftIntervalBy' :: forall c.
-                    EuclideanRing c
-                 => Interval c
-                 -> Ratio c
-                 -> Interval c
-shiftIntervalBy' v@(Pair l r) rat =
-  let diff = ((r - l) * (Ratio.numerator rat)) / (Ratio.denominator rat)
-  in Pair (l + diff) (r + diff)
-
-
-zoomIntervalBy :: forall c.
-                  Newtype c BigInt
-               => Interval c
-               -> Ratio BigInt
-               -> Interval c
-zoomIntervalBy v r = wrap <$> zoomIntervalBy' (unwrap <$> v) r
-
-zoomIntervalBy' :: forall c.
-                   EuclideanRing c
-                => Interval c
-                -> Ratio c
-                -> Interval c
-zoomIntervalBy' v@(Pair l r) rat =
-  let diff = ((r - l) * (Ratio.numerator rat)) / (Ratio.denominator rat)
-  in Pair (l - diff) (r + diff)
-
-
+-- | Newtype for representing values normalized to fit in some range
 newtype Normalized a = Normalized a
 
 derive instance newtypeNormalized :: Newtype (Normalized a) _
@@ -387,15 +63,162 @@ normalizePoint :: { width :: Number
                   , height :: Number }
                -> Point
                -> Normalized Point
-normalizePoint {width, height} {x, y} = Normalized { x: x', y: y' }
-  where x' = x / width
-        y' = y / height
+normalizePoint s {x, y} = Normalized { x: x', y: y' }
+  where x' = x / s.width
+        y' = y / s.height
 
-normPoint :: Point -> Maybe (Normalized Point)
-normPoint p@{x, y}
-  | x < 0.0 || x > 1.0 = Nothing
-  | y < 0.0 || y > 1.0 = Nothing
-  | otherwise = Just $ Normalized p
+rescalePoint :: { width :: Number, height :: Number }
+             -> Normalized Point
+             -> Point
+rescalePoint s (Normalized p) = {x: p.x * s.width, y: p.y * s.height}
 
-nPointToFrame :: Pixels -> Pixels -> Normalized Point -> Point
-nPointToFrame w h (Normalized p) = {x: p.x * w, y: p.y * h}
+
+-- this should be in the UI, actually.
+-- the padding for the view is calculated from the current scale & is in [minPixels, maxPixels]
+type SegmentPadding = { minPixels :: Number
+                      , maxPixels :: Number }
+
+
+-- | A coordinate system is defined by a set of segments,
+-- | which are defined by (mutually exclusive and contiguous) intervals
+-- | over the browser coordinates (Int in most cases)
+newtype CoordSys i c =
+  CoordSys (Segments i c)
+
+-- | A single segment is the segment identifier together with the range it covers.
+type Segment i c  = Tuple i (Pair c)
+
+-- TODO the `Map i (Pair c)` definition of `Segments i c` makes it
+--      tricky to work with `Segments` using lenses; having problems
+--      working with whole `Tuple i (Pair c)` from `Map i (Pair c)`
+--      without using Map.toUnfoldable, which requires an annotation...
+
+-- | Several segments are indexed by their identifiers.
+type Segments i c = Map i (Pair c)
+
+-- | The `Functor` instance maps over the segment borders.
+instance functorCoordSys :: Functor (CoordSys i) where
+  map f (CoordSys cs) = CoordSys $ (map <<< map) f cs
+
+derive instance newtypeCoordSys :: Newtype (CoordSys i c) _
+derive instance genericCoordSys :: Generic (CoordSys i c) _
+
+-- | Lens to the segments in a coordinate system.
+_Segments :: forall i c j d.
+             Lens
+             (CoordSys i c) (CoordSys j d)
+             (Segments i c) (Segments j d)
+_Segments = _Newtype
+
+
+-- | A Getter' to retrieve the total size of the coordinate system by summing its parts.
+_TotalSize :: forall i c.
+              Semiring c
+           => Getter' (CoordSys i c) c
+_TotalSize = _Segments
+             <<< (to $ alaF Additive foldMap sum)
+
+
+-- | A Getter' into the size of a segment.
+_SegmentSize :: forall i c.
+                Ring c
+             => Getter' (Segment i c) c
+_SegmentSize = _2 <<< to pairSize
+
+
+
+-- | A coordinate system is created by providing an array of pairs of
+-- | chromosome/segment name (often in the ChrId newtype) and their
+-- | respective sizes.
+coordSys :: forall i c.
+            Ord i
+         => Semiring c
+         => Array (Tuple i c)
+         -> CoordSys i c
+coordSys segs = CoordSys $ Map.fromFoldable
+                $ Array.zip ids (offsets sizes)
+  where (Tuple ids sizes) = Array.unzip segs
+
+        -- Given an array of sizes, produce an array of contiguous intervals.
+        offsets :: Array c -> Array (Pair c)
+        offsets xs = let os = Array.scanl (\x y -> x + y) zero xs
+                     in Array.zipWith Pair (zero `Array.cons` os) os
+
+
+-- | Given a coordinate system and a point, find the segment that contains the point, if any.
+lookupSegment :: forall i c.
+                 Ord c
+              => CoordSys i c
+              -> c
+              -> Maybe (Segment i c)
+lookupSegment cs x = findOf folded pred array
+  where pred :: Segment i c -> Boolean
+        pred = view (_2 <<< to (inPair x))
+        array :: Array (Segment i c)
+        array = cs ^. _Segments <<< to Map.toUnfoldable
+
+
+-- | Given a coordinate system and a range, find the segments that overlap, even partially, with the range.
+segmentsInPair :: forall i c.
+                  Ord i
+               => Ord c
+               => CoordSys i c
+               -> Pair c
+               -> Segments i c
+segmentsInPair cs x = Map.filter (any (_ `inPair` x)) $ cs ^. _Segments
+
+
+-- | The scale of the browser view is defined by how much of the coordinate system is visible,
+-- | and how big the screen it must fit into.
+type Scale = { screenWidth :: Number, viewWidth :: Int }
+
+-- | Given the width of the display in pixels, and how much of the coordinate system
+-- | that is currently visible, scale a point in the coordinate system
+-- | to the screen.
+-- | Always uses zero as the origin -- points scaled with this must still be translated!
+scaleToScreen :: Scale
+              -> Int
+              -> Number
+scaleToScreen {screenWidth, viewWidth} x =
+  Int.toNumber x * ((Int.toNumber viewWidth) / screenWidth)
+
+
+-- | Given the width of the display in pixels, and how much of the coordinate system
+-- | that is currently visible, scale a point given in pixels from the left-hand edge
+-- | to browser units from the beginning of the browser.
+-- | Always uses zero as the origin -- points scaled with this must still be translated!
+scaleToGlobal :: Scale
+              -> Number
+              -> Int
+scaleToGlobal {screenWidth, viewWidth} x =
+  Int.round $ x * (screenWidth / (Int.toNumber viewWidth))
+
+
+-- | Given a coordinate system and browser scale,
+-- | return the browser segments scaled to canvas coordinates.
+scaledSegments :: forall i.
+                  CoordSys i Int
+               -> Scale
+               -> Segments i Number
+scaledSegments cs scale = (map <<< map) (scaleToScreen scale) $ cs ^. _Segments
+
+
+
+-- | Helper functions for translating and scaling pairs.
+-- | They're concretized to `Int` for convenience; in truth they would
+-- | probably fit better in the UI module.
+
+-- | Translate an Int pair to the right by `x` multiples of its size.
+translatePairBy :: Pair Int
+                -> Number
+                -> Pair Int
+translatePairBy p x = (_ + delta) <$> p
+  where delta = Int.round $ x * (Int.toNumber $ pairSize p)
+
+-- | Scale an Int pair by changing its radius to be `x` times the pair size.
+scalePairBy :: Pair Int
+            -> Number
+            -> Pair Int
+scalePairBy p x = Int.round <$> Pair (l' - delta) (r' + delta)
+  where p'@(Pair l' r') = Int.toNumber <$> p
+        delta = (pairSize p' * x) - (pairSize p') / 2.0
