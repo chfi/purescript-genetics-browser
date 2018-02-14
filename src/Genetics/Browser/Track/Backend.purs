@@ -3,36 +3,32 @@ module Genetics.Browser.Track.Backend where
 import Prelude
 
 import Color (Color, black, white)
-import Color.Scheme.Clrs (red)
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
 import Data.Argonaut (Json, _Array)
 import Data.Array ((..))
 import Data.Array as Array
+import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.Either (Either(..))
 import Data.Exists (Exists, runExists)
-import Data.Filterable (partition, partitioned)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
-import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens (Getter', to, view, (^.), (^?))
+import Data.Lens (Getter', view, (^?))
 import Data.List (List)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(Just, Nothing), fromMaybe, isJust, maybe)
+import Data.Maybe (Maybe(Just, Nothing), fromMaybe, maybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (unwrap)
 import Data.Pair (Pair(..))
 import Data.Record as Record
 import Data.Symbol (class IsSymbol, SProxy(SProxy))
-import Data.Traversable (class Traversable, traverse)
-import Data.Tuple (Tuple(Tuple), snd, uncurry)
-import Data.Unfoldable (unfoldr)
-import Data.Variant (Variant, case_, inj, onMatch, prj)
-import Debug.Trace as Debug
+import Data.Traversable (traverse)
+import Data.Tuple (Tuple, snd, uncurry)
+import Data.Variant (Variant, case_, inj, onMatch)
 import Genetics.Browser.Types (Bp, ChrId, Point)
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), pairSize, pairsOverlap, scaledSegments)
 import Graphics.Canvas as Canvas
@@ -41,7 +37,6 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class RowLacks)
-import Unsafe.Coerce (unsafeCoerce)
 
 
 
@@ -100,10 +95,16 @@ type HorPlaceR = ( point :: Normalized Number
 type HPos = Variant HorPlaceR
 
 
-type Renderer a = { draw     :: a -> DrawingV
-                  , horPlace :: a -> HPos
-                  , verPlace :: a -> Normalized Number
-                  }
+
+type BatchRenderer a = { drawing :: Drawing
+                       , place :: a -> Normalized Point }
+
+type SingleRenderer a = { draw  :: a -> DrawingV
+                        , horPlace :: a -> HPos
+                        , verPlace :: a -> Normalized Number }
+
+type Renderer a = Variant ( batch :: BatchRenderer a
+                          , single :: SingleRenderer a )
 
 
 type NormalizedGlyph = { drawing :: Variant DrawingR
@@ -111,6 +112,14 @@ type NormalizedGlyph = { drawing :: Variant DrawingR
                        , verPos  :: Normalized Number
                        }
 
+
+type BatchGlyph c = { drawing :: Drawing
+                    , points :: Array c }
+
+type UniqueGlyph = { drawing :: Drawing, point :: Point }
+
+type BatchableGlyph = { drawing :: Drawing
+                      , points :: Array (Normalized Point) }
 
 
 horPlace :: forall r.
@@ -132,33 +141,45 @@ verPlace :: forall r.
          -> Normalized Number
 verPlace = view
 
-render :: forall err a.
-          Renderer a
-       -> a
-       -> NormalizedGlyph
-render render a =
+
+renderSingle :: forall a.
+                SingleRenderer a
+             -> a
+             -> NormalizedGlyph
+renderSingle render a =
       { drawing: render.draw a
       , horPos:  render.horPlace a
       , verPos:  render.verPlace a
       }
 
+renderBatch :: forall a.
+               BatchRenderer a
+            -> Array a
+            -> BatchGlyph (Normalized Point)
+renderBatch render as = {drawing, points}
+  where drawing = render.drawing
+        points  = map render.place as
 
-type BatchedDrawings = { drawing :: Drawing, points :: Array Point }
-type SingleDrawing   = { drawing :: Drawing, point :: Point }
 
-
-type Glyph = Variant ( batched :: BatchedDrawings
-                     , single  :: SingleDrawing  )
+render :: forall a.
+          Renderer a
+       -> Array a
+       -> Either
+           (BatchGlyph (Normalized Point))
+           (Array NormalizedGlyph)
+render r as = case_
+  # onMatch { batch:  \r -> Left  $ renderBatch r as
+            , single: \r -> Right $ map (renderSingle r) as }
+  $ r
 
 
 type FixedUIComponent    = CanvasReadyDrawing
 type RelativeUIComponent = Pair BigInt -> CanvasReadyDrawing
 
 
-
-type Browser = { tracks     :: Array Glyph
-               , relativeUI :: Array RelativeUIComponent
-               , fixedUI    :: Array FixedUIComponent }
+-- type Browser = { tracks     :: Array _
+--                , relativeUI :: Array RelativeUIComponent
+--                , fixedUI    :: Array FixedUIComponent }
 
 
 type CanvasSingleGlyph = { drawing :: Drawing, point :: Point }
@@ -183,69 +204,6 @@ resizeDrawing {width} = case_
   # onMatch
      { point: (\x -> x)
      , range: (_ $ width) }
-
-
-_LHS :: Getter' HPos (Normalized Number)
-_LHS = to $ case_
-         # onMatch { point: \x -> x, range: \(Pair l _) -> l}
-
-
-renderGlyphs :: forall f r a.
-                Canvas.Dimensions
-             -> Pair Number
-             -> Array NormalizedGlyph
-             -> { toBatch :: Array SingleDrawing
-                , singles :: Array SingleDrawing }
-renderGlyphs {height} vw@(Pair l r) gs =
-    (\ {left, right} -> {toBatch: left, singles: right})
-    $ partitioned $ map drawIt gs
-
-  where drawIt {drawing, horPos, verPos} =
-          let x = (r - l) * unwrap (horPos ^. _LHS)
-              y = height * (1.0 - unwrap verPos)
-              d = resizeDrawing {width: r-l} drawing
-              res = { drawing: d, point: { x: (x + l), y } }
-          in if isJust $ prj _point drawing
-                then Left res else Right res
-
-renderNormalizedGlyphs :: forall f r a.
-                          Canvas.Dimensions
-                       -> { width :: Number, offset :: Number }
-                       -> Array NormalizedGlyph
-                       -> { toBatch :: Array SingleDrawing
-                          , singles :: Array SingleDrawing }
-renderNormalizedGlyphs {height} {width, offset} gs =
-    (\ {left, right} -> {toBatch: left, singles: right})
-    $ partitioned $ map drawIt gs
-
-  where drawIt {drawing, horPos, verPos} =
-          let x = width * unwrap (horPos ^. _LHS)
-              y = height * (1.0 - unwrap verPos)
-              d = resizeDrawing {width} drawing
-              res = { drawing: d, point: { x: (x + offset), y } }
-          in if isJust $ prj _point drawing
-                then Left res else Right res
-
-
-batchDrawings :: Array SingleDrawing
-              -> Array BatchedDrawings
-batchDrawings = unfoldr f
-  where f gs = Array.uncons gs >>= \ {head, tail} ->
-                 let { no, yes } = partition (\ {drawing} -> head.drawing == drawing) tail
-                     points = Array.cons head.point $ map _.point yes
-                 in pure $ Tuple { drawing: head.drawing, points } no
-
-
-batchNormalizedGlyphs :: forall f r a.
-                         Canvas.Dimensions
-                      -> { width :: Number, offset :: Number }
-                      -> Array NormalizedGlyph
-                      -> Array Glyph
-batchNormalizedGlyphs h wo gs =
-  let {toBatch, singles} = renderNormalizedGlyphs h wo gs
-      batched = inj (SProxy :: SProxy "batched") <$> batchDrawings toBatch
-      single  = inj (SProxy :: SProxy "single")  <$> singles
-  in batched <> single
 
 
 
@@ -463,16 +421,6 @@ getDataGrouped cs p url = groupToChrs <$> getData cs p url
 
 
 
-type TrackRow c a = ( url :: String
-                    , parse :: c -> Json -> Maybe a
-                    , render :: Renderer a )
-
-type GWASTrack c a  = { vscale :: { | VScaleRow () }
-                      | TrackRow c a }
-
-type AnnotTrack c a = { getEntry :: a -> LegendEntry | TrackRow c a }
-
-
 eqLegend a b = a.text == b.text
 
 trackLegend :: forall f a.
@@ -484,14 +432,7 @@ trackLegend :: forall f a.
 trackLegend f as = Array.nubBy eqLegend $ Array.fromFoldable $ map f as
 
 
-
 data Track a = Track (Map ChrId (Array a)) (Renderer a)
-
-
-renderTrackNormalized :: forall a.
-                         Track a
-                      -> Map ChrId (Array NormalizedGlyph)
-renderTrackNormalized (Track as r) = (map <<< map) (render r) as
 
 
 horPlaceOnSegment :: forall r.
@@ -515,33 +456,51 @@ finalizeNormDrawing seg o =
             , range: (_ $ pairSize seg) }
   $ o.drawing
 
-
--- TODO remember to subtract LHS of view to actually move the glyphs to the screen!
-
-
--- TODO should only return SingleDrawing; let renderNormalizedTrack handle batching
 renderNormalized1 :: Number
                   -> Pair Number
                   -> NormalizedGlyph
-                  -> Glyph
+                  -> UniqueGlyph
 renderNormalized1 height seg@(Pair l _) ng =
   let x = horPlaceOnSegment seg ng + l
       y = height * (one - unwrap ng.verPos)
       drawing = finalizeNormDrawing seg ng
-  in inj (SProxy :: SProxy "single") { point: {x,y} , drawing }
+  in { point: {x,y} , drawing }
+
+scalePoint :: Number
+           -> Pair Number
+           -> Normalized Point
+           -> Point
+scalePoint height seg@(Pair l _) np =
+  let x = (unwrap np).x * pairSize seg + l
+      y = height * (one - (unwrap np).y)
+  in { x,y }
+
 
 
 renderNormalizedTrack :: CoordSys ChrId BigInt
                       -> Canvas.Dimensions
                       -> Pair BigInt
-                      -> Map ChrId (Array NormalizedGlyph)
-                      -> Map ChrId (Array Glyph)
+                      -> Map ChrId (Either
+                                      (BatchGlyph (Normalized Point))
+                                      (Array NormalizedGlyph))
+                      -> Map ChrId (Either
+                                      (BatchGlyph Point)
+                                      (Array UniqueGlyph))
 renderNormalizedTrack cs cdim bView ngs =
   let segs :: Map ChrId (Pair Number)
-      segs = let s = scaledSegments cs { screenWidth: cdim.width, viewWidth: pairSize bView }
-             in Debug.traceShow s \_ -> s
-      renderSeg :: ChrId -> Pair Number -> Array Glyph
-      renderSeg k v = foldMap (map (renderNormalized1 cdim.height v)) $ Map.lookup k ngs
+      segs = scaledSegments cs { screenWidth: cdim.width, viewWidth: pairSize bView }
+
+      batchT :: Pair Number -> BatchGlyph (Normalized Point) -> BatchGlyph Point
+      batchT seg bg@{points} = bg { points = map (scalePoint cdim.height seg) points }
+
+      uniqT :: Pair Number -> Array NormalizedGlyph -> Array UniqueGlyph
+      uniqT seg = map (renderNormalized1 cdim.height seg)
+
+      renderSeg :: ChrId -> Pair Number -> Either (BatchGlyph Point) (Array UniqueGlyph)
+      renderSeg k seg = fromMaybe (pure [])
+                         $ bimap (batchT seg) (uniqT seg)
+                        <$> Map.lookup k ngs
+
   in mapWithIndex renderSeg segs
 
 
@@ -551,7 +510,7 @@ browser :: CoordSys ChrId BigInt
         -> Padding
         -> { legend :: Legend, vscale :: VScale }
         -> List (Exists Track)
-        -> { tracks     :: Pair BigInt -> List (Array Glyph)
+        -> { tracks     :: Pair BigInt -> List _
            , relativeUI :: Pair BigInt -> Drawing
            , fixedUI    :: Drawing }
 browser cs cdim padding ui inputTracks =
@@ -582,11 +541,14 @@ browser cs cdim padding ui inputTracks =
 
       fixedUI = vScale <> legend
 
-      normGlyphs :: List (Map ChrId (Array NormalizedGlyph))
-      normGlyphs = map (runExists (\(Track as r) -> (map <<< map) (render r) as)) inputTracks
+      normTracks :: List (Map ChrId
+                          (Either (BatchGlyph (Normalized Point))
+                                  (Array NormalizedGlyph)))
+      normTracks = runExists (\(Track as r) -> render r <$> as) <$> inputTracks
 
-      tracks :: Pair BigInt -> List (Array Glyph)
-      tracks v = fold <$> (renderNormalizedTrack cs cdim v <$> normGlyphs)
+      -- tracks :: Pair BigInt -> List (Either (BatchGlyph Point) (Array UniqueGlyph))
+      tracks :: Pair BigInt -> _
+      tracks v = (renderNormalizedTrack cs cdim v) <$> normTracks
 
       -- chrLabels = chrLabelTrack cs trackCanvas
       -- ruler     = horRulerTrack ui.vscale red trackCanvas
@@ -595,7 +557,7 @@ browser cs cdim padding ui inputTracks =
       -- relativeUI = chrLabels
       --           <> translate 0.0 padding.vertical <<< (ruler <> boxes)
 
-  in { tracks
+  in { tracks: mempty
      , relativeUI: mempty
      , fixedUI
      }
