@@ -3,9 +3,10 @@ module Genetics.Browser.Types.Coordinates where
 import Prelude
 
 import Data.Array as Array
-import Data.Foldable (any, foldMap, sum)
+import Data.BigInt (BigInt)
+import Data.BigInt as BigInt
+import Data.Foldable (any, foldMap)
 import Data.Generic.Rep (class Generic)
-import Data.Int as Int
 import Data.Lens (Getter', Lens, _2, findOf, folded, to, view, (^.))
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Map (Map)
@@ -19,7 +20,7 @@ import Genetics.Browser.Types (Point)
 
 
 -- | The global coordinate system works by taking the sum of the chromosome sizes,
--- | for now mainly represented as an Int.
+-- | for now mainly represented as a BigInt, as an Int representation may overflow.
 -- | Subsets of the global coordinate system are defined by some interval, namely a Pair of Ints
 
 
@@ -81,9 +82,10 @@ type SegmentPadding = { minPixels :: Number
 
 -- | A coordinate system is defined by a set of segments,
 -- | which are defined by (mutually exclusive and contiguous) intervals
--- | over the browser coordinates (Int in most cases)
+-- | over the browser coordinates (BigInt in most cases)
 newtype CoordSys i c =
   CoordSys (Segments i c)
+
 
 -- | A single segment is the segment identifier together with the range it covers.
 type Segment i c  = Tuple i (Pair c)
@@ -95,6 +97,7 @@ type Segment i c  = Tuple i (Pair c)
 
 -- | Several segments are indexed by their identifiers.
 type Segments i c = Map i (Pair c)
+
 
 -- | The `Functor` instance maps over the segment borders.
 instance functorCoordSys :: Functor (CoordSys i) where
@@ -113,10 +116,10 @@ _Segments = _Newtype
 
 -- | A Getter' to retrieve the total size of the coordinate system by summing its parts.
 _TotalSize :: forall i c.
-              Semiring c
+              Ring c
            => Getter' (CoordSys i c) c
 _TotalSize = _Segments
-             <<< (to $ alaF Additive foldMap sum)
+             <<< (to $ alaF Additive foldMap pairSize)
 
 
 -- | A Getter' into the size of a segment.
@@ -170,17 +173,17 @@ segmentsInPair cs x = Map.filter (any (_ `inPair` x)) $ cs ^. _Segments
 
 -- | The scale of the browser view is defined by how much of the coordinate system is visible,
 -- | and how big the screen it must fit into.
-type Scale = { screenWidth :: Number, viewWidth :: Int }
+type Scale = { screenWidth :: Number, viewWidth :: BigInt }
 
 -- | Given the width of the display in pixels, and how much of the coordinate system
 -- | that is currently visible, scale a point in the coordinate system
 -- | to the screen.
 -- | Always uses zero as the origin -- points scaled with this must still be translated!
 scaleToScreen :: Scale
-              -> Int
+              -> BigInt
               -> Number
 scaleToScreen {screenWidth, viewWidth} x =
-  Int.toNumber x * ((Int.toNumber viewWidth) / screenWidth)
+  BigInt.toNumber x * (screenWidth / (BigInt.toNumber viewWidth))
 
 
 -- | Given the width of the display in pixels, and how much of the coordinate system
@@ -189,15 +192,15 @@ scaleToScreen {screenWidth, viewWidth} x =
 -- | Always uses zero as the origin -- points scaled with this must still be translated!
 scaleToGlobal :: Scale
               -> Number
-              -> Int
+              -> BigInt
 scaleToGlobal {screenWidth, viewWidth} x =
-  Int.round $ x * (screenWidth / (Int.toNumber viewWidth))
+  BigInt.fromNumber $ x * ((BigInt.toNumber viewWidth) / screenWidth)
 
 
 -- | Given a coordinate system and browser scale,
 -- | return the browser segments scaled to canvas coordinates.
 scaledSegments :: forall i.
-                  CoordSys i Int
+                  CoordSys i BigInt
                -> Scale
                -> Segments i Number
 scaledSegments cs scale = (map <<< map) (scaleToScreen scale) $ cs ^. _Segments
@@ -205,20 +208,20 @@ scaledSegments cs scale = (map <<< map) (scaleToScreen scale) $ cs ^. _Segments
 
 
 -- | Helper functions for translating and scaling pairs.
--- | They're concretized to `Int` for convenience; in truth they would
+-- | They're concretized to `BigInt` for convenience; in truth they would
 -- | probably fit better in the UI module.
 
--- | Translate an Int pair to the right by `x` multiples of its size.
-translatePairBy :: Pair Int
+-- | Translate an BigInt pair to the right by `x` multiples of its size.
+translatePairBy :: Pair BigInt
                 -> Number
-                -> Pair Int
+                -> Pair BigInt
 translatePairBy p x = (_ + delta) <$> p
-  where delta = Int.round $ x * (Int.toNumber $ pairSize p)
+  where delta = BigInt.fromNumber $ x * (BigInt.toNumber $ pairSize p)
 
 -- | Scale an Int pair by changing its radius to be `x` times the pair size.
-scalePairBy :: Pair Int
+scalePairBy :: Pair BigInt
             -> Number
-            -> Pair Int
-scalePairBy p x = Int.round <$> Pair (l' - delta) (r' + delta)
-  where p'@(Pair l' r') = Int.toNumber <$> p
+            -> Pair BigInt
+scalePairBy p x = BigInt.fromNumber <$> Pair (l' - delta) (r' + delta)
+  where p'@(Pair l' r') = BigInt.toNumber <$> p
         delta = (pairSize p' * x) - (pairSize p') / 2.0
