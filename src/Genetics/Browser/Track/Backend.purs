@@ -1,8 +1,4 @@
 module Genetics.Browser.Track.Backend where
-       -- ( demoBrowser
-       -- , demoLegend
-       -- , getDataDemo
-       -- ) where
 
 import Prelude
 
@@ -14,10 +10,12 @@ import Control.Monad.Error.Class (throwError)
 import Data.Argonaut (Json, _Array)
 import Data.Array ((..))
 import Data.Array as Array
+import Data.BigInt (BigInt)
 import Data.Either (Either(..))
 import Data.Exists (Exists, runExists)
 import Data.Filterable (partition, partitioned)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
+import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
 import Data.Lens (Getter', to, view, (^.), (^?))
@@ -29,24 +27,22 @@ import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (unwrap)
 import Data.Pair (Pair(..))
 import Data.Record as Record
-import Data.Symbol (class IsSymbol, SProxy(..))
+import Data.Symbol (class IsSymbol, SProxy(SProxy))
 import Data.Traversable (class Traversable, traverse)
 import Data.Tuple (Tuple(Tuple), snd, uncurry)
 import Data.Unfoldable (unfoldr)
-import Data.Variant (Variant, case_, inj, on, onMatch, prj)
+import Data.Variant (Variant, case_, inj, onMatch, prj)
+import Debug.Trace as Debug
 import Genetics.Browser.Types (Bp, ChrId, Point)
-import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, Normalized(Normalized), _BrowserIntervals, _Index, _Interval, intervalToScreen, intervalsOverlap, intervalsToMap)
-import Genetics.Browser.View (Pixels)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), pairSize, pairsOverlap, scaledSegments)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class RowLacks)
+import Unsafe.Coerce (unsafeCoerce)
 
-
-
-type BrowserView = Interval BrowserPoint
 
 
 intersection :: forall k a b.
@@ -80,11 +76,14 @@ zipMapsWith f a b = uncurry f <$> zipMaps a b
 type ChrCtx r = Map ChrId (Record r)
 
 
+
+
+
 _point = SProxy :: SProxy "point"
 _range = SProxy :: SProxy "range"
 
 type GenomePosV = Variant ( point :: Bp
-                          , range :: Interval Bp )
+                          , range :: Pair Bp )
 
 type FeatureR r = ( position :: GenomePosV
                   , frameSize :: Bp
@@ -93,11 +92,11 @@ type Feature r = Record (FeatureR r)
 
 
 type DrawingR  = ( point :: Drawing
-                 , range :: Pixels -> Drawing )
+                 , range :: Number -> Drawing )
 type DrawingV  = Variant DrawingR
 
 type HorPlaceR = ( point :: Normalized Number
-                 , range :: Interval (Normalized Number) )
+                 , range :: Pair (Normalized Number) )
 type HPos = Variant HorPlaceR
 
 
@@ -153,7 +152,7 @@ type Glyph = Variant ( batched :: BatchedDrawings
 
 
 type FixedUIComponent    = CanvasReadyDrawing
-type RelativeUIComponent = Interval BrowserPoint -> CanvasReadyDrawing
+type RelativeUIComponent = Pair BigInt -> CanvasReadyDrawing
 
 
 
@@ -170,14 +169,14 @@ type BatchedTrack = Array CanvasBatchGlyph
 type CanvasReadyDrawing = Drawing
 
 type BrowserTrack = Canvas.Dimensions
-                 -> Interval BrowserPoint
+                 -> Pair BigInt
                  -> CanvasReadyDrawing
 
 
 -- Given a frame-normalized drawing, finalize it so it can be rendered to a canvas;
 -- `width` is the width in pixels of the frame the drawing resides in.
 resizeDrawing :: forall r.
-                 { width :: Pixels | r }
+                 { width :: Number | r }
               -> DrawingV
               -> Drawing
 resizeDrawing {width} = case_
@@ -191,9 +190,27 @@ _LHS = to $ case_
          # onMatch { point: \x -> x, range: \(Pair l _) -> l}
 
 
-renderNormalizedGlyphs ::  forall f r a.
+renderGlyphs :: forall f r a.
+                Canvas.Dimensions
+             -> Pair Number
+             -> Array NormalizedGlyph
+             -> { toBatch :: Array SingleDrawing
+                , singles :: Array SingleDrawing }
+renderGlyphs {height} vw@(Pair l r) gs =
+    (\ {left, right} -> {toBatch: left, singles: right})
+    $ partitioned $ map drawIt gs
+
+  where drawIt {drawing, horPos, verPos} =
+          let x = (r - l) * unwrap (horPos ^. _LHS)
+              y = height * (1.0 - unwrap verPos)
+              d = resizeDrawing {width: r-l} drawing
+              res = { drawing: d, point: { x: (x + l), y } }
+          in if isJust $ prj _point drawing
+                then Left res else Right res
+
+renderNormalizedGlyphs :: forall f r a.
                           Canvas.Dimensions
-                       -> { width :: Pixels, offset :: Pixels }
+                       -> { width :: Number, offset :: Number }
                        -> Array NormalizedGlyph
                        -> { toBatch :: Array SingleDrawing
                           , singles :: Array SingleDrawing }
@@ -221,7 +238,7 @@ batchDrawings = unfoldr f
 
 batchNormalizedGlyphs :: forall f r a.
                          Canvas.Dimensions
-                      -> { width :: Pixels, offset :: Pixels }
+                      -> { width :: Number, offset :: Number }
                       -> Array NormalizedGlyph
                       -> Array Glyph
 batchNormalizedGlyphs h wo gs =
@@ -231,75 +248,6 @@ batchNormalizedGlyphs h wo gs =
   in batched <> single
 
 
--- TODO rewrite relative UI features to use renderNormalizedglyphs;
---      this one seems kinda broken with the horizontal shifting
-drawIntervalFeature :: forall f r a.
-                       Foldable f
-                    => Canvas.Dimensions
-                    -> { width :: Pixels, offset :: Pixels }
-                    -> f NormalizedGlyph
-                    -> CanvasReadyDrawing
-drawIntervalFeature {height} {width, offset} = foldMap drawIt
-  where drawIt {drawing, horPos, verPos} =
-          let x' = case_
-                    # on _point (\x -> x)
-                    # on _range (\(Pair l _) -> l)
-                    $ horPos
-              x = width * unwrap x'
-              y = height * (1.0 - unwrap verPos)
-              d = resizeDrawing {width} drawing
-          in translate (x + offset) y d
-
-
--- | Returns the left-hand-edge offset, and width, in pixels,
--- | of each interval (chromosome) in the provided coordinate system
-viewportIntervals :: forall i a r.
-                     Ord i
-                  => CoordSys i BrowserPoint
-                  -> Canvas.Dimensions
-                  -> Interval BrowserPoint
-                  -> Map i { width :: Pixels, offset :: Pixels }
-viewportIntervals cs cdim bView =
-  intervalToScreen cdim bView <$> (view _Interval <$> intervalsToMap cs)
-
-
-drawRelativeUI :: forall f i a.
-                  Ord i
-               => Foldable f
-               => CoordSys i BrowserPoint
-               -> Map i (f NormalizedGlyph)
-               -> Canvas.Dimensions
-               -> RelativeUIComponent
-drawRelativeUI cs drawings cd v =
-  fold $ zipMapsWith (drawIntervalFeature cd) (viewportIntervals cs cd v) drawings
-
-
-pureTrackGlyphs :: forall f i a.
-                   Ord i
-                => CoordSys i BrowserPoint
-                -> Map i (Array NormalizedGlyph)
-                -> Canvas.Dimensions
-                -> Interval BrowserPoint
-                -> Map i (Array Glyph)
-pureTrackGlyphs cs glyphs cd v =
-  zipMapsWith (\v gs -> batchNormalizedGlyphs cd v gs) (viewportIntervals cs cd v) glyphs
-
-
-
-renderTrackGlyphs ::  forall f i a.
-                      Ord i
-                  => Foldable f
-                  => Traversable f
-                  => CoordSys i BrowserPoint
-                  -> Renderer a
-                  -> Map i (f a)
-                  -> Canvas.Dimensions
-                  -> Interval BrowserPoint
-                  -> Array Glyph
-renderTrackGlyphs cs r trackData =
-  let data' = map Array.fromFoldable trackData
-      glyphs = (map <<< map) (render r) data'
-  in \cd v -> fold $ pureTrackGlyphs cs glyphs cd v
 
 
 horRulerTrack :: forall r.
@@ -313,40 +261,42 @@ horRulerTrack {min, max, sig} color f _ = outlined outline rulerDrawing
         rulerDrawing = Drawing.path [{x: 0.0, y}, {x: f.width, y}]
 
 
-chrLabelTrack :: CoordSys ChrId BrowserPoint
-              -> Canvas.Dimensions
-              -> RelativeUIComponent
-chrLabelTrack cs = drawRelativeUI cs (Map.fromFoldable results)
-  where mkLabel :: ChrId -> NormalizedGlyph
-        mkLabel chr = { drawing: inj _point $ chrText chr
-                      , horPos:  inj _point $ Normalized (0.5)
-                      , verPos: Normalized (0.05) }
+-- chrLabelTrack :: CoordSys ChrId BigInt
+--               -> Canvas.Dimensions
+--               -> RelativeUIComponent
+-- chrLabelTrack cs = unsafeCoerce unit
+-- chrLabelTrack cs = drawRelativeUI cs (Map.fromFoldable results)
+--   where mkLabel :: ChrId -> NormalizedGlyph
+--         mkLabel chr = { drawing: inj _point $ chrText chr
+--                       , horPos:  inj _point $ Normalized (0.5)
+--                       , verPos: Normalized (0.05) }
 
-        font' = font sansSerif 12 mempty
+--         font' = font sansSerif 12 mempty
 
-        chrText :: ChrId -> Drawing
-        chrText chr = Drawing.text font' zero zero (fillColor black) (unwrap chr)
+--         chrText :: ChrId -> Drawing
+--         chrText chr = Drawing.text font' zero zero (fillColor black) (unwrap chr)
 
-        results :: Array _
-        results = map (\x -> Tuple (x^._Index) [mkLabel (x^._Index)]) $ cs^._BrowserIntervals
-
-
-boxesTrack :: Number
-           -> CoordSys ChrId BrowserPoint
-           -> Canvas.Dimensions
-           -> RelativeUIComponent
-boxesTrack h cs = drawRelativeUI cs $ map (const [glyph]) $ intervalsToMap cs
-  where glyph :: NormalizedGlyph
-        glyph = { drawing: inj _range draw
-                , horPos:  inj _range $ Normalized <$> (Pair zero one)
-                , verPos: Normalized one }
-        draw = \w ->
-             let rect = rectangle 0.0 0.0 w h
-             in outlined (outlineColor black <> lineWidth 1.5) rect
+--         results :: Array _
+--         results = map (\x -> Tuple zero [mkLabel (x^._Index)]) $ cs^._BrowserIntervals
 
 
+-- boxesTrack :: Number
+--            -> CoordSys ChrId BigInt
+--            -> Canvas.Dimensions
+--            -> Pair BigInt -> CanvasReadyDrawing
+-- boxesTrack h cs = unsafeCoerce unit
+-- boxesTrack h cs = drawRelativeUI cs $ map (const [glyph]) $ cs ^. _BrowserIntervals
+--   where glyph :: NormalizedGlyph
+--         glyph = { drawing: inj _range draw
+--                 , horPos:  inj _range $ Normalized <$> (Pair zero one)
+--                 , verPos: aone }
+--         draw = \w ->
+--              let rect = rectangle 0.0 0.0 w h
+--              in outlined (outlineColor black <> lineWidth 1.5) rect
 
-featureInterval :: forall a. Feature a -> Interval Bp
+
+
+featureInterval :: forall a. Feature a -> Pair Bp
 featureInterval {position} = case_
   # onMatch
      { point: (\x -> Pair x x)
@@ -369,9 +319,9 @@ bumpFeatures :: forall f a l i o.
              -> f (Feature i)
              -> f (Feature o)
 bumpFeatures f l radius other = map bump
-  where maxInRadius :: Interval Bp -> Number
+  where maxInRadius :: Pair Bp -> Number
         maxInRadius lr = fromMaybe 0.0 $ maximum
-                          $ map (\g -> if intervalsOverlap (featureInterval g) lr
+                          $ map (\g -> if pairsOverlap (featureInterval g) lr
                                           then f `view` g else 0.0) other
 
         bump :: Record (FeatureR i) -> Record (FeatureR o)
@@ -396,7 +346,7 @@ type VScaleRow r = ( min :: Number
                    , sig :: Number
                    | r )
 
-type VScale = { width :: Pixels
+type VScale = { width :: Number
               , color :: Color
               | VScaleRow () }
 
@@ -435,7 +385,7 @@ drawVScale vscale height =
 
 type LegendEntry = { text :: String, icon :: Drawing }
 
-type Legend = { width :: Pixels
+type Legend = { width :: Number
               , entries :: Array LegendEntry }
 
 
@@ -472,8 +422,8 @@ drawLegend {width, entries} height =
   in fold ds
 
 
-type Padding = { vertical :: Pixels
-               , horizontal :: Pixels
+type Padding = { vertical :: Number
+               , horizontal :: Number
                }
 
 
@@ -538,23 +488,71 @@ trackLegend f as = Array.nubBy eqLegend $ Array.fromFoldable $ map f as
 data Track a = Track (Map ChrId (Array a)) (Renderer a)
 
 
--- TODO handle vertical offsets of tracks here
-renderTrack :: forall a.
-               CoordSys ChrId BrowserPoint
-            -> Canvas.Dimensions
-            -> Interval BrowserPoint
-            -> Track a
-            -> Array Glyph
-renderTrack cs cd v (Track as r) = renderTrackGlyphs cs r as cd v
+renderTrackNormalized :: forall a.
+                         Track a
+                      -> Map ChrId (Array NormalizedGlyph)
+renderTrackNormalized (Track as r) = (map <<< map) (render r) as
 
 
-browser :: CoordSys ChrId BrowserPoint
+horPlaceOnSegment :: forall r.
+                     Pair Number
+                  -> { horPos :: Variant HorPlaceR | r }
+                  -> Number
+horPlaceOnSegment segmentPixels o =
+    case_
+  # onMatch { point: \(Normalized x) -> x * pairSize segmentPixels
+            , range: \(Pair l r)     -> unwrap l * pairSize segmentPixels }
+  $ o.horPos
+
+
+finalizeNormDrawing :: forall r.
+                       Pair Number
+                    -> { drawing :: DrawingV | r }
+                    -> Drawing
+finalizeNormDrawing seg o =
+    case_
+  # onMatch { point: \x -> x
+            , range: (_ $ pairSize seg) }
+  $ o.drawing
+
+
+-- TODO remember to subtract LHS of view to actually move the glyphs to the screen!
+
+
+-- TODO should only return SingleDrawing; let renderNormalizedTrack handle batching
+renderNormalized1 :: Number
+                  -> Pair Number
+                  -> NormalizedGlyph
+                  -> Glyph
+renderNormalized1 height seg@(Pair l _) ng =
+  let x = horPlaceOnSegment seg ng + l
+      y = height * (one - unwrap ng.verPos)
+      drawing = finalizeNormDrawing seg ng
+  in inj (SProxy :: SProxy "single") { point: {x,y} , drawing }
+
+
+renderNormalizedTrack :: CoordSys ChrId BigInt
+                      -> Canvas.Dimensions
+                      -> Pair BigInt
+                      -> Map ChrId (Array NormalizedGlyph)
+                      -> Map ChrId (Array Glyph)
+renderNormalizedTrack cs cdim bView ngs =
+  let segs :: Map ChrId (Pair Number)
+      segs = let s = scaledSegments cs { screenWidth: cdim.width, viewWidth: pairSize bView }
+             in Debug.traceShow s \_ -> s
+      renderSeg :: ChrId -> Pair Number -> Array Glyph
+      renderSeg k v = foldMap (map (renderNormalized1 cdim.height v)) $ Map.lookup k ngs
+  in mapWithIndex renderSeg segs
+
+
+
+browser :: CoordSys ChrId BigInt
         -> Canvas.Dimensions
         -> Padding
         -> { legend :: Legend, vscale :: VScale }
         -> List (Exists Track)
-        -> { tracks     :: Interval BrowserPoint -> Array Glyph
-           , relativeUI :: Interval BrowserPoint -> Drawing
+        -> { tracks     :: Pair BigInt -> List (Array Glyph)
+           , relativeUI :: Pair BigInt -> Drawing
            , fixedUI    :: Drawing }
 browser cs cdim padding ui inputTracks =
   let height = cdim.height - 2.0 * padding.vertical
@@ -584,17 +582,20 @@ browser cs cdim padding ui inputTracks =
 
       fixedUI = vScale <> legend
 
-      tracks :: Interval BrowserPoint -> Array Glyph
-      tracks v = foldMap (runExists (\t -> renderTrack cs trackCanvas v t)) inputTracks
+      normGlyphs :: List (Map ChrId (Array NormalizedGlyph))
+      normGlyphs = map (runExists (\(Track as r) -> (map <<< map) (render r) as)) inputTracks
 
-      chrLabels = chrLabelTrack cs trackCanvas
-      ruler     = horRulerTrack ui.vscale red trackCanvas
-      boxes     = boxesTrack height cs trackCanvas
+      tracks :: Pair BigInt -> List (Array Glyph)
+      tracks v = fold <$> (renderNormalizedTrack cs cdim v <$> normGlyphs)
 
-      relativeUI = chrLabels
-                <> translate 0.0 padding.vertical <<< (ruler <> boxes)
+      -- chrLabels = chrLabelTrack cs trackCanvas
+      -- ruler     = horRulerTrack ui.vscale red trackCanvas
+      -- boxes     = boxesTrack height cs trackCanvas
+
+      -- relativeUI = chrLabels
+      --           <> translate 0.0 padding.vertical <<< (ruler <> boxes)
 
   in { tracks
-     , relativeUI
+     , relativeUI: mempty
      , fixedUI
      }
