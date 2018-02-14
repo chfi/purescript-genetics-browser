@@ -8,10 +8,13 @@ import Control.Monad.Aff (Aff, throwError)
 import Control.Monad.Eff.Exception (error)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
+import Data.BigInt (BigInt)
+import Data.BigInt as BigInt
 import Data.Exists (Exists, mkExists)
 import Data.Filterable (filtered)
 import Data.Foldable (class Foldable)
-import Data.Lens (to, (^?))
+import Data.Int as Int
+import Data.Lens (to, view, (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -26,7 +29,7 @@ import Data.Traversable (traverse)
 import Data.Variant (inj)
 import Genetics.Browser.Track.Backend (ChrCtx, DrawingV, Feature, LegendEntry, Renderer, Track(Track), VScale, _point, _range, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend, verPlace)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), lookupInterval)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize)
 import Graphics.Drawing (circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
@@ -74,8 +77,7 @@ type GWASFeature r = Feature ( score :: Number
 
 
 
-gemmaJSONParse :: forall a.
-                  CoordSys ChrId a
+gemmaJSONParse :: CoordSys ChrId BigInt
                -> Json
                -> Maybe (GWASFeature ())
 gemmaJSONParse cs j = do
@@ -84,7 +86,7 @@ gemmaJSONParse cs j = do
   pos   <- Bp    <$> obj ^? ix "ps"  <<< _Number
   score <-           obj ^? ix "af"  <<< _Number
 
-  {chrSize} <- lookupInterval cs chrId
+  chrSize <- (Bp <<< BigInt.toNumber <<< pairSize) <$> Map.lookup chrId (view _Segments cs)
 
   pure { position: inj _point pos
        , frameSize: chrSize
@@ -124,7 +126,9 @@ geneRenderer =
   , verPlace: const (Normalized 0.1) }
 
 
-geneJSONParse :: CoordSys _ _
+
+
+geneJSONParse :: CoordSys ChrId BigInt
               -> Json
               -> Maybe (Gene ())
 geneJSONParse cs j = do
@@ -136,7 +140,7 @@ geneJSONParse cs j = do
   end    <- Bp    <$> obj ^? ix "Gene end (bp)"  <<< _Number
   chrId  <- ChrId <$> obj ^? ix "ChrId" <<< _String
 
-  {chrSize} <- lookupInterval cs chrId
+  chrSize <- (Bp <<< BigInt.toNumber <<< pairSize) <$> Map.lookup chrId (view _Segments cs)
 
   pure { position: inj _range (Pair start end)
        , frameSize: chrSize

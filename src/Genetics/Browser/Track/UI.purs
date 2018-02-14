@@ -7,6 +7,7 @@ import Control.Monad.Aff (Aff, Fiber, forkAff, killFiber, launchAff, launchAff_)
 import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, takeVar, tryTakeVar)
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Eff.Uncurried (EffFn4, runEffFn4)
 import Control.Monad.Error.Class (throwError)
@@ -21,29 +22,31 @@ import DOM.Node.Node (appendChild) as DOM
 import DOM.Node.ParentNode (querySelector) as DOM
 import DOM.Node.Types (Element, Node)
 import Data.Argonaut (Json, _Number, _Object, _String)
-import Data.Bifunctor (bimap)
+import Data.Array as Array
+import Data.Bifunctor (bimap, lmap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(..), note)
-import Data.Foldable (foldMap)
+import Data.Foldable (foldMap, for_)
 import Data.Int as Int
 import Data.Lens (to, (^.), (^?))
 import Data.Lens.Index (ix)
+import Data.List (List)
+import Data.List as List
 import Data.Maybe (Maybe(Nothing, Just), fromJust, fromMaybe, maybe)
 import Data.Newtype (wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
 import Data.Ratio (Ratio, (%))
 import Data.Symbol (SProxy(..))
-import Data.Traversable (traverse, traverse_)
-import Data.Tuple (Tuple(Tuple))
+import Data.Traversable (scanl, traverse, traverse_)
+import Data.Tuple (Tuple(Tuple), snd)
 import Data.Variant (case_, onMatch)
 import FRP.Event (Event)
 import Genetics.Browser.Track.Backend (Glyph, Padding, browser, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Demo (annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
-import Genetics.Browser.Types.Coordinates (BrowserPoint, CoordSys, Interval, _BrowserSize, mkCoordSys, shiftIntervalBy, zoomIntervalBy)
-import Genetics.Browser.View (Pixels)
+import Genetics.Browser.Types.Coordinates (CoordSys, _TotalSize, coordSys, pairSize, scalePairBy, scaleToScreen, translatePairBy)
 import Graphics.Canvas (CanvasElement, Context2D, getContext2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
@@ -100,19 +103,19 @@ foreign import canvasEvent :: String -> CanvasElement -> Event Point
 foreign import setViewUI :: forall eff. String -> Eff eff Unit
 
 
-type ViewRange = Interval BrowserPoint
+type ViewRange = Pair BigInt
 
 data UpdateView =
-    ScrollView (Ratio BigInt)
-  | ZoomView (Ratio BigInt)
+    ScrollView Number
+  | ZoomView Number
   | ModView (ViewRange -> ViewRange)
 
 updateViewFold :: UpdateView
                -> ViewRange
                -> ViewRange
 updateViewFold uv iv@(Pair l r) = case uv of
-  ZoomView   x -> iv `zoomIntervalBy`  x
-  ScrollView x -> iv `shiftIntervalBy` x
+  ZoomView   x -> iv `scalePairBy`  x
+  ScrollView x -> iv `translatePairBy` x
   ModView f    -> f iv
 
 
@@ -120,13 +123,13 @@ queueCmd :: AVar UpdateView -> UpdateView -> Eff _ Unit
 queueCmd av cmd = launchAff_ $ putVar cmd av
 
 
-btnScroll :: Ratio BigInt -> AVar UpdateView -> Eff _ Unit
+btnScroll :: Number -> AVar UpdateView -> Eff _ Unit
 btnScroll x av = do
   buttonEvent "scrollLeft"  $ queueCmd av $ ScrollView (-x)
   buttonEvent "scrollRight" $ queueCmd av $ ScrollView   x
 
 
-btnZoom :: Ratio BigInt -> AVar UpdateView -> Eff _ Unit
+btnZoom :: Number -> AVar UpdateView -> Eff _ Unit
 btnZoom x av = do
   buttonEvent "zoomOut" $ queueCmd av $ ZoomView   x
   buttonEvent "zoomIn"  $ queueCmd av $ ZoomView (-x)
@@ -142,9 +145,7 @@ dragScroll width cnv av =
   let f = case _ of
         Left  {x,y} -> queueCmd av $ ScrollView $ g (-x)
         Right {x,y} -> scrollCanvas cnv.buffer cnv.track {x: -x, y: zero}
-      g x = let width' = BigInt.fromInt $ Int.round width
-                x'     = BigInt.fromInt $ Int.round x
-            in x' % width'
+      g x = x / width
   in canvasDrag f cnv.overlay
 
 
@@ -153,11 +154,11 @@ foreign import canvasWheelEvent :: CanvasElement -> Event Number
 
 scrollZoomEvent :: CanvasElement -> Event UpdateView
 scrollZoomEvent el = map (ZoomView <<< f) $ canvasWheelEvent el
-  where f :: Number -> Ratio BigInt
+  where f :: Number -> Number
         f dY = let d' = 10000.0
-                   n = BigInt.fromInt $ Int.round $ dY * d'
-                   d = BigInt.fromInt $ Int.round $ d' * 100.0
-               in n % d
+                   n = dY * d'
+                   d = d' * 100.0
+               in n / d
 
 
 -- TODO differentiate scroll buffer & rendering buffer
@@ -200,8 +201,8 @@ createBrowserCanvas el dim = do
   pure { buffer, track, overlay }
 
 
-coordSys :: CoordSys ChrId BrowserPoint
-coordSys = mkCoordSys mouseChrSizes (BigInt.fromInt 2000000)
+cSys :: CoordSys ChrId BigInt
+cSys = coordSys mouseChrSizes
 
 mouseChrSizes :: Array (Tuple ChrId BigInt)
 mouseChrSizes =
@@ -231,7 +232,7 @@ mouseChrSizes =
       ]
 
 
-type Conf = { browserHeight :: Pixels
+type Conf = { browserHeight :: Number
             , padding :: Padding
             , score :: { min :: Number, max :: Number, sig :: Number }
             , urls :: { gwas        :: Maybe String
@@ -276,8 +277,8 @@ type BrowserState = { visible  :: ViewRange }
                     -- , rendered :: ViewRange }
 
 
-browserLoop :: { tracks     :: ViewRange -> Array Glyph
-               , relativeUI :: ViewRange -> Drawing
+browserLoop :: { tracks     :: Pair BigInt -> List (Array Glyph)
+               , relativeUI :: Pair BigInt -> Drawing
                , fixedUI :: Drawing }
             -> BrowserCanvas
             -> { viewState   :: AVar BrowserState
@@ -286,12 +287,13 @@ browserLoop :: { tracks     :: ViewRange -> Array Glyph
             -> Aff _ _
 browserLoop browser canvases state = forever do
 
+
   vState <- takeVar state.viewState
 
   traverse_ (killFiber (error "Resetting renderer"))
     =<< tryTakeVar state.renderFiber
 
-  renderer <- forkAff $ renderGlyphs (browser.tracks vState.visible) canvases
+  renderer <- forkAff $ renderGlyphs (vState.visible) (browser.tracks vState.visible) canvases
 
   liftEff $ do
     trackCtx   <- getContext2D canvases.track
@@ -302,17 +304,22 @@ browserLoop browser canvases state = forever do
   -- wait until UI has been clicked, view scrolled, etc.
   cmd <- takeVar state.viewCmds
 
-  let newState = updateViewFold cmd vState.visible
+  -- let newState = updateViewFold cmd vState.visible
+  let newState = vState.visible
 
   putVar { visible: newState } state.viewState
+
+  liftEff $ log $ "new view: " <> show newState
 
   pure unit
 
 
-renderGlyphs :: Array Glyph
+renderGlyphs :: Pair BigInt
+             -> List (Array Glyph)
              -> BrowserCanvas
              -> Aff _ Unit
-renderGlyphs gs canvases = do
+renderGlyphs vw@(Pair l _) ts canvases = do
+
   {width, height} <- liftEff $ Canvas.getCanvasDimensions canvases.track
   let bg = filled (fillColor white) $ rectangle 0.0 0.0 width height
 
@@ -320,11 +327,13 @@ renderGlyphs gs canvases = do
   overlayCtx <- liftEff $ getContext2D canvases.overlay
 
   liftEff $ Drawing.render trackCtx bg
-  liftEff $ foreachE gs $ case_ # onMatch
-    { batched: (\t -> renderBatch canvases.buffer t trackCtx)
-    , single: (\s -> Drawing.render trackCtx
-                       $ Drawing.translate s.point.x s.point.y
-                       $ s.drawing) }
+
+  for_ (List.reverse ts) \gs -> do
+    liftEff $ foreachE gs $ case_ # onMatch
+        { batched: (\t -> renderBatch canvases.buffer t trackCtx)
+        , single: (\s -> Drawing.render trackCtx
+                        $ Drawing.translate s.point.x s.point.y
+                        $ s.drawing) }
 
 
 runBrowser :: Conf -> Eff _ _
@@ -350,10 +359,10 @@ runBrowser config = launchAff $ do
 
 
   trackData <- do
-    gwas  <- traverse (getGWAS  coordSys) config.urls.gwas
-    genes <- traverse (getGenes coordSys) config.urls.genes
+    gwas  <- traverse (getGWAS  cSys) config.urls.gwas
+    genes <- traverse (getGenes cSys) config.urls.genes
     rawAnnotations <-
-      traverse (getAnnotations coordSys) config.urls.annotations
+      traverse (getAnnotations cSys) config.urls.annotations
 
     let annotations = zipMapsWith
                        (bumpFeatures (to _.score) (SProxy :: SProxy "score")
@@ -364,13 +373,13 @@ runBrowser config = launchAff $ do
 
 
 
-  let initialView :: Interval BrowserPoint
-      initialView = Pair zero (coordSys^._BrowserSize)
+  let initialView :: Pair BigInt
+      initialView = Pair zero (cSys^._TotalSize)
 
   viewCmds <- makeEmptyVar
   liftEff $ do
-    btnScroll (one % BigInt.fromInt 20) viewCmds
-    btnZoom   (one % BigInt.fromInt 20) viewCmds
+    btnScroll 0.05 viewCmds
+    btnZoom   0.05 viewCmds
     dragScroll trackWidth bCanvas viewCmds
 
   viewState <- makeVar { visible: initialView }
@@ -385,7 +394,7 @@ runBrowser config = launchAff $ do
       vscale = { width: vScaleWidth, color: black
                , min: s.min, max: s.max, sig: s.sig }
       tracks = demoTracks vscale trackData
-      mainBrowser = browser coordSys browserDimensions config.padding {legend, vscale} tracks
+      mainBrowser = browser cSys browserDimensions config.padding {legend, vscale} tracks
 
   browserLoop mainBrowser bCanvas { viewCmds, viewState, renderFiber }
 
