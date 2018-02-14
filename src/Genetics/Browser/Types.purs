@@ -1,72 +1,17 @@
 module Genetics.Browser.Types where
-       -- ( Point
-       -- , Pos
-       -- , Range
-       -- , Bp(..)
-       -- , MBp(..)
-       -- , class HCoordinate
-       -- , bp
-       -- , mbp
-       -- , _Bp
-       -- , _MBp
-       -- , _BpMBp
-       -- , ChrId(..)
-       -- , _ChrId
-       -- , toScreen
-       -- , BpPerPixel(..)
-       -- , bpToPixels
-       -- , pixelsToBp
-       -- , Chr
-       -- , ChrInterval
-       -- , BrowserPoint(..)
-       -- , LocalPoint(..)
-       -- , IntervalPoint
-       -- , Interval(..)
-       -- , CoordSys(..)
-       -- , mkCoordSys
-       -- , findInterval
-       -- , localToGlobal
-       -- , globalToLocal
-       -- , canvasToView
-       -- , globalToFrame
-       -- , intervalToChr
-       -- , frameToChr
-       -- , intervalSize
-       -- , canvasToBrowserOffset
-       -- ) where
 
 import Prelude
-
-import Control.Alternative (empty)
-import Control.MonadPlus (guard)
-import Data.Array as Array
-import Data.Bifunctor (bimap)
-import Data.BigInt (BigInt)
-import Data.BigInt as BigInt
-import Data.Foldable (length, sum)
 import Data.Foreign.Class (class Decode, class Encode)
-import Data.Int as Int
-import Data.Lens (APrism', Iso', Lens', Prism', iso, lens, prism', takeBoth, (^.))
+import Data.Lens (iso)
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Types (Iso')
-import Data.Maybe (Maybe(..))
-import Data.Newtype (class Newtype, unwrap, wrap)
-import Data.Profunctor.Choice (fanin)
-import Data.Profunctor.Strong (fanout, splitStrong)
-import Data.Ratio (Ratio, (%))
-import Data.Ratio as Ratio
-import Data.Tuple (Tuple(..), fst, snd, uncurry)
-import Unsafe.Coerce (unsafeCoerce)
--- import Genetics.Browser.Units (Bp(..), ChrId(..))
+import Data.Newtype (class Newtype, unwrap)
 
 type Point = { x :: Number, y :: Number}
 
 type Pos = { chrId :: ChrId, bp :: Bp }
 
 type Chr = { chrId :: ChrId, size :: Bp }
-
-type Range r = { lHand :: Pos, rHand :: Pos  | r}
-
 
 
 -- | Newtype wrapper for a basepair location
