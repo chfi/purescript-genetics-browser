@@ -23,7 +23,7 @@
     "purescript-argonaut": "^3.0.0",
     "purescript-coroutines": "^4.0.0",
     "purescript-variant": "^4.0.0",
-    "purescript-contravariant": "3.1.0",
+    "purescript-contravariant": "^3.1.0",
     "purescript-aff": "^4.0.2",
     "purescript-aff-bus": "^3.0.0",
     "purescript-aff-promise": "^1.0.0",
@@ -33,7 +33,7 @@
     "purescript-globals": "^3.0.0",
     "purescript-dom": "^4.1.0",
     "purescript-typelevel-prelude": "^2.4.0",
-    "purescript-foreign-generic": "4.1.0",
+    "purescript-foreign-generic": "^5.0.0",
     "purescript-nullable": "^3.0.0",
     "purescript-ipfs-api": "^0.0.3",
     "purescript-errors": "^3.0.0",
@@ -52,13 +52,14 @@
     "purescript-pairing": "^4.0.0",
     "purescript-record-extra": "^0.1.0",
     "purescript-validation": "^3.2.0",
-    "purescript-maps": "^3.6.0"
+    "purescript-maps": "^3.6.0",
+    "purescript-simple-json": "^1.1.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0",
     "purescript-debug": "^3.0.0",
     "purescript-spec": "^2.0.0",
-    "purescript-spec-quickcheck": "2.0.0",
+    "purescript-spec-quickcheck": "^2.0.0",
     "purescript-jack": "^2.0.0",
     "purescript-quickcheck": "^4.6.0",
     "purescript-quickcheck-laws": "^3.0.1"
