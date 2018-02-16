@@ -14,9 +14,10 @@ import Data.BigInt (BigInt)
 import Data.Either (Either(..))
 import Data.Exists (Exists, runExists)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
+import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens (Getter', view, (^?))
+import Data.Lens (Getter', view, (^?), (^.))
 import Data.List (List)
 import Data.Map (Map)
 import Data.Map as Map
@@ -30,7 +31,7 @@ import Data.Traversable (traverse)
 import Data.Tuple (Tuple, snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Genetics.Browser.Types (Bp, ChrId, Point)
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), pairSize, pairsOverlap, scaledSegments)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize, pairsOverlap, scaledSegments)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
@@ -103,6 +104,9 @@ type SingleRenderer a = { draw  :: a -> DrawingV
                         , horPlace :: a -> HPos
                         , verPlace :: a -> Normalized Number }
 
+_batch = (SProxy :: SProxy "batch")
+_single = (SProxy :: SProxy "single")
+
 type Renderer a = Variant ( batch :: BatchRenderer a
                           , single :: SingleRenderer a )
 
@@ -116,7 +120,7 @@ type NormalizedGlyph = { drawing :: Variant DrawingR
 type BatchGlyph c = { drawing :: Drawing
                     , points :: Array c }
 
-type UniqueGlyph = { drawing :: Drawing, point :: Point }
+type SingleGlyph = { drawing :: Drawing, point :: Point }
 
 type BatchableGlyph = { drawing :: Drawing
                       , points :: Array (Normalized Point) }
@@ -459,7 +463,7 @@ finalizeNormDrawing seg o =
 renderNormalized1 :: Number
                   -> Pair Number
                   -> NormalizedGlyph
-                  -> UniqueGlyph
+                  -> SingleGlyph
 renderNormalized1 height seg@(Pair l _) ng =
   let x = horPlaceOnSegment seg ng + l
       y = height * (one - unwrap ng.verPos)
@@ -476,6 +480,20 @@ scalePoint height seg@(Pair l _) np =
   in { x,y }
 
 
+rescaleNormBatchGlyphs :: Number
+                       -> Pair Number
+                       -> BatchGlyph (Normalized Point)
+                       -> BatchGlyph Point
+rescaleNormBatchGlyphs height seg bg@{points} =
+  bg { points = map (scalePoint height seg) points }
+
+rescaleNormSingleGlyphs :: Number
+                        -> Pair Number
+                        -> Array NormalizedGlyph
+                        -> Array SingleGlyph
+rescaleNormSingleGlyphs height seg =
+  map (renderNormalized1 height seg)
+
 
 renderNormalizedTrack :: CoordSys ChrId BigInt
                       -> Canvas.Dimensions
@@ -483,34 +501,38 @@ renderNormalizedTrack :: CoordSys ChrId BigInt
                       -> Map ChrId (Either
                                       (BatchGlyph (Normalized Point))
                                       (Array NormalizedGlyph))
-                      -> Map ChrId (Either
-                                      (BatchGlyph Point)
-                                      (Array UniqueGlyph))
+                      -- -> Map ChrId (Either
+                      --                 (BatchGlyph Point)
+                      --                 (Array SingleGlyph))
+                      -- TODO concatting the segments with array is just lazy but works for now
+                      --      optimally, a whole track should be one or the other type of glyph
+                      -> Array (Either
+                                  (BatchGlyph Point)
+                                  (Array SingleGlyph))
 renderNormalizedTrack cs cdim bView ngs =
   let segs :: Map ChrId (Pair Number)
       segs = scaledSegments cs { screenWidth: cdim.width, viewWidth: pairSize bView }
 
-      batchT :: Pair Number -> BatchGlyph (Normalized Point) -> BatchGlyph Point
-      batchT seg bg@{points} = bg { points = map (scalePoint cdim.height seg) points }
+      renderSeg :: ChrId -> Pair Number -> Array (Either (BatchGlyph Point) (Array SingleGlyph))
+      renderSeg k seg =
+        pure $ fromMaybe (pure [])
+               $ bimap
+                 (rescaleNormBatchGlyphs  cdim.height seg)
+                 (rescaleNormSingleGlyphs cdim.height seg)
+                 <$> Map.lookup k ngs
 
-      uniqT :: Pair Number -> Array NormalizedGlyph -> Array UniqueGlyph
-      uniqT seg = map (renderNormalized1 cdim.height seg)
-
-      renderSeg :: ChrId -> Pair Number -> Either (BatchGlyph Point) (Array UniqueGlyph)
-      renderSeg k seg = fromMaybe (pure [])
-                         $ bimap (batchT seg) (uniqT seg)
-                        <$> Map.lookup k ngs
-
-  in mapWithIndex renderSeg segs
+  in foldMapWithIndex renderSeg segs
 
 
+
+type RenderedTrack = Either (BatchGlyph Point) (Array SingleGlyph)
 
 browser :: CoordSys ChrId BigInt
         -> Canvas.Dimensions
         -> Padding
         -> { legend :: Legend, vscale :: VScale }
         -> List (Exists Track)
-        -> { tracks     :: Pair BigInt -> List _
+        -> { tracks     :: Pair BigInt -> List (Array RenderedTrack)
            , relativeUI :: Pair BigInt -> Drawing
            , fixedUI    :: Drawing }
 browser cs cdim padding ui inputTracks =
@@ -546,8 +568,7 @@ browser cs cdim padding ui inputTracks =
                                   (Array NormalizedGlyph)))
       normTracks = runExists (\(Track as r) -> render r <$> as) <$> inputTracks
 
-      -- tracks :: Pair BigInt -> List (Either (BatchGlyph Point) (Array UniqueGlyph))
-      tracks :: Pair BigInt -> _
+      tracks :: Pair BigInt -> List (Array (Either (BatchGlyph Point) (Array SingleGlyph)))
       tracks v = (renderNormalizedTrack cs cdim v) <$> normTracks
 
       -- chrLabels = chrLabelTrack cs trackCanvas
@@ -557,7 +578,7 @@ browser cs cdim padding ui inputTracks =
       -- relativeUI = chrLabels
       --           <> translate 0.0 padding.vertical <<< (ruler <> boxes)
 
-  in { tracks: mempty
+  in { tracks
      , relativeUI: mempty
      , fixedUI
      }

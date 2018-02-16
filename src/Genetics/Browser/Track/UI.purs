@@ -43,7 +43,7 @@ import Data.Traversable (scanl, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple), snd)
 import Data.Variant (case_, onMatch)
 import FRP.Event (Event)
-import Genetics.Browser.Track.Backend (Glyph, Padding, browser, bumpFeatures, zipMapsWith)
+import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Demo (annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (CoordSys, _TotalSize, coordSys, pairSize, scalePairBy, scaleToScreen, translatePairBy)
@@ -277,7 +277,7 @@ type BrowserState = { visible  :: ViewRange }
                     -- , rendered :: ViewRange }
 
 
-browserLoop :: { tracks     :: Pair BigInt -> List (Array Glyph)
+browserLoop :: { tracks     :: Pair BigInt -> List (Array RenderedTrack)
                , relativeUI :: Pair BigInt -> Drawing
                , fixedUI :: Drawing }
             -> BrowserCanvas
@@ -315,7 +315,7 @@ browserLoop browser canvases state = forever do
 
 
 renderGlyphs :: Pair BigInt
-             -> List (Array Glyph)
+             -> List (Array RenderedTrack)
              -> BrowserCanvas
              -> Aff _ Unit
 renderGlyphs vw@(Pair l _) ts canvases = do
@@ -328,12 +328,12 @@ renderGlyphs vw@(Pair l _) ts canvases = do
 
   liftEff $ Drawing.render trackCtx bg
 
-  for_ (List.reverse ts) \gs -> do
-    liftEff $ foreachE gs $ case_ # onMatch
-        { batched: (\t -> renderBatch canvases.buffer t trackCtx)
-        , single: (\s -> Drawing.render trackCtx
-                        $ Drawing.translate s.point.x s.point.y
-                        $ s.drawing) }
+  for_ (List.reverse ts) \segs -> do
+    liftEff $ foreachE segs $ case _ of
+      Left gs  -> renderBatch canvases.buffer gs trackCtx
+      Right gs -> foreachE gs \s -> Drawing.render trackCtx
+                                    $ Drawing.translate s.point.x s.point.y
+                                    $ s.drawing
 
 
 runBrowser :: Conf -> Eff _ _

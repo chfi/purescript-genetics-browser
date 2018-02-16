@@ -27,7 +27,7 @@ import Data.Pair (Pair(..))
 import Data.String as String
 import Data.Traversable (traverse)
 import Data.Variant (inj)
-import Genetics.Browser.Track.Backend (ChrCtx, DrawingV, Feature, LegendEntry, Renderer, Track(Track), VScale, _point, _range, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend, verPlace)
+import Genetics.Browser.Track.Backend (ChrCtx, DrawingV, Feature, LegendEntry, Renderer, SingleRenderer, Track(Track), VScale, _point, _range, _single, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend, verPlace)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize)
 import Graphics.Drawing (circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
@@ -121,9 +121,10 @@ geneDraw gene = inj _range \w ->
 
 geneRenderer :: forall r. Renderer (Gene r)
 geneRenderer =
-  { draw: geneDraw
-  , horPlace
-  , verPlace: const (Normalized 0.1) }
+  inj _single
+              { draw: geneDraw
+              , horPlace
+              , verPlace: const (Normalized 0.1) }
 
 
 
@@ -196,7 +197,7 @@ pointRenderer :: forall r1 r2.
                  { min :: Number, max :: Number, sig :: Number | r2 }
               -> (Feature (score :: Number | r1) -> DrawingV)
               -> Renderer (Feature (score :: Number | r1))
-pointRenderer s draw = { horPlace, verPlace: scoreVerPlace s, draw }
+pointRenderer s draw = inj _single { horPlace, verPlace: scoreVerPlace s, draw }
 
 
 basicRenderers :: forall r.
