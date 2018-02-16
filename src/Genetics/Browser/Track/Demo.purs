@@ -26,14 +26,15 @@ import Data.Newtype (unwrap)
 import Data.Pair (Pair(..))
 import Data.String as String
 import Data.Traversable (traverse)
-import Data.Variant (inj)
-import Genetics.Browser.Track.Backend (ChrCtx, DrawingV, Feature, LegendEntry, Renderer, SingleRenderer, Track(Track), VScale, _point, _range, _single, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend, verPlace)
+import Data.Variant (case_, inj, onMatch)
+import Genetics.Browser.Track.Backend (ChrCtx, DrawingV, Feature, LegendEntry, Renderer, SingleRenderer, Track(Track), VScale, HPos, _batch, _point, _range, _single, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend, verPlace)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize)
-import Graphics.Drawing (circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
+import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
+import Unsafe.Coerce (unsafeCoerce)
 
 
 
@@ -51,16 +52,14 @@ fetchJSON p url = do
       Just fs -> pure $ fs
 
 
-gwasDraw :: forall a.
-            Color
-         -> a
-         -> DrawingV
+gwasDraw :: Color
+         -> Drawing
 gwasDraw color =
   let r = 2.2
       c = circle 0.0 0.0 r
       out = outlined (outlineColor color) c
       fill = filled (fillColor color) c
-  in const $ inj _point $ out <> fill
+  in out <> fill
 
 
 
@@ -200,13 +199,31 @@ pointRenderer :: forall r1 r2.
 pointRenderer s draw = inj _single { horPlace, verPlace: scoreVerPlace s, draw }
 
 
+lhs :: HPos -> Normalized Number
+lhs = case_
+  # onMatch
+     { point: (\x -> x)
+     , range: (\(Pair l _) -> l)
+     }
+
+batchPointRenderer :: forall r1 r2.
+                      { min :: Number, max :: Number, sig :: Number | r2 }
+                   -> Drawing
+                   -> Renderer (Feature (score :: Number | r1))
+batchPointRenderer s drawing = inj _batch { drawing, place  }
+  where place :: _
+        place f = let (Normalized y) = scoreVerPlace s f
+                      (Normalized x) = lhs $ horPlace f
+                  in Normalized {x,y}
+
+
 basicRenderers :: forall r.
                   { min :: Number, max :: Number, sig :: Number | r }
                -> { gwas        :: Renderer (GWASFeature _)
                   , annotations :: Renderer (Annot _)
                   , genes       :: Renderer (Gene _)
                   }
-basicRenderers s = { gwas:        pointRenderer s (gwasDraw navy)
+basicRenderers s = { gwas:        batchPointRenderer s (gwasDraw navy)
                    , annotations: pointRenderer s annotDraw
                    , genes:       geneRenderer
                    }
