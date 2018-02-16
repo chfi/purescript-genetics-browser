@@ -2,45 +2,25 @@ module Genetics.Browser.Track.Bed where
 
 import Prelude
 
-import Color (Color, black)
-import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive, orange, purple, red, teal, yellow)
-import Control.Monad.Aff (Aff, throwError)
-import Control.Monad.Eff.Exception (error)
+import Control.Monad.Aff (Aff, error, throwError)
+import Control.Monad.Eff.Exception (throw)
 import Control.Monad.Except (runExcept)
-import Data.Argonaut (Json, JObject, _Array, _Number, _Object, _String)
-import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Either (Either(..), note)
-import Data.Exists (Exists, mkExists)
-import Data.Filterable (filtered)
-import Data.Foldable (class Foldable)
+import Data.Either (Either(Right, Left))
+import Data.Foldable (foldMap)
 import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
 import Data.Int as Int
-import Data.Lens (re, to, view, (^?))
-import Data.Lens.Index (ix)
-import Data.List (List)
-import Data.List as List
-import Data.List.NonEmpty (NonEmptyList(..))
-import Data.Map (Map)
-import Data.Map as Map
-import Data.Maybe (Maybe(..), fromMaybe, maybe)
-import Data.Monoid (mempty)
-import Data.Newtype (unwrap, wrap)
-import Data.Pair (Pair(..))
+import Data.List.NonEmpty (NonEmptyList)
+import Data.Maybe (Maybe(..))
+import Data.Newtype (wrap)
 import Data.String as String
 import Data.Traversable (traverse)
-import Data.Validation.Semigroup (V, invalid)
-import Data.Variant (inj)
-import Genetics.Browser.Track.Backend (ChrCtx, DrawingV, Feature, LegendEntry, Renderer, Track(Track), VScale, _point, _range, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend, verPlace)
-import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), _ChrId)
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize)
-import Graphics.Drawing (circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
-import Graphics.Drawing as Drawing
-import Graphics.Drawing.Font (font, sansSerif)
+import Data.Validation.Semigroup (V, invalid, unV)
+import Genetics.Browser.Types (ChrId)
 import Network.HTTP.Affjax as Affjax
 import Simple.JSON (read)
-import Unsafe.Coerce (unsafeCoerce)
+
 
 {- NB this deals with JSON that's currently specified to work with a
 bespoke conversion of the gencode.bb genes file from biodalliance.org.
@@ -68,9 +48,9 @@ example converted line:
 -}
 
 
-type BedChrom i c r = ( chromId :: i, chromStart :: c, chromEnd :: c | r )
+type BedChrom i c r = ( chrom :: i, chromStart :: c, chromEnd :: c | r )
 
-type BedLineName r = ( lineName :: String | r )
+type BedLineName r = ( name :: String | r )
 -- a valid score is >= 0 and <= 1000
 type BedScore r = ( score :: Int | r )
 
@@ -95,97 +75,81 @@ type BedTranscript r = ( "type" :: String
                        , tags :: Array String | r )
 
 
-type BedLine i c =
-  Record
-  (BedChrom i c
-   (BedLineName
-    (BedScore
-     (BedStrand
-      (BedThick c
-       (BedRGB
-        (BedBlocks c
-         (BedGene
-          (BedTranscript ())))))))))
+type BedLine count method attrs ident coord many =
+  ( chrom :: ident
+  , chromStart :: coord
+  , chromEnd :: coord
+  , name :: String
+  , score :: count
+  , strand :: String
+  , thickStart :: coord
+  , thickEnd :: coord
+  , itemRgb :: String
+  , blockCount :: count
+  , blockSizes :: many
+  , blockStarts :: many
+  , geneId :: String
+  , geneName :: String
+  , "type" :: method
+  , tags :: attrs
+  )
 
+type RawBedLine = Record (BedLine String String String String String String)
 
-type RawBedLine = BedLine String Int
+type ParsedLine = Record (BedLine Int String String ChrId BigInt (Array BigInt))
 
 type Validated = V (NonEmptyList String)
 
 
 -- TODO this should compare to browser coord sys used
-validChrId :: forall r.
-              { chromId :: String | r }
-           -> Validated { chromId :: ChrId  }
-validChrId r = pure { chromId: wrap r.chromId }
+validChrId :: String -> Validated ChrId
+validChrId = pure <<< wrap
 
-validChrRange :: forall r.
-                 { chromStart :: Int, chromEnd :: Int | r }
-              -> Validated { chromStart :: BigInt, chromEnd :: BigInt }
-validChrRange r
--- this is probably too strict.
-  | r.chromStart > r.chromEnd = invalid $ pure "feature start > feature end"
-  | otherwise = pure $ { chromStart: BigInt.fromInt r.chromStart
-                       , chromEnd: BigInt.fromInt r.chromEnd }
+validInt :: String -> Validated Int
+validInt s = case Int.fromString s of
+  Nothing -> invalid $ pure $ "Error parsing int " <> s
+  Just i  -> pure i
 
+validBigInt :: String -> Validated BigInt
+validBigInt s = case BigInt.fromString s of
+  Nothing -> invalid $ pure $ "Error parsing int " <> s
+  Just i  -> pure i
 
-validScore :: forall r.
-              Record (BedScore r)
-           -> Validated (Record (BedScore ()))
-validScore { score } = pure { score }
-
-validStrand :: forall r.
-               Record (BedStrand r)
-            -> Validated (Record (BedStrand ()))
-validStrand { strand } = pure { strand }
+validList :: String -> V (NonEmptyList String) (Array BigInt)
+validList x = traverse validBigInt (String.split (wrap ",") x)
 
 
--- this could be deduped w/ lens and/or sproxy
-validThickRange :: forall r.
-                 Record (BedThick Int r)
-              -> Validated (Record (BedThick BigInt ()))
-validThickRange r
-  | r.thickStart > r.thickEnd = invalid $ pure "feature thick start > end"
-  | otherwise = pure $ { thickStart: BigInt.fromInt r.thickStart
-                       , thickEnd: BigInt.fromInt r.thickEnd }
+-- TODO validate `*Start` and `*End` by providing a coord sys and comparing thick* to chrom* etc.
+-- -- TODO more validation & parsing (e.g. of `itemRgb` and `strand` could be done, but not necessary ATM)
+validLine :: RawBedLine -> Validated ParsedLine
+validLine l = (l { chrom = _
+                 , chromStart = _, chromEnd = _
+                 , score = _
+                 , thickStart = _, thickEnd = _
+                 , blockCount = _
+                 , blockSizes = _, blockStarts = _})
+           <$> validChrId l.chrom
+           <*> validBigInt l.chromStart <*> validBigInt l.chromEnd
+           <*> validInt l.score
+           <*> validBigInt l.thickStart <*> validBigInt l.thickEnd
+           <*> validInt l.blockCount
+           <*> validList l.blockSizes
+           <*> validList l.blockStarts
 
-validRGB :: forall r.
-            { itemRgb :: Array Int | r }
-         -> Validated { itemRgb :: Array Int  }
-validRGB {itemRgb} = pure {itemRgb}
 
-validBlocks :: forall r.
-            Record (BedBlocks Int r)
-         -> Validated (Record (BedBlocks BigInt ()))
-validBlocks r = pure { blockCount: r.blockCount
-                     , blockSizes: BigInt.fromInt  <$> r.blockSizes
-                     , blockStarts: BigInt.fromInt <$> r.blockStarts }
-
-validGene :: forall r.
-             Record (BedGene r)
-          -> Validated (Record (BedGene ()))
-validGene {geneId, geneName} = pure {geneId, geneName}
-
-validTranscript :: forall r.
-                   Record (BedTranscript r)
-                -> Validated (Record (BedTranscript ()))
-validTranscript r = pure { "type": r."type", tags: r.tags }
-
-validateBed :: Foreign -> Validated (Array (BedLine ChrId BigInt))
+validateBed :: Foreign -> Validated (Array ParsedLine)
 validateBed d =
   case (runExcept $ read d) :: Either MultipleErrors (Array RawBedLine) of
     Left err -> invalid $ map renderForeignError err
-    Right ls ->
-      let f :: _
-          f l = { chromId:_, chromRange:_, name: _
-                , score: _, thick: _, rgb: _
-                , blocks: _, gene: _, transcript: _ }
-              <$> validChrId l
-              <*> validChrRange l
-              <*> validScore l
-              <*> validStrand l
-              <*> validRGB l
-              <*> validBlocks l
-              <*> validGene l
-              <*> validTranscript l
-       in unsafeCoerce unit
+    Right ls -> traverse validLine ls
+    -- Right ls -> pure ls
+
+
+-- fetchBed :: String -> Aff _ (Array (BedLine ChrId BigInt))
+fetchBed :: String -> Aff _ (Array ParsedLine)
+fetchBed url = do
+  json <- _.response <$> Affjax.get url
+
+  unV (throwError <<< error <<< foldMap (_ <> ", "))
+      pure
+      $ validateBed json

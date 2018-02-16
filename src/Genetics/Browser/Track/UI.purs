@@ -44,9 +44,11 @@ import Data.Tuple (Tuple(Tuple), snd)
 import Data.Variant (case_, onMatch)
 import FRP.Event (Event)
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
+import Genetics.Browser.Track.Bed as Bed
 import Genetics.Browser.Track.Demo (annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (CoordSys, _TotalSize, coordSys, pairSize, scalePairBy, scaleToScreen, translatePairBy)
+import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, Context2D, getContext2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
@@ -371,6 +373,14 @@ runBrowser config = launchAff $ do
 
     pure { genes, gwas, annotations }
 
+
+
+  genes' <- Bed.fetchBed "mouse.json"
+
+  liftEff $ log $ "parsed " <> show (Array.length genes') <> " genes!"
+
+  liftEff $
+    foreachE (Array.take 10 genes') (log <<< unsafeStringify)
 
 
   let initialView :: Pair BigInt
