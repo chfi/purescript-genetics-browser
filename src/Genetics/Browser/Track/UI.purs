@@ -27,28 +27,24 @@ import Data.Bifunctor (bimap, lmap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(..), note)
-import Data.Foldable (foldMap, for_)
-import Data.Int as Int
-import Data.Lens (to, (^.), (^?))
+import Data.Filterable (filter, partitioned)
+import Data.Foldable (fold, foldMap, for_, length)
+import Data.Lens ((^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
 import Data.Maybe (Maybe(Nothing, Just), fromJust, fromMaybe, maybe)
-import Data.Newtype (wrap)
+import Data.Monoid.Additive (Additive(..))
+import Data.Newtype (alaF, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
-import Data.Ratio (Ratio, (%))
-import Data.Symbol (SProxy(..))
-import Data.Traversable (scanl, traverse, traverse_)
-import Data.Tuple (Tuple(Tuple), snd)
-import Data.Variant (case_, onMatch)
+import Data.Traversable (traverse, traverse_)
+import Data.Tuple (Tuple(Tuple))
 import FRP.Event (Event)
-import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Bed as Bed
-import Genetics.Browser.Track.Demo (annotLegendTest, demoTracks, demoTracksBed, getAnnotations, getBedGenes, getGWAS, getGenes)
-import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
-import Genetics.Browser.Types.Coordinates (CoordSys, _TotalSize, coordSys, pairSize, scalePairBy, scaleToScreen, translatePairBy)
-import Global.Unsafe (unsafeStringify)
+import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser)
+import Genetics.Browser.Track.Demo (annotLegendTest, demoTracksBed, getBedGenes)
+import Genetics.Browser.Types (ChrId(ChrId), Point)
+import Genetics.Browser.Types.Coordinates (CoordSys, _TotalSize, coordSys, pairSize, scalePairBy, translatePairBy)
 import Graphics.Canvas (CanvasElement, Context2D, getContext2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
@@ -133,8 +129,8 @@ btnScroll x av = do
 
 btnZoom :: Number -> AVar UpdateView -> Eff _ Unit
 btnZoom x av = do
-  buttonEvent "zoomOut" $ queueCmd av $ ZoomView   x
-  buttonEvent "zoomIn"  $ queueCmd av $ ZoomView (-x)
+  buttonEvent "zoomOut" $ queueCmd av $ ZoomView $ 1.0 + x
+  buttonEvent "zoomIn"  $ queueCmd av $ ZoomView $ 1.0 - x
 
 
 -- TODO handle normalization of view
@@ -307,8 +303,7 @@ browserLoop browser trackDisplayWidth canvases state = forever do
   -- wait until UI has been clicked, view scrolled, etc.
   cmd <- takeVar state.viewCmds
 
-  -- let newState = updateViewFold cmd vState.visible
-  let newState = vState.visible
+  let newState = updateViewFold cmd vState.visible
 
   putVar { visible: newState } state.viewState
 
@@ -337,7 +332,7 @@ renderGlyphs vw@(Pair l _) viewScale ts canvases = do
     liftEff $ foreachE segs $ case _ of
       Left gs  -> renderBatch canvases.buffer gs trackCtx
       Right gs -> do
-        foreachE gs \s -> log $ "rendering at x: " <> show s.point.x
+        -- foreachE gs \s -> log $ "rendering at x: " <> show s.point.x
         let gs' = filter (\x -> x.width >= one) gs
         log $ "rendering " <> show (Array.length gs') <> " glyphs"
         foreachE gs' \s -> do
@@ -395,7 +390,7 @@ runBrowser config = launchAff $ do
   viewCmds <- makeEmptyVar
   liftEff $ do
     btnScroll 0.05 viewCmds
-    btnZoom   0.05 viewCmds
+    btnZoom   0.10 viewCmds
     dragScroll trackWidth bCanvas viewCmds
 
   viewState <- makeVar { visible: initialView }

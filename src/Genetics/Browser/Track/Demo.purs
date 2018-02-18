@@ -3,10 +3,8 @@ module Genetics.Browser.Track.Demo where
 import Prelude
 
 import Color (Color, black)
-import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive, orange, purple, red, teal, yellow)
+import Color.Scheme.Clrs (aqua, blue, navy, red, teal)
 import Control.Monad.Aff (Aff, throwError)
-import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
@@ -14,15 +12,14 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Exists (Exists, mkExists)
 import Data.Filterable (filterMap, filtered)
-import Data.Foldable (class Foldable, foldMap)
-import Data.Int as Int
+import Data.Foldable (class Foldable)
 import Data.Lens (to, view, (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Maybe (Maybe(Just, Nothing))
 import Data.Monoid (mempty)
 import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
@@ -30,17 +27,15 @@ import Data.String as String
 import Data.Traversable (traverse)
 import Data.Variant (case_, inj, onMatch)
 import Debug.Trace as Debug
-import Genetics.Browser.Track.Backend (ChrCtx, DrawingV, Feature, LegendEntry, Renderer, SingleRenderer, Track(Track), VScale, HPos, _batch, _point, _range, _single, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend, verPlace)
+import Genetics.Browser.Track.Backend (DrawingV, Feature, HPos, LegendEntry, Renderer, Track(Track), VScale, _batch, _point, _range, _single, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend, verPlace)
 import Genetics.Browser.Track.Bed (ParsedLine, fetchBed)
-import Genetics.Browser.Track.Bed as Bed
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize)
-import Global.Unsafe (unsafeStringify)
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
-import Unsafe.Coerce (unsafeCoerce)
+
 
 
 
@@ -186,32 +181,6 @@ type GeneRow r = ( geneID :: String
 type Gene r = Feature (GeneRow r)
 
 
-
-geneDraw :: forall r.
-            (Gene r)
-         -> DrawingV
-geneDraw gene = inj _range \w ->
-  let (Pair l r) = featureInterval gene
-      glyphW = unwrap $ (r - l) / gene.frameSize
-      rect = rectangle 0.0 0.0 (w * glyphW) 12.0
-      out  = outlined (outlineColor aqua <> lineWidth 4.0) rect
-      fill = filled   (fillColor teal) rect
-
-  in out <> fill
-
-
-geneRenderer :: forall r. Renderer (Gene r)
-geneRenderer =
-  inj _single
-              { draw: geneDraw
-              , horPlace
-              , verPlace: const (Normalized 0.1) }
-
-
-
-
-
-
 geneJSONParse :: CoordSys ChrId BigInt
               -> Json
               -> Maybe (Gene ())
@@ -354,25 +323,6 @@ annotationsTrack :: VScale
                  -> Track (Annot (score :: Number))
 annotationsTrack vs dat = Track dat ((basicRenderers vs).annotations)
 
-genesTrack :: VScale
-           -> Map ChrId (Array (Gene ()))
-           -> Track (Gene ())
-genesTrack vs dat = Track dat ((basicRenderers vs).genes)
-
-
-
-demoTracks :: VScale
-           -> { gwas        :: Maybe (Map ChrId (Array (GWASFeature ()         )))
-              , annotations :: Maybe (Map ChrId (Array (Annot (score :: Number))))
-              , genes       :: Maybe (Map ChrId (Array (Gene ()                ))) }
-           -> List (Exists Track)
-demoTracks vs {gwas, annotations, genes} =
-  List.fromFoldable $ filtered
-  $ [ mkExists <$> gwasTrack vs        <$> gwas
-    , mkExists <$> annotationsTrack vs <$> annotations
-    , mkExists <$> genesTrack vs       <$> genes
-    ]
-
 
 
 
@@ -440,15 +390,3 @@ mouseChrs = Map.fromFoldable $ Array.zip mouseChrIds $
             , (Bp 17103129.0)
             , (Bp 9174469.0)
             ]
-
-mouseColors :: ChrCtx (color :: Color)
-mouseColors = Map.fromFoldable $ Array.zip mouseChrIds $ map (\x -> {color: x})
-              [ navy, blue, aqua, teal, olive
-              , green, lime, yellow, orange, red
-              , maroon, fuchsia, purple, navy, blue
-              , aqua, teal, olive, green, lime
-              , yellow ]
-
-
-mouseChrCtx :: ChrCtx (size :: Bp)
-mouseChrCtx = map (\size -> { size }) mouseChrs
