@@ -224,4 +224,4 @@ scalePairBy :: Pair BigInt
             -> Pair BigInt
 scalePairBy p x = BigInt.fromNumber <$> Pair (l' - delta) (r' + delta)
   where p'@(Pair l' r') = BigInt.toNumber <$> p
-        delta = (pairSize p' * x) - (pairSize p') / 2.0
+        delta = ((pairSize p' * x) - (pairSize p')) / 2.0
