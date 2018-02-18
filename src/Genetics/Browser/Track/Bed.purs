@@ -22,6 +22,9 @@ import Network.HTTP.Affjax as Affjax
 import Simple.JSON (read)
 
 
+
+
+
 {- NB this deals with JSON that's currently specified to work with a
 bespoke conversion of the gencode.bb genes file from biodalliance.org.
 in other words, it is garbage
@@ -46,33 +49,6 @@ example converted line:
 ,"tags":"basic,appris_principal,CCDS"}
 
 -}
-
-
-type BedChrom i c r = ( chrom :: i, chromStart :: c, chromEnd :: c | r )
-
-type BedLineName r = ( name :: String | r )
--- a valid score is >= 0 and <= 1000
-type BedScore r = ( score :: Int | r )
-
-
-  -- bad type!!! strand is only one of three characters after all
-type BedStrand r = ( strand :: String | r )
-
-type BedThick c r = ( thickStart :: c, thickEnd :: c | r )
-
--- this is pretty bad too~~
-type BedRGB r = ( itemRgb :: Array Int | r )
-
-
-type BedBlocks c r = ( blockCount :: Int
-                     , blockSizes :: Array c
-                     , blockStarts :: Array c | r )
-
-type BedGene r = ( geneId :: String
-                 , geneName :: String | r )
-
-type BedTranscript r = ( "type" :: String
-                       , tags :: Array String | r )
 
 
 type BedLine count method attrs ident coord many =
@@ -103,7 +79,8 @@ type Validated = V (NonEmptyList String)
 
 -- TODO this should compare to browser coord sys used
 validChrId :: String -> Validated ChrId
-validChrId = pure <<< wrap
+              -- TODO super duper cool hardcoded string transformation to go from "chr1" to "1" which everything else uses atm
+validChrId = pure <<< wrap <<< String.drop 3
 
 validInt :: String -> Validated Int
 validInt s = case Int.fromString s of
