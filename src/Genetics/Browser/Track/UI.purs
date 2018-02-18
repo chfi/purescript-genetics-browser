@@ -282,12 +282,13 @@ type BrowserState = { visible  :: ViewRange }
 browserLoop :: { tracks     :: Pair BigInt -> List (Array RenderedTrack)
                , relativeUI :: Pair BigInt -> Drawing
                , fixedUI :: Drawing }
+            -> Number
             -> BrowserCanvas
             -> { viewState   :: AVar BrowserState
                , viewCmds    :: AVar UpdateView
                , renderFiber :: AVar (Fiber _ _)}
             -> Aff _ _
-browserLoop browser canvases state = forever do
+browserLoop browser trackDisplayWidth canvases state = forever do
 
 
   vState <- takeVar state.viewState
@@ -295,7 +296,7 @@ browserLoop browser canvases state = forever do
   traverse_ (killFiber (error "Resetting renderer"))
     =<< tryTakeVar state.renderFiber
 
-  renderer <- forkAff $ renderGlyphs (vState.visible) (browser.tracks vState.visible) canvases
+  renderer <- forkAff $ renderGlyphs vState.visible scale tracks canvases
 
   liftEff $ do
     trackCtx   <- getContext2D canvases.track
@@ -317,10 +318,11 @@ browserLoop browser canvases state = forever do
 
 
 renderGlyphs :: Pair BigInt
+             -> Number
              -> List (Array RenderedTrack)
              -> BrowserCanvas
              -> Aff _ Unit
-renderGlyphs vw@(Pair l _) ts canvases = do
+renderGlyphs vw@(Pair l _) viewScale ts canvases = do
 
   {width, height} <- liftEff $ Canvas.getCanvasDimensions canvases.track
   let bg = filled (fillColor white) $ rectangle 0.0 0.0 width height
@@ -329,13 +331,22 @@ renderGlyphs vw@(Pair l _) ts canvases = do
   overlayCtx <- liftEff $ getContext2D canvases.overlay
 
   liftEff $ Drawing.render trackCtx bg
+  void $ liftEff $ Canvas.translate { translateX: (-offset), translateY: zero } trackCtx
 
   for_ (List.reverse ts) \segs -> do
     liftEff $ foreachE segs $ case _ of
       Left gs  -> renderBatch canvases.buffer gs trackCtx
-      Right gs -> foreachE gs \s -> Drawing.render trackCtx
-                                    $ Drawing.translate s.point.x s.point.y
-                                    $ s.drawing
+      Right gs -> do
+        foreachE gs \s -> log $ "rendering at x: " <> show s.point.x
+        let gs' = filter (\x -> x.width >= one) gs
+        log $ "rendering " <> show (Array.length gs') <> " glyphs"
+        foreachE gs' \s -> do
+                   when (s.width >= one) do
+                     Drawing.render trackCtx
+                          $ Drawing.translate s.point.x s.point.y
+                          $ s.drawing
+
+  void $ liftEff $ Canvas.translate { translateX: offset, translateY: zero } trackCtx
 
 
 runBrowser :: Conf -> Eff _ _
@@ -401,7 +412,7 @@ runBrowser config = launchAff $ do
       tracks = demoTracksBed vscale trackData
       mainBrowser = browser cSys browserDimensions config.padding {legend, vscale} tracks
 
-  browserLoop mainBrowser bCanvas { viewCmds, viewState, renderFiber }
+  browserLoop mainBrowser trackWidth bCanvas { viewCmds, viewState, renderFiber }
 
 
 

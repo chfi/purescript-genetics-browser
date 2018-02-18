@@ -88,7 +88,7 @@ type Feature r = Record (FeatureR r)
 
 
 type DrawingR  = ( point :: Drawing
-                 , range :: Number -> Drawing )
+                 , range :: Number -> { drawing :: Drawing, width :: Number } )
 type DrawingV  = Variant DrawingR
 
 type HorPlaceR = ( point :: Normalized Number
@@ -120,7 +120,7 @@ type NormalizedGlyph = { drawing :: Variant DrawingR
 type BatchGlyph c = { drawing :: Drawing
                     , points :: Array c }
 
-type SingleGlyph = { drawing :: Drawing, point :: Point }
+type SingleGlyph = { drawing :: Drawing, point :: Point, width :: Number }
 
 type BatchableGlyph = { drawing :: Drawing
                       , points :: Array (Normalized Point) }
@@ -198,20 +198,6 @@ type BrowserTrack = Canvas.Dimensions
                  -> CanvasReadyDrawing
 
 
--- Given a frame-normalized drawing, finalize it so it can be rendered to a canvas;
--- `width` is the width in pixels of the frame the drawing resides in.
-resizeDrawing :: forall r.
-                 { width :: Number | r }
-              -> DrawingV
-              -> Drawing
-resizeDrawing {width} = case_
-  # onMatch
-     { point: (\x -> x)
-     , range: (_ $ width) }
-
-
-
-
 horRulerTrack :: forall r.
                  { min :: Number, max :: Number, sig :: Number | r }
               -> Color
@@ -223,8 +209,23 @@ horRulerTrack {min, max, sig} color f _ = outlined outline rulerDrawing
         rulerDrawing = Drawing.path [{x: 0.0, y}, {x: f.width, y}]
 
 
--- chrLabelTrack :: CoordSys ChrId BigInt
---               -> Canvas.Dimensions
+chrLabelTrack :: CoordSys ChrId BigInt
+              -> Canvas.Dimensions
+              -> Map ChrId (Array NormalizedGlyph)
+chrLabelTrack cs cdim =
+  let font' = font sansSerif 12 mempty
+
+      chrText :: ChrId -> Drawing
+      chrText chr =
+        Drawing.text font' zero zero (fillColor black) (unwrap chr)
+
+      mkLabel :: ChrId -> NormalizedGlyph
+      mkLabel chr = { drawing: inj _point $ chrText chr
+                    , horPos:  inj _point $ Normalized (0.5)
+                    , verPos: Normalized (0.05) }
+
+  in mapWithIndex (\i _ -> [mkLabel i]) $ cs ^. _Segments
+
 --               -> RelativeUIComponent
 -- chrLabelTrack cs = unsafeCoerce unit
 -- chrLabelTrack cs = drawRelativeUI cs (Map.fromFoldable results)
@@ -453,10 +454,10 @@ horPlaceOnSegment segmentPixels o =
 finalizeNormDrawing :: forall r.
                        Pair Number
                     -> { drawing :: DrawingV | r }
-                    -> Drawing
+                    -> { drawing :: Drawing, width :: Number }
 finalizeNormDrawing seg o =
     case_
-  # onMatch { point: \x -> x
+  # onMatch { point: \x -> { drawing: x, width: 1.0 }
             , range: (_ $ pairSize seg) }
   $ o.drawing
 
@@ -467,8 +468,8 @@ renderNormalized1 :: Number
 renderNormalized1 height seg@(Pair l _) ng =
   let x = horPlaceOnSegment seg ng + l
       y = height * (one - unwrap ng.verPos)
-      drawing = finalizeNormDrawing seg ng
-  in { point: {x,y} , drawing }
+      {drawing, width} = finalizeNormDrawing seg ng
+  in { point: {x,y}, drawing, width }
 
 scalePoint :: Number
            -> Pair Number

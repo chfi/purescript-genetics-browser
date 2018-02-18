@@ -100,7 +100,7 @@ bedDraw gene = inj _range \w ->
       out  = outlined (outlineColor aqua <> lineWidth 1.0) rect
       fill = filled   (fillColor teal) rect
 
-  in out <> fill
+  in { drawing: out <> fill, width: w * glyphW }
 
 
 
@@ -305,11 +305,11 @@ basicRenderers :: forall r.
                   { min :: Number, max :: Number, sig :: Number | r }
                -> { gwas        :: Renderer (GWASFeature _)
                   , annotations :: Renderer (Annot _)
-                  , genes       :: Renderer (Gene _)
+                  , genes       :: Renderer BedFeature
                   }
 basicRenderers s = { gwas:        batchPointRenderer s (gwasDraw navy)
                    , annotations: pointRenderer s annotDraw
-                   , genes:       geneRenderer
+                   , genes:       bedGeneRenderer
                    }
 
 
