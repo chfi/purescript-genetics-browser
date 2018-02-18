@@ -5,14 +5,16 @@ import Prelude
 import Color (Color, black)
 import Color.Scheme.Clrs (aqua, blue, fuchsia, green, lime, maroon, navy, olive, orange, purple, red, teal, yellow)
 import Control.Monad.Aff (Aff, throwError)
+import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Exists (Exists, mkExists)
-import Data.Filterable (filtered)
-import Data.Foldable (class Foldable)
+import Data.Filterable (filterMap, filtered)
+import Data.Foldable (class Foldable, foldMap)
 import Data.Int as Int
 import Data.Lens (to, view, (^?))
 import Data.Lens.Index (ix)
@@ -20,21 +22,101 @@ import Data.List (List)
 import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Monoid (mempty)
-import Data.Newtype (unwrap)
+import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.String as String
 import Data.Traversable (traverse)
 import Data.Variant (case_, inj, onMatch)
+import Debug.Trace as Debug
 import Genetics.Browser.Track.Backend (ChrCtx, DrawingV, Feature, LegendEntry, Renderer, SingleRenderer, Track(Track), VScale, HPos, _batch, _point, _range, _single, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend, verPlace)
+import Genetics.Browser.Track.Bed (ParsedLine, fetchBed)
+import Genetics.Browser.Track.Bed as Bed
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize)
+import Global.Unsafe (unsafeStringify)
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
 import Unsafe.Coerce (unsafeCoerce)
+
+
+
+type BedFeature = Feature ( thickRange :: Pair Bp
+                          , blocks :: Array (Pair Bp)
+                          , geneId :: String
+                          , geneName :: String
+                          , chrId :: ChrId )
+
+
+
+
+bedToFeature :: CoordSys ChrId BigInt -> ParsedLine -> Maybe BedFeature
+bedToFeature cs pl = do
+  seg@(Pair offset _ ) <- cs ^? _Segments <<< ix pl.chrom
+
+  -- TODO validate ranges maybe, idk
+  let frameSize = wrap $ BigInt.toNumber $ pairSize seg
+
+      helper :: BigInt -> Bp
+      helper = wrap <<< BigInt.toNumber <<< (_ + offset)
+      position = inj _range
+                 $ helper <$> Pair pl.chromStart pl.chromEnd
+      thickRange = helper <$> Pair pl.thickStart pl.thickEnd
+
+
+  pure { position
+       , frameSize
+       , thickRange
+       , blocks: []
+       , geneId: pl.geneId
+       , geneName: pl.geneName
+       , chrId: pl.chrom
+       }
+
+
+getBedGenes :: CoordSys ChrId BigInt
+            -> String
+            -> Aff _ (Map ChrId (Array BedFeature))
+getBedGenes cs url = do
+  ls <- fetchBed url
+
+  let fs = filterMap (bedToFeature cs) ls
+  -- let fs = Debug.trace "debugging w/ only 10 features" \_ ->
+  --            filterMap (bedToFeature cs) (Array.take 10 (Array.drop 3000 ls))
+
+  pure $ groupToChrs $ fs
+
+
+
+bedDraw :: BedFeature
+        -> DrawingV
+bedDraw gene = inj _range \w ->
+  let (Pair l r) = featureInterval gene
+      glyphW = unwrap $ (r - l) / gene.frameSize
+      rect = rectangle 0.0 0.0 (w * glyphW) 20.0
+      out  = outlined (outlineColor aqua <> lineWidth 1.0) rect
+      fill = filled   (fillColor teal) rect
+
+  in out <> fill
+
+
+
+bedGeneRenderer :: Renderer BedFeature
+bedGeneRenderer =
+  inj _single
+      { draw: bedDraw
+      , horPlace
+      , verPlace: const (Normalized 0.5) }
+
+
+
+bedGenesTrack :: VScale
+              -> Map ChrId (Array BedFeature)
+              -> Track BedFeature
+bedGenesTrack vs dat = Track dat bedGeneRenderer
 
 
 
@@ -124,6 +206,8 @@ geneRenderer =
               { draw: geneDraw
               , horPlace
               , verPlace: const (Normalized 0.1) }
+
+
 
 
 
