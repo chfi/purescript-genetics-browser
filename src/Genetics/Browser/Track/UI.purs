@@ -45,7 +45,7 @@ import Data.Variant (case_, onMatch)
 import FRP.Event (Event)
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Bed as Bed
-import Genetics.Browser.Track.Demo (annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes)
+import Genetics.Browser.Track.Demo (annotLegendTest, demoTracks, demoTracksBed, getAnnotations, getBedGenes, getGWAS, getGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (CoordSys, _TotalSize, coordSys, pairSize, scalePairBy, scaleToScreen, translatePairBy)
 import Global.Unsafe (unsafeStringify)
@@ -361,26 +361,21 @@ runBrowser config = launchAff $ do
 
 
   trackData <- do
-    gwas  <- traverse (getGWAS  cSys) config.urls.gwas
-    genes <- traverse (getGenes cSys) config.urls.genes
-    rawAnnotations <-
-      traverse (getAnnotations cSys) config.urls.annotations
+    -- genes <- traverse (getGenes cSys) config.urls.genes
+    genes <- traverse (getBedGenes cSys) (Just "./mouse.json")
+    -- gwas  <- traverse (getGWAS  cSys) config.urls.gwas
+    -- rawAnnotations <-
+    --   traverse (getAnnotations cSys) config.urls.annotations
 
-    let annotations = zipMapsWith
-                       (bumpFeatures (to _.score) (SProxy :: SProxy "score")
-                         (Bp 1000000.0))
-                       <$> gwas <*> rawAnnotations
+    -- let annotations = zipMapsWith
+    --                    (bumpFeatures (to _.score) (SProxy :: SProxy "score")
+    --                      (Bp 1000000.0))
+    --                    <$> gwas <*> rawAnnotations
 
-    pure { genes, gwas, annotations }
+    pure { genes, gwas: Nothing, annotations: Nothing }
+    -- pure { genes, gwas, annotations }
 
 
-
-  genes' <- Bed.fetchBed "mouse.json"
-
-  liftEff $ log $ "parsed " <> show (Array.length genes') <> " genes!"
-
-  liftEff $
-    foreachE (Array.take 10 genes') (log <<< unsafeStringify)
 
 
   let initialView :: Pair BigInt
@@ -403,7 +398,7 @@ runBrowser config = launchAff $ do
       s = config.score
       vscale = { width: vScaleWidth, color: black
                , min: s.min, max: s.max, sig: s.sig }
-      tracks = demoTracks vscale trackData
+      tracks = demoTracksBed vscale trackData
       mainBrowser = browser cSys browserDimensions config.padding {legend, vscale} tracks
 
   browserLoop mainBrowser bCanvas { viewCmds, viewState, renderFiber }

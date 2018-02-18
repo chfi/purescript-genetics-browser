@@ -374,6 +374,22 @@ demoTracks vs {gwas, annotations, genes} =
     ]
 
 
+
+
+
+demoTracksBed :: VScale
+              -> { gwas        :: Maybe (Map ChrId (Array (GWASFeature ()         )))
+                 , annotations :: Maybe (Map ChrId (Array (Annot (score :: Number))))
+                 , genes       :: Maybe (Map ChrId (Array BedFeature)) }
+              -> List (Exists Track)
+demoTracksBed vs {gwas, annotations, genes} =
+  List.fromFoldable $ filtered
+  $ [ mkExists <$> gwasTrack vs        <$> gwas
+    , mkExists <$> annotationsTrack vs <$> annotations
+    , mkExists <$> bedGenesTrack vs    <$> genes
+    ]
+
+
 mouseChrIds :: Array ChrId
 mouseChrIds =
             [ (ChrId "1")
