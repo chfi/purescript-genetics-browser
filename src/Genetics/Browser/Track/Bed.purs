@@ -2,14 +2,24 @@ module Genetics.Browser.Track.Bed where
 
 import Prelude
 
-import Control.Monad.Aff (Aff, error, throwError)
+import Control.Coroutine (Producer, producer)
+import Control.Coroutine.Aff as Aff
+import Control.Monad.Aff (Aff, Fiber, delay, error, forkAff, runAff, throwError)
+import Control.Monad.Aff.AVar (AVAR, AVar, makeEmptyVar, makeVar, putVar, takeVar)
+import Control.Monad.Aff.Class (class MonadAff, liftAff)
+import Control.Monad.Eff (Eff)
+import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Exception (throw)
 import Control.Monad.Except (runExcept)
+import Control.Monad.Free.Trans (hoistFreeT)
+import Control.Monad.Trans.Class (lift)
+import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
+import Data.Either (Either)
 import Data.Foldable (foldMap)
-import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
+import Data.Foreign (Foreign, MultipleErrors, readArray, renderForeignError)
 import Data.Int as Int
 import Data.List.NonEmpty (NonEmptyList)
 import Data.Maybe (Maybe(..))
@@ -17,12 +27,11 @@ import Data.Newtype (wrap)
 import Data.String as String
 import Data.Traversable (traverse)
 import Data.Validation.Semigroup (V, invalid, unV)
+import Debug.Trace as Debug
 import Genetics.Browser.Types (ChrId)
 import Network.HTTP.Affjax as Affjax
 import Simple.JSON (read)
-
-
-
+import Unsafe.Coerce (unsafeCoerce)
 
 
 {- NB this deals with JSON that's currently specified to work with a
@@ -114,19 +123,75 @@ validLine l = (l { chrom = _
            <*> validList l.blockStarts
 
 
-validateBed :: Foreign -> Validated (Array ParsedLine)
-validateBed d =
-  case (runExcept $ read d) :: Either MultipleErrors (Array RawBedLine) of
+validateBedChunk :: Array Foreign -> Validated (Array ParsedLine)
+validateBedChunk d =
+  case (runExcept $ traverse read d) :: Either MultipleErrors (Array RawBedLine) of
+
     Left err -> invalid $ map renderForeignError err
     Right ls -> traverse validLine ls
+
     -- Right ls -> pure ls
 
 
 -- fetchBed :: String -> Aff _ (Array (BedLine ChrId BigInt))
-fetchBed :: String -> Aff _ (Array ParsedLine)
-fetchBed url = do
-  json <- _.response <$> Affjax.get url
+-- fetchBed :: String -> Aff _ (Array ParsedLine)
+-- fetchBed url = do
+--   json <- _.response <$> Affjax.get url
 
-  unV (throwError <<< error <<< foldMap (_ <> ", "))
-      pure
-      $ validateBed json
+
+
+--   unV (throwError <<< error <<< foldMap (_ <> ", "))
+--       pure
+--       $ validateBed json
+
+
+
+
+
+
+produceBed :: String
+           -> Aff _ (Producer (Array ParsedLine) (Aff _) Unit)
+produceBed url = do
+    -- if necessary, producer should fetch the stuff too -- no reason to block here, if that's a thing
+  resp <- _.response <$> Affjax.get url
+
+  -- make sure it's an array
+  case runExcept $ readArray resp of
+    Left err -> Debug.trace "shit's fucked" \_ -> pure $ unsafeCoerce unit
+    -- Left err -> throw $ (error <<< foldMap (_ <> ", ") <<< renderForeignError <$> err)
+    Right ls -> do
+      -- AVar to store unparsed lines
+      remaining <- makeVar ls
+
+      let produceLoop emit = do
+        -- extract remaining from Avar
+            unparsed <- takeVar remaining
+
+            -- if there are no unparsed lines, emit 'unit' to signal producer done, and kill the avar
+            case Array.length unparsed of
+              0 -> emit $ Right unit
+              n -> do
+                -- if there are unparsed lines left, take a chunk of them,
+                let chunkSize = 500
+                    chunk = Array.take 500 unparsed
+                    rest  = Array.drop 500 unparsed
+
+                -- updating the stored unparsed lines,
+                putVar rest remaining
+
+                -- parse the chunk
+                let parsed :: Validated (Array ParsedLine)
+                    parsed = validateBedChunk chunk
+
+                unV (\_ -> pure unit)
+                    (emit <<< Left)
+                    $ parsed
+
+                -- hold on for a bit? why is this necessary lol
+                delay (wrap 10.0)
+
+                -- repeat
+                produceLoop emit
+
+        -- return producer
+      pure $ Aff.produceAff produceLoop

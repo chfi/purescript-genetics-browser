@@ -3,8 +3,10 @@ module Genetics.Browser.Track.UI where
 import Prelude
 
 import Color (black)
+import Control.Coroutine (Consumer, Process, connect, runProcess)
+import Control.Coroutine as Co
 import Control.Monad.Aff (Aff, Fiber, forkAff, killFiber, launchAff, launchAff_)
-import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, takeVar, tryTakeVar)
+import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, readVar, takeVar, tryTakeVar)
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
@@ -42,6 +44,7 @@ import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import FRP.Event (Event)
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser)
+import Genetics.Browser.Track.Bed (ParsedLine, produceBed)
 import Genetics.Browser.Track.Demo (annotLegendTest, demoTracksBed, getBedGenes)
 import Genetics.Browser.Types (ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (CoordSys, _TotalSize, coordSys, pairSize, scalePairBy, translatePairBy)
@@ -344,6 +347,22 @@ renderGlyphs vw@(Pair l _) viewScale ts canvases = do
   void $ liftEff $ Canvas.translate { translateX: offset, translateY: zero } trackCtx
 
 
+
+
+bedConsume :: AVar (Array ParsedLine) -> Array ParsedLine -> Aff _ (Maybe Unit)
+bedConsume av ls = do
+  sofar <- takeVar av
+  let new = sofar <> ls
+  liftEff $ log $ "received " <> show (Array.length new) <> " lines"
+  putVar new av
+  pure Nothing
+
+
+bedConsumer :: AVar (Array ParsedLine) -> Consumer (Array ParsedLine) (Aff _) Unit
+bedConsumer av = Co.consumer (bedConsume av)
+
+
+
 runBrowser :: Conf -> Eff _ _
 runBrowser config = launchAff $ do
 
@@ -407,7 +426,28 @@ runBrowser config = launchAff $ do
       tracks = demoTracksBed vscale trackData
       mainBrowser = browser cSys browserDimensions config.padding {legend, vscale} tracks
 
-  browserLoop mainBrowser trackWidth bCanvas { viewCmds, viewState, renderFiber }
+  _ <- forkAff $ browserLoop mainBrowser trackWidth bCanvas { viewCmds, viewState, renderFiber }
+
+
+  prod <- produceBed "./mouse.json"
+
+  res <- makeVar []
+  let cnsm = bedConsumer res
+
+  let prcs :: Process (Aff _) Unit
+      prcs = prod `connect` cnsm
+
+  liftEff $ log "starting process"
+
+  _ <- forkAff do
+    runProcess prcs
+    bedData <- readVar res
+    liftEff $ log $ "process complete, loaded: " <> show (Array.length bedData) <> " lines"
+
+  -- runProcess prcs
+  -- liftEff $ log $ "process complete, loaded"
+
+  pure unit
 
 
 
