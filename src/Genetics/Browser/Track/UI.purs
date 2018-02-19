@@ -31,7 +31,7 @@ import Data.BigInt as BigInt
 import Data.Either (Either(..), note)
 import Data.Filterable (filter, partitioned)
 import Data.Foldable (fold, foldMap, for_, length)
-import Data.Lens ((^.), (^?))
+import Data.Lens (to, (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -40,13 +40,14 @@ import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (alaF, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
+import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import FRP.Event (Event)
-import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser)
+import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Bed (ParsedLine, produceBed)
-import Genetics.Browser.Track.Demo (annotLegendTest, demoTracksBed, getBedGenes)
-import Genetics.Browser.Types (ChrId(ChrId), Point)
+import Genetics.Browser.Track.Demo (annotLegendTest, demoTracksBed, getAnnotations, getBedGenes, getGWAS)
+import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (CoordSys, _TotalSize, coordSys, pairSize, scalePairBy, translatePairBy)
 import Graphics.Canvas (CanvasElement, Context2D, getContext2D)
 import Graphics.Canvas as Canvas
@@ -289,11 +290,16 @@ browserLoop :: { tracks     :: Pair BigInt -> List (Array RenderedTrack)
             -> Aff _ _
 browserLoop browser trackDisplayWidth canvases state = forever do
 
-
   vState <- takeVar state.viewState
 
   traverse_ (killFiber (error "Resetting renderer"))
     =<< tryTakeVar state.renderFiber
+
+  let scale = BigInt.toNumber (pairSize vState.visible) / trackDisplayWidth
+      tracks = browser.tracks vState.visible
+
+  liftEff do
+    log $ "current scale: " <> show scale <> " bps/pixel"
 
   renderer <- forkAff $ renderGlyphs vState.visible scale tracks canvases
 
@@ -328,21 +334,39 @@ renderGlyphs vw@(Pair l _) viewScale ts canvases = do
   trackCtx   <- liftEff $ getContext2D canvases.track
   overlayCtx <- liftEff $ getContext2D canvases.overlay
 
-  liftEff $ Drawing.render trackCtx bg
+  let offset = BigInt.toNumber l / viewScale
+      vw'@(Pair pxL pxR) = map (\x -> (BigInt.toNumber x / viewScale)) vw
+
+  liftEff do
+    log $ "offset: " <> show offset
+    log $ "pixels view: " <> show vw'
+    Drawing.render trackCtx bg
+
+  -- Shift canvas so we render to the visible part
   void $ liftEff $ Canvas.translate { translateX: (-offset), translateY: zero } trackCtx
+
+  -- Predicates to filter out glyphs that would not be visible on screen
+  let predB p = p.x - 10.0 > pxL
+             && p.x + 10.0 < pxR
+      predS s = s.width >= one
+             && s.point.x - s.width > pxL
+             && s.point.x + s.width < pxR
 
   for_ (List.reverse ts) \segs -> do
     liftEff $ foreachE segs $ case _ of
-      Left gs  -> renderBatch canvases.buffer gs trackCtx
+
+      Left {drawing, points}  -> do
+        let points' = filter predB points
+        log $ "rendering " <> show (Array.length points') <> " glyphs, out of " <> show (Array.length points)
+        renderBatch canvases.buffer {drawing, points: points'} trackCtx
+
       Right gs -> do
-        -- foreachE gs \s -> log $ "rendering at x: " <> show s.point.x
-        let gs' = filter (\x -> x.width >= one) gs
-        log $ "rendering " <> show (Array.length gs') <> " glyphs"
-        foreachE gs' \s -> do
-                   when (s.width >= one) do
-                     Drawing.render trackCtx
-                          $ Drawing.translate s.point.x s.point.y
-                          $ s.drawing
+        let gs' = filter predS gs
+        log $ "rendering " <> show (Array.length gs') <> " glyphs, out of " <> show (Array.length gs)
+        foreachE gs' \s ->
+          Drawing.render trackCtx
+            $ Drawing.translate s.point.x s.point.y
+            $ s.drawing
 
   void $ liftEff $ Canvas.translate { translateX: offset, translateY: zero } trackCtx
 
@@ -386,20 +410,17 @@ runBrowser config = launchAff $ do
 
 
   trackData <- do
-    -- genes <- traverse (getGenes cSys) config.urls.genes
     genes <- traverse (getBedGenes cSys) (Just "./mouse.json")
-    -- gwas  <- traverse (getGWAS  cSys) config.urls.gwas
-    -- rawAnnotations <-
-    --   traverse (getAnnotations cSys) config.urls.annotations
+    gwas  <- traverse (getGWAS  cSys) config.urls.gwas
+    rawAnnotations <-
+      traverse (getAnnotations cSys) config.urls.annotations
 
-    -- let annotations = zipMapsWith
-    --                    (bumpFeatures (to _.score) (SProxy :: SProxy "score")
-    --                      (Bp 1000000.0))
-    --                    <$> gwas <*> rawAnnotations
+    let annotations = zipMapsWith
+                       (bumpFeatures (to _.score) (SProxy :: SProxy "score")
+                         (Bp 1000000.0))
+                       <$> gwas <*> rawAnnotations
 
-    pure { genes, gwas: Nothing, annotations: Nothing }
-    -- pure { genes, gwas, annotations }
-
+    pure { genes, gwas, annotations }
 
 
 
@@ -429,6 +450,7 @@ runBrowser config = launchAff $ do
   _ <- forkAff $ browserLoop mainBrowser trackWidth bCanvas { viewCmds, viewState, renderFiber }
 
 
+  {-
   prod <- produceBed "./mouse.json"
 
   res <- makeVar []
@@ -443,9 +465,7 @@ runBrowser config = launchAff $ do
     runProcess prcs
     bedData <- readVar res
     liftEff $ log $ "process complete, loaded: " <> show (Array.length bedData) <> " lines"
-
-  -- runProcess prcs
-  -- liftEff $ log $ "process complete, loaded"
+  -}
 
   pure unit
 

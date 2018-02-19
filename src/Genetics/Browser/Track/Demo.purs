@@ -79,8 +79,10 @@ getBedGenes cs url = do
   ls <- fetchBed url
 
   let fs = filterMap (bedToFeature cs) ls
-  -- let fs = Debug.trace "debugging w/ only 10 features" \_ ->
-  --            filterMap (bedToFeature cs) (Array.take 10 (Array.drop 3000 ls))
+  -- let d = 3000
+  --     n = 10
+  --     fs = Debug.trace ("debugging w/ only " <> show n <> " features") \_ ->
+  --            filterMap (bedToFeature cs) (Array.take n (Array.drop d ls))
 
   pure $ groupToChrs $ fs
 

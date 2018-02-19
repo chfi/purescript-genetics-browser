@@ -134,15 +134,17 @@ validateBedChunk d =
 
 
 -- fetchBed :: String -> Aff _ (Array (BedLine ChrId BigInt))
--- fetchBed :: String -> Aff _ (Array ParsedLine)
--- fetchBed url = do
---   json <- _.response <$> Affjax.get url
+fetchBed :: String -> Aff _ (Array ParsedLine)
+fetchBed url = do
+  resp <- _.response <$> Affjax.get url
 
-
-
---   unV (throwError <<< error <<< foldMap (_ <> ", "))
---       pure
---       $ validateBed json
+  case runExcept $ readArray resp of
+    Left err -> Debug.trace "shit's fucked" \_ -> pure $ unsafeCoerce unit
+    -- Left err -> throw $ (error <<< foldMap (_ <> ", ") <<< renderForeignError <$> err)
+    Right ls -> do
+        unV (throwError <<< error <<< foldMap (_ <> ", "))
+            pure
+            $ validateBedChunk ls
 
 
 
@@ -176,22 +178,18 @@ produceBed url = do
                     chunk = Array.take 500 unparsed
                     rest  = Array.drop 500 unparsed
 
-                -- updating the stored unparsed lines,
+                -- updating the stored unparsed lines
                 putVar rest remaining
 
-                -- parse the chunk
-                let parsed :: Validated (Array ParsedLine)
-                    parsed = validateBedChunk chunk
+                -- parse & emit the chunk
 
+                -- TODO what to do on failure? should it even be handled here?
                 unV (\_ -> pure unit)
                     (emit <<< Left)
-                    $ parsed
+                    $ validateBedChunk chunk
 
-                -- hold on for a bit? why is this necessary lol
-                delay (wrap 10.0)
-
-                -- repeat
-                produceLoop emit
+                -- chill for a bit & repeat
+                delay (wrap 10.0) *> produceLoop emit
 
         -- return producer
       pure $ Aff.produceAff produceLoop
