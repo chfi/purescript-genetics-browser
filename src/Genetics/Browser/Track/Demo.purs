@@ -4,6 +4,7 @@ import Prelude
 
 import Color (Color, black)
 import Color.Scheme.Clrs (aqua, blue, navy, red, teal)
+import Control.Coroutine (Producer, Transformer, transform, ($~), (~~))
 import Control.Monad.Aff (Aff, throwError)
 import Control.Monad.Eff.Exception (error)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
@@ -28,13 +29,14 @@ import Data.Traversable (traverse)
 import Data.Variant (case_, inj, onMatch)
 import Debug.Trace as Debug
 import Genetics.Browser.Track.Backend (DrawingV, Feature, HPos, LegendEntry, Renderer, Track(Track), VScale, _batch, _point, _range, _single, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend, verPlace)
-import Genetics.Browser.Track.Bed (ParsedLine, fetchBed)
+import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize)
 import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
+import Unsafe.Coerce (unsafeCoerce)
 
 
 
@@ -86,6 +88,19 @@ getBedGenes cs url = do
 
   pure $ groupToChrs $ fs
 
+produceGenes :: CoordSys ChrId BigInt -> String
+             -> Aff _
+                (Producer
+                 (Map ChrId (Array BedFeature))
+                 (Aff _) Unit)
+produceGenes cs url = do
+  prod <- fetchForeignChunks url
+
+  pure
+    $ prod
+    $~ parsedLineTransformer
+    ~~ transform
+       (groupToChrs <<< filterMap (bedToFeature cs))
 
 
 bedDraw :: BedFeature
@@ -114,6 +129,55 @@ bedGenesTrack :: VScale
               -> Map ChrId (Array BedFeature)
               -> Track BedFeature
 bedGenesTrack vs dat = Track dat bedGeneRenderer
+
+
+fetchJsonChunks :: String
+                -> Aff _ (Producer (Array Json) (Aff _) Unit)
+fetchJsonChunks url = do
+  json <- _.response <$> Affjax.get url
+
+  case json ^? _Array of
+    Nothing -> throwError $ error "Parse error: JSON is not an array"
+    Just ls -> pure $ chunkProducer 512 ls
+
+
+featureProd :: forall r.
+               String
+            -> (Json -> Maybe { chrId :: ChrId | r })
+            -> Aff _
+                 (Producer
+                 (Map ChrId (Array { chrId :: ChrId | r }))
+                 (Aff _) Unit)
+featureProd url parse = do
+  prod <- fetchJsonChunks url
+
+  pure $ prod $~ (transform $ groupToChrs <<< filterMap parse)
+
+produceGWAS :: CoordSys ChrId _
+            -> String
+            -> Aff _
+               (Producer
+                (Map ChrId
+                 (Array (GWASFeature ())))
+                 (Aff _) Unit)
+produceGWAS cs url = featureProd url $ gemmaJSONParse cs
+
+produceAnnots :: CoordSys ChrId _
+              -> String
+              -> Aff _
+                 (Producer
+                  (Map ChrId
+                   (Array (Annot ())))
+                   (Aff _) Unit)
+produceAnnots cs url = featureProd url $ (map toAnnot <$> (geneJSONParse cs))
+  where toAnnot :: Gene () -> Annot ()
+  -- where toAnnot :: _
+        toAnnot gene = { geneID: gene.geneID
+                       , desc: gene.desc
+                       , position: gene.position
+                       , frameSize: gene.frameSize
+                       , name: gene.name
+                       , chrId: gene.chrId }
 
 
 
