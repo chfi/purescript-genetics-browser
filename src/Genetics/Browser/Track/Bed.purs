@@ -2,7 +2,7 @@ module Genetics.Browser.Track.Bed where
 
 import Prelude
 
-import Control.Coroutine (Producer, producer)
+import Control.Coroutine (Producer, Transformer, producer, transform)
 import Control.Coroutine.Aff as Aff
 import Control.Monad.Aff (Aff, Fiber, delay, error, forkAff, runAff, throwError)
 import Control.Monad.Aff.AVar (AVAR, AVar, makeEmptyVar, makeVar, putVar, takeVar)
@@ -23,6 +23,7 @@ import Data.Foreign (Foreign, MultipleErrors, readArray, renderForeignError)
 import Data.Int as Int
 import Data.List.NonEmpty (NonEmptyList)
 import Data.Maybe (Maybe(..))
+import Data.Monoid (mempty)
 import Data.Newtype (wrap)
 import Data.String as String
 import Data.Traversable (traverse)
@@ -148,48 +149,47 @@ fetchBed url = do
 
 
 
+chunkProducer :: forall a.
+                 Int
+              -> Array a
+              -> Producer (Array a) (Aff _) Unit
+chunkProducer n input = Aff.produceAff \emit -> do
+  remaining <- makeVar input
+
+  let prodLoop = do
+
+        unparsed <- takeVar remaining
+
+        case Array.length unparsed of
+          0 -> emit $ Right unit
+          _ -> do
+            let chunk = Array.take n unparsed
+                rest  = Array.drop n unparsed
+
+            putVar rest remaining
+            emit $ Left chunk
+            prodLoop
+
+  prodLoop
 
 
-
-produceBed :: String
-           -> Aff _ (Producer (Array ParsedLine) (Aff _) Unit)
-produceBed url = do
-    -- if necessary, producer should fetch the stuff too -- no reason to block here, if that's a thing
+fetchForeignChunks :: String
+                   -> Aff _ (Producer (Array Foreign) (Aff _) Unit)
+fetchForeignChunks url = do
   resp <- _.response <$> Affjax.get url
 
-  -- make sure it's an array
   case runExcept $ readArray resp of
+      -- TODO actually handle this failing : )
     Left err -> Debug.trace "shit's fucked" \_ -> pure $ unsafeCoerce unit
-    -- Left err -> throw $ (error <<< foldMap (_ <> ", ") <<< renderForeignError <$> err)
-    Right ls -> do
-      -- AVar to store unparsed lines
-      remaining <- makeVar ls
+    Right ls ->
+      pure $ chunkProducer 512 ls
 
-      let produceLoop emit = do
-        -- extract remaining from Avar
-            unparsed <- takeVar remaining
 
-            -- if there are no unparsed lines, emit 'unit' to signal producer done, and kill the avar
-            case Array.length unparsed of
-              0 -> emit $ Right unit
-              n -> do
-                -- if there are unparsed lines left, take a chunk of them,
-                let chunkSize = 500
-                    chunk = Array.take 500 unparsed
-                    rest  = Array.drop 500 unparsed
-
-                -- updating the stored unparsed lines
-                putVar rest remaining
-
-                -- parse & emit the chunk
-
-                -- TODO what to do on failure? should it even be handled here?
-                unV (\_ -> pure unit)
-                    (emit <<< Left)
-                    $ validateBedChunk chunk
-
-                -- chill for a bit & repeat
-                delay (wrap 10.0) *> produceLoop emit
-
-        -- return producer
-      pure $ Aff.produceAff produceLoop
+parsedLineTransformer :: Transformer
+                         (Array Foreign)
+                         (Array ParsedLine)
+                         (Aff _) Unit
+parsedLineTransformer =
+  transform
+  -- TODO holy hell handle failure
+     $ unV (const mempty) id <<< validateBedChunk
