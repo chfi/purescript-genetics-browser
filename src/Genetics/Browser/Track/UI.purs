@@ -285,16 +285,17 @@ type BrowserState = { visible  :: ViewRange }
                     -- , rendered :: ViewRange }
 
 
-browserLoop :: { tracks     :: Pair BigInt -> List (Array RenderedTrack)
-               , relativeUI :: Pair BigInt -> Drawing
-               , fixedUI :: Drawing }
-            -> Number
-            -> BrowserCanvas
-            -> { viewState   :: AVar BrowserState
-               , viewCmds    :: AVar UpdateView
-               , renderFiber :: AVar (Fiber _ _)}
-            -> Aff _ _
-browserLoop browser trackDisplayWidth canvases state = forever do
+renderLoop :: CoordSys _ _
+           -> { tracks     :: Pair BigInt -> List (Array RenderedTrack)
+              , relativeUI :: Pair BigInt -> Drawing
+              , fixedUI :: Drawing }
+           -> Number
+           -> BrowserCanvas
+           -> { viewState   :: AVar BrowserState
+              , viewCmds    :: AVar UpdateView
+              , renderFiber :: AVar (Fiber _ _)}
+           -> Aff _ _
+renderLoop cSys browser trackDisplayWidth canvases state = forever do
 
   vState <- takeVar state.viewState
 
@@ -318,7 +319,13 @@ browserLoop browser trackDisplayWidth canvases state = forever do
   -- wait until UI has been clicked, view scrolled, etc.
   cmd <- takeVar state.viewCmds
 
-  let newState = updateViewFold cmd vState.visible
+      -- update view using received cmd, limiting view to coordsys
+  let (Pair l' r') = updateViewFold cmd vState.visible
+      newState =
+        Pair (max zero l')
+             (min (max r'  -- arbitrary minimum of 400 units shown, so things don't go too crazy when zoomed in
+                      (l' + BigInt.fromInt 400))
+                  (cSys^._TotalSize))
 
   putVar { visible: newState } state.viewState
 
@@ -352,23 +359,26 @@ renderGlyphs vw@(Pair l _) viewScale ts canvases = do
   void $ liftEff $ Canvas.translate { translateX: (-offset), translateY: zero } trackCtx
 
   -- Predicates to filter out glyphs that would not be visible on screen
-  let predB p = p.x - 10.0 > pxL
-             && p.x + 10.0 < pxR
+     -- Hack to render more of the canvas just to be sure
+  let pxL' = pxL - (pxR - pxL)
+      pxR' = pxR + (pxR - pxL)
+      predB p = p.x - 10.0 > pxL'
+             && p.x + 10.0 < pxR'
       predS s = s.width >= one
-             && s.point.x - s.width > pxL
-             && s.point.x + s.width < pxR
+             && s.point.x - s.width > pxL'
+             && s.point.x + s.width < pxR'
 
   for_ (List.reverse ts) \segs -> do
     liftEff $ foreachE segs $ case _ of
 
       Left {drawing, points}  -> do
         let points' = filter predB points
-        log $ "rendering " <> show (Array.length points') <> " glyphs, out of " <> show (Array.length points)
+        -- log $ "rendering " <> show (Array.length points') <> " glyphs, out of " <> show (Array.length points)
         renderBatch canvases.buffer {drawing, points: points'} trackCtx
 
       Right gs -> do
         let gs' = filter predS gs
-        log $ "rendering " <> show (Array.length gs') <> " glyphs, out of " <> show (Array.length gs)
+        -- log $ "rendering " <> show (Array.length gs') <> " glyphs, out of " <> show (Array.length gs)
         foreachE gs' \s ->
           Drawing.render trackCtx
             $ Drawing.translate s.point.x s.point.y
@@ -500,25 +510,9 @@ runBrowser config = launchAff $ do
       tracks = demoTracksBed vscale trackData
       mainBrowser = browser cSys browserDimensions config.padding {legend, vscale} tracks
 
-  _ <- forkAff $ browserLoop mainBrowser trackWidth bCanvas { viewCmds, viewState, renderFiber }
+  _ <- forkAff $ renderLoop cSys mainBrowser trackWidth bCanvas { viewCmds, viewState, renderFiber }
 
 
-  {-
-  prod <- produceBed "./mouse.json"
-
-  res <- makeVar []
-  let cnsm = bedConsumer res
-
-  let prcs :: Process (Aff _) Unit
-      prcs = prod `connect` cnsm
-
-  liftEff $ log "starting process"
-
-  _ <- forkAff do
-    runProcess prcs
-    bedData <- readVar res
-    liftEff $ log $ "process complete, loaded: " <> show (Array.length bedData) <> " lines"
-  -}
 
   pure unit
 
