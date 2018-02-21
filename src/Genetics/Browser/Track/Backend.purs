@@ -545,11 +545,10 @@ browser cs cdim padding ui inputTracks =
 
       -- TODO make a type that corresponds to left-of-track and right-of-track to make this dynamic
       drawOverlay x w d =
-        (translate x zero
-         $ filled (fillColor white)
-         $ rectangle zero zero w height )
-        <> translate x padding.vertical
-           d
+          (translate x zero
+           $ filled (fillColor white)
+           $ rectangle zero zero w cdim.height )
+        <> translate x padding.vertical d
 
       vScale = drawOverlay
                  zero
@@ -570,7 +569,7 @@ browser cs cdim padding ui inputTracks =
       normTracks = runExists (\(Track as r) -> render r <$> as) <$> inputTracks
 
       tracks :: Pair BigInt -> List (Array (Either (BatchGlyph Point) (Array SingleGlyph)))
-      tracks v = (renderNormalizedTrack cs cdim v) <$> normTracks
+      tracks v = (renderNormalizedTrack cs trackCanvas v) <$> normTracks
 
       -- chrLabels = chrLabelTrack cs trackCanvas
       -- ruler     = horRulerTrack ui.vscale red trackCanvas

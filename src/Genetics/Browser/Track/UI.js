@@ -1,11 +1,5 @@
 "use strict";
 
-exports.clearCanvas = function(canvas) {
-    return function() {
-        canvas.width = canvas.width;
-    };
-};
-
 exports.buttonEvent = function(id) {
     return function(cb) {
         return function() {
@@ -53,12 +47,14 @@ exports.scrollCanvas = function(backCanvas) {
 
                 bCtx.drawImage(canvas, 0, 0);
 
-                // clears the canvas...
-                // no idea of performance vs. drawRect
-                canvas.width = canvas.width;
+                ctx.save();
+                ctx.setTransform(1,0,0,1,0,0);
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.drawImage(backCanvas, p.x, p.y);
-            };
+                ctx.restore();
 
+            };
         };
     };
 };

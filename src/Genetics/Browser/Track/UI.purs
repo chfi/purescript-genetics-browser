@@ -91,8 +91,6 @@ foreign import newCanvas :: forall eff.
                             { width :: Number, height :: Number }
                          -> Eff eff CanvasElement
 
-foreign import clearCanvas :: forall eff. CanvasElement -> Eff eff Unit
-
 
 -- set an event to fire on the given button id
 
@@ -174,8 +172,9 @@ type BrowserCanvas = { buffer  :: CanvasElement
 
 createBrowserCanvas :: Element
                     -> { width :: Number, height :: Number }
+                    -> Canvas.TranslateTransform
                     -> Eff _ BrowserCanvas
-createBrowserCanvas el dim = do
+createBrowserCanvas el dim trackTT = do
   let node :: CanvasElement -> Node
       node = unsafeCoerce
       element :: CanvasElement -> Element
@@ -183,6 +182,10 @@ createBrowserCanvas el dim = do
 
   buffer  <- newCanvas dim
   track   <- newCanvas dim
+  -- Translate the origin of the Track canvas;
+  -- useful to place the origin within the vertical padding and horizontal UI elements
+  void $ Canvas.getContext2D track >>= Canvas.translate trackTT
+
   overlay <- newCanvas dim
 
   DOM.setId (wrap "buffer")  (element buffer)
@@ -466,10 +469,13 @@ runBrowser config = launchAff $ do
            <$> (DOM.document =<< DOM.window)
     cont <- liftEff $ DOM.querySelector (wrap "#browser") (toParentNode doc)
 
-    maybe
-      (throwError $ error "Could not find browser element")
-      (\el -> liftEff $ createBrowserCanvas el browserDimensions)
-      cont
+    case cont of
+      Nothing -> throwError $ error "Could not find browser element"
+      Just el -> liftEff do
+        createBrowserCanvas
+          el browserDimensions
+          { translateX: vScaleWidth
+          , translateY: zero }
 
 
   trackData <- do
