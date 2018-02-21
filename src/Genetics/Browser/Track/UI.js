@@ -75,22 +75,6 @@ var evToPoint = function(e) {
            };
 }
 
-exports.canvasEvent = function(type) {
-    return function(canvas) {
-        return function(sub) {
-            var cb = function(e) {
-                sub(evToPoint(e));
-            };
-
-            canvas.addEventListener(type, cb);
-            return function() {
-                canvas.removeEventListener(type, cb);
-            }
-        };
-    };
-};
-
-
 exports.canvasDragImpl = function(canvas) {
     return function(cb) {
         return function() {

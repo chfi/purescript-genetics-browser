@@ -100,9 +100,6 @@ foreign import buttonEvent :: forall eff.
                            -> Eff eff Unit
 
 
-foreign import canvasEvent :: String -> CanvasElement -> Event Point
-
-
 foreign import setViewUI :: forall eff. String -> Eff eff Unit
 
 
@@ -345,6 +342,7 @@ renderGlyphs :: Pair BigInt
 renderGlyphs vw@(Pair l _) viewScale ts canvases = do
 
   {width, height} <- liftEff $ Canvas.getCanvasDimensions canvases.track
+
   let bg = filled (fillColor white) $ rectangle 0.0 0.0 width height
 
   trackCtx   <- liftEff $ getContext2D canvases.track
@@ -446,13 +444,6 @@ fetchLoop cs urls = do
   pure { gwas, annotations, genes }
 
 
-
--- browserLoopN :: CoordSys _ _
---              -> BrowserCanvas
---              ->
-
-
-
 runBrowser :: Conf -> Eff _ _
 runBrowser config = launchAff $ do
 
@@ -460,8 +451,8 @@ runBrowser config = launchAff $ do
 
   let height = config.browserHeight
       browserDimensions = {width, height}
-      vScaleWidth = 40.0
-      legendWidth = 100.0
+      vScaleWidth = 60.0
+      legendWidth = 120.0
       trackWidth = width - (vScaleWidth + legendWidth)
 
   bCanvas <- do
