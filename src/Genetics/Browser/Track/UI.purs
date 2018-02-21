@@ -3,9 +3,9 @@ module Genetics.Browser.Track.UI where
 import Prelude
 
 import Color (black)
-import Control.Coroutine (Consumer, Process, connect, runProcess)
+import Control.Coroutine (Consumer, Process, Producer, connect, runProcess, ($$))
 import Control.Coroutine as Co
-import Control.Monad.Aff (Aff, Fiber, forkAff, killFiber, launchAff, launchAff_)
+import Control.Monad.Aff (Aff, Fiber, delay, forkAff, killFiber, launchAff, launchAff_)
 import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, readVar, takeVar, tryTakeVar)
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
@@ -30,12 +30,14 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(..), note)
 import Data.Filterable (filter, partitioned)
-import Data.Foldable (fold, foldMap, for_, length)
+import Data.Foldable (class Foldable, fold, foldMap, for_, length, null)
 import Data.Lens (to, (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
+import Data.Map (Map)
 import Data.Maybe (Maybe(Nothing, Just), fromJust, fromMaybe, maybe)
+import Data.Monoid (class Monoid, mempty)
 import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (alaF, wrap)
 import Data.Nullable (Nullable, toMaybe)
@@ -43,10 +45,11 @@ import Data.Pair (Pair(..))
 import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
+import Data.Variant (Variant)
 import FRP.Event (Event)
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Bed (ParsedLine, produceBed)
-import Genetics.Browser.Track.Demo (annotLegendTest, demoTracksBed, getAnnotations, getBedGenes, getGWAS)
+import Genetics.Browser.Track.Bed (ParsedLine)
+import Genetics.Browser.Track.Demo (BedFeature, GWASFeature, Annot, annotLegendTest, demoTracksBed, getAnnotations, getBedGenes, getGWAS, produceAnnots, produceGWAS, produceGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (CoordSys, _TotalSize, coordSys, pairSize, scalePairBy, translatePairBy)
 import Graphics.Canvas (CanvasElement, Context2D, getContext2D)
@@ -234,13 +237,16 @@ mouseChrSizes =
       ]
 
 
+type DataURLs = { gwas        :: Maybe String
+                , annotations :: Maybe String
+                , genes       :: Maybe String
+                }
+
+
 type Conf = { browserHeight :: Number
             , padding :: Padding
             , score :: { min :: Number, max :: Number, sig :: Number }
-            , urls :: { gwas        :: Maybe String
-                      , annotations :: Maybe String
-                      , genes       :: Maybe String
-                      }
+            , urls :: DataURLs
             }
 
 
@@ -372,18 +378,65 @@ renderGlyphs vw@(Pair l _) viewScale ts canvases = do
 
 
 
+-- TODO this could almost certainly be done better
+chunkConsumer :: forall m a.
+                 Foldable m
+              => Monoid (m a)
+              => AVar (m a)
+              -> Consumer (m a) (Aff _) Unit
+chunkConsumer av = Co.consumer \m ->
+  if null m
+     then pure $ Just unit
+     else do
+       sofar <- takeVar av
 
-bedConsume :: AVar (Array ParsedLine) -> Array ParsedLine -> Aff _ (Maybe Unit)
-bedConsume av ls = do
-  sofar <- takeVar av
-  let new = sofar <> ls
-  liftEff $ log $ "received " <> show (Array.length new) <> " lines"
-  putVar new av
-  pure Nothing
+       let new = sofar <> m
+
+       putVar new av
+       delay (wrap 20.0)
+
+       pure Nothing
 
 
-bedConsumer :: AVar (Array ParsedLine) -> Consumer (Array ParsedLine) (Aff _) Unit
-bedConsumer av = Co.consumer (bedConsume av)
+
+type TrackVar a = AVar (Map ChrId (Array a))
+
+
+-- | Starts threads that fetch & parse each of the provided tracks,
+-- | filling an AVar over time per track, which can be used by other parts of the application
+-- | (read only, should be a newtype)
+fetchLoop :: CoordSys ChrId BigInt
+          -> DataURLs
+          -> Aff _
+               { gwas :: TrackVar (GWASFeature ())
+               , genes :: TrackVar BedFeature
+               , annotations :: TrackVar (Annot ())
+               }
+fetchLoop cs urls = do
+  gwasProd   <- traverse (produceGWAS cs) urls.gwas
+  annotsProd <- traverse (produceAnnots cs) urls.annotations
+  genesProd  <- traverse (produceGenes cs) urls.genes
+
+  gwas        <- makeVar mempty
+  annotations <- makeVar mempty
+  genes       <- makeVar mempty
+
+  let gwasProc :: Maybe (Process (Aff _) Unit)
+      gwasProc   = (_ $$ chunkConsumer gwas)   <$> gwasProd
+      annotsProc = (_ $$ chunkConsumer annotations) <$> annotsProd
+      genesProc  = (_ $$ chunkConsumer genes)  <$> genesProd
+
+  _ <- traverse forkAff (runProcess <$> gwasProc)
+  _ <- traverse forkAff (runProcess <$> annotsProc)
+  _ <- traverse forkAff (runProcess <$> genesProc)
+
+  pure { gwas, annotations, genes }
+
+
+
+-- browserLoopN :: CoordSys _ _
+--              -> BrowserCanvas
+--              ->
 
 
 
