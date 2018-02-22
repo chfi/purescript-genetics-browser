@@ -5,8 +5,8 @@ import Prelude
 import Color (black)
 import Control.Coroutine (Consumer, Process, Producer, connect, runProcess, ($$))
 import Control.Coroutine as Co
-import Control.Monad.Aff (Aff, Fiber, delay, forkAff, killFiber, launchAff, launchAff_)
-import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, readVar, takeVar, tryTakeVar)
+import Control.Monad.Aff (Aff, Fiber, delay, finally, forkAff, killFiber, launchAff, launchAff_)
+import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, takeVar, tryTakeVar)
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
@@ -25,30 +25,27 @@ import DOM.Node.ParentNode (querySelector) as DOM
 import DOM.Node.Types (Element, Node)
 import Data.Argonaut (Json, _Number, _Object, _String)
 import Data.Array as Array
-import Data.Bifunctor (bimap, lmap)
+import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(..), note)
-import Data.Filterable (filter, partitioned)
-import Data.Foldable (class Foldable, fold, foldMap, for_, length, null)
+import Data.Filterable (filter)
+import Data.Foldable (class Foldable, foldMap, for_, null)
 import Data.Lens (to, (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
 import Data.Map (Map)
-import Data.Maybe (Maybe(Nothing, Just), fromJust, fromMaybe, maybe)
+import Data.Maybe (Maybe(Just, Nothing), fromJust, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
-import Data.Monoid.Additive (Additive(..))
-import Data.Newtype (alaF, wrap)
+import Data.Newtype (wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
 import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
-import Data.Variant (Variant)
 import FRP.Event (Event)
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Bed (ParsedLine)
 import Genetics.Browser.Track.Demo (BedFeature, GWASFeature, Annot, annotLegendTest, demoTracksBed, getAnnotations, getBedGenes, getGWAS, produceAnnots, produceGWAS, produceGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (CoordSys, _TotalSize, coordSys, pairSize, scalePairBy, translatePairBy)
@@ -293,12 +290,13 @@ renderLoop :: CoordSys _ _
            -> BrowserCanvas
            -> { viewState   :: AVar BrowserState
               , viewCmds    :: AVar UpdateView
-              , renderFiber :: AVar (Fiber _ _)}
+              , renderFiber :: AVar (Fiber _ Unit)}
            -> Aff _ _
 renderLoop cSys browser trackDisplayWidth canvases state = forever do
 
   vState <- takeVar state.viewState
 
+  -- if there's a rendering fiber running, we kill it
   traverse_ (killFiber (error "Resetting renderer"))
     =<< tryTakeVar state.renderFiber
 
@@ -307,10 +305,9 @@ renderLoop cSys browser trackDisplayWidth canvases state = forever do
       offset = BigInt.toNumber l / scale
       tracks = browser.tracks vState.visible
 
-  liftEff do
-    log $ "current scale: " <> show scale <> " bps/pixel"
-
-  renderer <- forkAff $ renderGlyphs vState.visible scale tracks canvases
+  -- fork a new renderFiber
+  renderFiber <- forkAff $ renderGlyphs vState.visible scale tracks canvases
+  putVar renderFiber state.renderFiber
 
   liftEff $ do
     trackCtx   <- getContext2D canvases.track
@@ -318,7 +315,6 @@ renderLoop cSys browser trackDisplayWidth canvases state = forever do
 
     -- Shift canvas so we render to the visible part
     -- this shit ugly af tho, all of this gotta get redone~~
-
     void $ Canvas.withContext trackCtx do
       void $ Canvas.translate
         { translateX: (-offset), translateY: zero } trackCtx
@@ -339,10 +335,6 @@ renderLoop cSys browser trackDisplayWidth canvases state = forever do
 
   putVar { visible: newState } state.viewState
 
-  liftEff $ log $ "new view: " <> show newState
-
-  pure unit
-
 
 renderGlyphs :: Pair BigInt
              -> Number
@@ -351,27 +343,23 @@ renderGlyphs :: Pair BigInt
              -> Aff _ Unit
 renderGlyphs vw@(Pair l _) viewScale ts canvases = do
 
-  {width, height} <- liftEff $ Canvas.getCanvasDimensions canvases.track
 
-  let bg = filled (fillColor white) $ rectangle 0.0 0.0 width height
+  -- Blank out the track canvas and get its context
+  trackCtx <- liftEff do
+    {width, height} <- Canvas.getCanvasDimensions canvases.track
+    trackCtx <- getContext2D canvases.track
+    Drawing.render trackCtx
+      $ filled (fillColor white) $ rectangle 0.0 0.0 width height
+    pure trackCtx
 
-  trackCtx   <- liftEff $ getContext2D canvases.track
-  overlayCtx <- liftEff $ getContext2D canvases.overlay
+
 
   let offset = BigInt.toNumber l / viewScale
       vw'@(Pair pxL pxR) = map (\x -> (BigInt.toNumber x / viewScale)) vw
 
-  liftEff do
-    log $ "offset: " <> show offset
-    log $ "pixels view: " <> show vw'
-    Drawing.render trackCtx bg
-
-  -- Shift canvas so we render to the visible part
-  void $ liftEff $ Canvas.translate { translateX: (-offset), translateY: zero } trackCtx
-
   -- Predicates to filter out glyphs that would not be visible on screen
      -- Hack to render more of the canvas just to be sure
-  let pxL' = pxL - (pxR - pxL)
+      pxL' = pxL - (pxR - pxL)
       pxR' = pxR + (pxR - pxL)
       predB p = p.x - 10.0 > pxL'
              && p.x + 10.0 < pxR'
@@ -379,24 +367,33 @@ renderGlyphs vw@(Pair l _) viewScale ts canvases = do
              && s.point.x - s.width > pxL'
              && s.point.x + s.width < pxR'
 
-  for_ (List.reverse ts) \segs -> do
-    liftEff $ foreachE segs $ case _ of
+      shiftView x =
+        void $ liftEff $ Canvas.translate { translateX: x, translateY: zero } trackCtx
 
-      Left {drawing, points}  -> do
-        let points' = filter predB points
-        -- log $ "rendering " <> show (Array.length points') <> " glyphs, out of " <> show (Array.length points)
-        renderBatch canvases.buffer {drawing, points: points'} trackCtx
+  -- Shift canvas so we render to the visible part
+  shiftView (-offset)
 
-      Right gs -> do
-        let gs' = filter predS gs
-        -- log $ "rendering " <> show (Array.length gs') <> " glyphs, out of " <> show (Array.length gs)
-        foreachE gs' \s ->
-          Drawing.render trackCtx
-            $ Drawing.translate s.point.x s.point.y
-            $ s.drawing
+  -- Make sure we unshift even if renderer is killed
+  finally (shiftView offset) do
 
-  void $ liftEff $ Canvas.translate { translateX: offset, translateY: zero } trackCtx
+    for_ ts \track -> do
 
+      for_ track \t -> do
+        case t of
+          Left {drawing, points}  -> do
+            let points' = filter predB points
+            liftEff $
+              renderBatch canvases.buffer {drawing, points: points'} trackCtx
+
+          Right gs -> do
+            let gs' = filter predS gs
+            liftEff $ foreachE gs' \s ->
+              Drawing.render trackCtx
+                $ Drawing.translate s.point.x s.point.y
+                $ s.drawing
+
+        -- delay to give the UI thread a moment
+        delay (wrap 3.0)
 
 
 -- TODO this could almost certainly be done better
@@ -506,7 +503,6 @@ runBrowser config = launchAff $ do
   viewState <- makeVar { visible: initialView }
 
   renderFiber <- makeEmptyVar
-
 
   let
       entries = foldMap annotLegendTest trackData.annotations
