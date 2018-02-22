@@ -480,7 +480,7 @@ runBrowser config = launchAff $ do
 
 
   trackData <- do
-    genes <- traverse (getBedGenes cSys) (Just "./mouse.json")
+    genes <- traverse (getBedGenes cSys) config.urls.genes
     gwas  <- traverse (getGWAS  cSys) config.urls.gwas
     rawAnnotations <-
       traverse (getAnnotations cSys) config.urls.annotations

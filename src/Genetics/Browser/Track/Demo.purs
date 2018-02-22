@@ -4,6 +4,7 @@ import Prelude
 
 import Color (Color, black)
 import Color.Scheme.Clrs (aqua, blue, navy, red, teal)
+import Color.Scheme.X11 (lightgrey)
 import Control.Coroutine (Producer, Transformer, transform, ($~), (~~))
 import Control.Monad.Aff (Aff, throwError)
 import Control.Monad.Eff.Exception (error)
@@ -109,8 +110,8 @@ bedDraw gene = inj _range \w ->
   let (Pair l r) = featureInterval gene
       glyphW = unwrap $ (r - l) / gene.frameSize
       rect = rectangle 0.0 0.0 (w * glyphW) 20.0
-      out  = outlined (outlineColor aqua <> lineWidth 1.0) rect
-      fill = filled   (fillColor teal) rect
+      out  = outlined (outlineColor black <> lineWidth 1.0) rect
+      fill = filled   (fillColor lightgrey) rect
 
   in { drawing: out <> fill, width: w * glyphW }
 
