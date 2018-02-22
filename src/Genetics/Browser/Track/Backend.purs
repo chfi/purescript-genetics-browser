@@ -3,6 +3,7 @@ module Genetics.Browser.Track.Backend where
 import Prelude
 
 import Color (Color, black, white)
+import Color.Scheme.Clrs (red)
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
@@ -193,16 +194,12 @@ type BatchedTrack = Array CanvasBatchGlyph
 
 type CanvasReadyDrawing = Drawing
 
-type BrowserTrack = Canvas.Dimensions
-                 -> Pair BigInt
-                 -> CanvasReadyDrawing
-
-
 horRulerTrack :: forall r.
                  { min :: Number, max :: Number, sig :: Number | r }
               -> Color
-              -> BrowserTrack
-horRulerTrack {min, max, sig} color f _ = outlined outline rulerDrawing
+              -> Canvas.Dimensions
+              -> Drawing
+horRulerTrack {min, max, sig} color f = outlined outline rulerDrawing
   where normY = (sig - min) / (max - min)
         y = f.height - (normY * f.height)
         outline = outlineColor color
@@ -225,22 +222,6 @@ chrLabelTrack cs cdim =
                     , verPos: Normalized (0.05) }
 
   in mapWithIndex (\i _ -> [mkLabel i]) $ cs ^. _Segments
-
---               -> RelativeUIComponent
--- chrLabelTrack cs = unsafeCoerce unit
--- chrLabelTrack cs = drawRelativeUI cs (Map.fromFoldable results)
---   where mkLabel :: ChrId -> NormalizedGlyph
---         mkLabel chr = { drawing: inj _point $ chrText chr
---                       , horPos:  inj _point $ Normalized (0.5)
---                       , verPos: Normalized (0.05) }
-
---         font' = font sansSerif 12 mempty
-
---         chrText :: ChrId -> Drawing
---         chrText chr = Drawing.text font' zero zero (fillColor black) (unwrap chr)
-
---         results :: Array _
---         results = map (\x -> Tuple zero [mkLabel (x^._Index)]) $ cs^._BrowserIntervals
 
 
 -- boxesTrack :: Number
@@ -496,15 +477,27 @@ rescaleNormSingleGlyphs height seg =
   map (renderNormalized1 height seg)
 
 
+
+withPixelSegments :: forall r m.
+                     Monoid m
+                  => CoordSys ChrId BigInt
+                  -> { width :: Number | r }
+                  -> Pair BigInt
+                  -> (ChrId -> Pair Number -> m)
+                  -> m
+withPixelSegments cs cdim bView =
+  let scale = { screenWidth: cdim.width
+              , viewWidth: pairSize bView }
+  in flip foldMapWithIndex (scaledSegments cs scale)
+
+
+
 renderNormalizedTrack :: CoordSys ChrId BigInt
                       -> Canvas.Dimensions
                       -> Pair BigInt
                       -> Map ChrId (Either
                                       (BatchGlyph (Normalized Point))
                                       (Array NormalizedGlyph))
-                      -- -> Map ChrId (Either
-                      --                 (BatchGlyph Point)
-                      --                 (Array SingleGlyph))
                       -- TODO concatting the segments with array is just lazy but works for now
                       --      optimally, a whole track should be one or the other type of glyph
                       -> Array (Either
@@ -561,7 +554,10 @@ browser cs cdim padding ui inputTracks =
                  (drawLegend ui.legend height)
 
 
-      fixedUI = vScale <> legend
+      ruler   = Drawing.translate ui.vscale.width zero
+                $ horRulerTrack ui.vscale red trackCanvas
+
+      fixedUI = ruler <> vScale <> legend
 
       normTracks :: List (Map ChrId
                           (Either (BatchGlyph (Normalized Point))
@@ -571,14 +567,26 @@ browser cs cdim padding ui inputTracks =
       tracks :: Pair BigInt -> List (Array (Either (BatchGlyph Point) (Array SingleGlyph)))
       tracks v = (renderNormalizedTrack cs trackCanvas v) <$> normTracks
 
-      -- chrLabels = chrLabelTrack cs trackCanvas
-      -- ruler     = horRulerTrack ui.vscale red trackCanvas
+
+
+      renderUIElement :: Map ChrId (Array NormalizedGlyph)
+                      -> ChrId -> Pair Number -> Array SingleGlyph
+      renderUIElement m k s
+          = fold $ rescaleNormSingleGlyphs cdim.height s
+                <$> (Map.lookup k m)
+
+      drawUI :: Pair BigInt -> (ChrId -> Pair Number -> (Array _)) -> Drawing
+      drawUI v = foldMap f <<< withPixelSegments cs cdim v
+        where f {drawing, point} = Drawing.translate point.x point.y drawing
+
+      chrLabels :: _
+      chrLabels = renderUIElement $ chrLabelTrack cs trackCanvas
       -- boxes     = boxesTrack height cs trackCanvas
 
-      -- relativeUI = chrLabels
-      --           <> translate 0.0 padding.vertical <<< (ruler <> boxes)
+      relativeUI :: Pair BigInt -> Drawing
+      relativeUI v =  drawUI v chrLabels
 
   in { tracks
-     , relativeUI: mempty
+     , relativeUI
      , fixedUI
      }

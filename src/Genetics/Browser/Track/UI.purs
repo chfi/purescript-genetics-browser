@@ -303,6 +303,8 @@ renderLoop cSys browser trackDisplayWidth canvases state = forever do
     =<< tryTakeVar state.renderFiber
 
   let scale = BigInt.toNumber (pairSize vState.visible) / trackDisplayWidth
+      (Pair l _ ) = vState.visible
+      offset = BigInt.toNumber l / scale
       tracks = browser.tracks vState.visible
 
   liftEff do
@@ -313,7 +315,15 @@ renderLoop cSys browser trackDisplayWidth canvases state = forever do
   liftEff $ do
     trackCtx   <- getContext2D canvases.track
     overlayCtx <- getContext2D canvases.overlay
-    Drawing.render trackCtx $ browser.relativeUI vState.visible
+
+    -- Shift canvas so we render to the visible part
+    -- this shit ugly af tho, all of this gotta get redone~~
+
+    void $ Canvas.withContext trackCtx do
+      void $ Canvas.translate
+        { translateX: (-offset), translateY: zero } trackCtx
+      Drawing.render trackCtx $ browser.relativeUI vState.visible
+
     Drawing.render overlayCtx browser.fixedUI
 
   -- wait until UI has been clicked, view scrolled, etc.

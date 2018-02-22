@@ -353,8 +353,8 @@ basicRenderers s = { gwas:        batchPointRenderer s (gwasDraw navy)
 annotLegendEntry :: forall r. Annot r -> LegendEntry
 annotLegendEntry a =
   if (String.length a.name) `mod` 2 == 0
-    then mkIcon blue "even length name"
-    else mkIcon red  "odd length name"
+    then mkIcon blue "even name"
+    else mkIcon red  "odd name"
 
 
 annotLegendTest :: forall f r.
