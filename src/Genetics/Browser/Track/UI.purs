@@ -3,15 +3,12 @@ module Genetics.Browser.Track.UI where
 import Prelude
 
 import Color (black)
-import Control.Coroutine (Consumer, Process, Producer, connect, runProcess, ($$))
+import Control.Coroutine (Consumer, Process, runProcess, ($$))
 import Control.Coroutine as Co
-import Control.Monad.Aff (Aff, Fiber, Milliseconds(..), delay, finally, forkAff, killFiber, launchAff, launchAff_)
-import Control.Monad.Aff as Aff
-import Control.Monad.Aff.AVar (AVar, AVarStatus(..), makeEmptyVar, makeVar, putVar, takeVar, tryTakeVar)
-import Control.Monad.Aff.AVar as Aff
+import Control.Monad.Aff (Aff, Fiber, Milliseconds, delay, finally, forkAff, killFiber, launchAff, launchAff_)
+import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, readVar, takeVar, tryTakeVar)
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Eff.Uncurried (EffFn4, runEffFn4)
 import Control.Monad.Error.Class (throwError)
@@ -46,7 +43,6 @@ import Data.Pair (Pair(..))
 import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
-import FRP.Event (Event)
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Demo (BedFeature, GWASFeature, Annot, annotLegendTest, demoTracksBed, getAnnotations, getBedGenes, getGWAS, produceAnnots, produceGWAS, produceGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
@@ -119,7 +115,7 @@ instance showUpdateView :: Show UpdateView where
     -- TODO idk if this instance makes sense??? whatevs
 instance semigroupUpdateView :: Semigroup UpdateView where
   append (ScrollView x1) (ScrollView x2) = ScrollView (x1 + x2)
-  append (ZoomView s1) (ZoomView s2) = ZoomView (s1 + s2)
+  append (ZoomView s1)   (ZoomView s2)   = ZoomView   (s1 * s2)
   append _ y = y
 
 instance monoidUpdateView :: Monoid UpdateView where
@@ -129,7 +125,7 @@ updateViewFold :: UpdateView
                -> ViewRange
                -> ViewRange
 updateViewFold uv iv@(Pair l r) = case uv of
-  ZoomView   x -> iv `scalePairBy`  x
+  ZoomView   x -> iv `scalePairBy`     x
   ScrollView x -> iv `translatePairBy` x
   ModView f    -> f iv
 
@@ -164,16 +160,18 @@ dragScroll width cnv av =
   in canvasDrag f cnv.overlay
 
 
+foreign import canvasWheelCBImpl :: forall eff.
+                                    CanvasElement
+                                 -> (Number -> Eff eff Unit)
+                                 -> Eff eff Unit
 
-foreign import canvasWheelEvent :: CanvasElement -> Event Number
-
-scrollZoomEvent :: CanvasElement -> Event UpdateView
-scrollZoomEvent el = map (ZoomView <<< f) $ canvasWheelEvent el
-  where f :: Number -> Number
-        f dY = let d' = 10000.0
-                   n = dY * d'
-                   d = d' * 100.0
-               in n / d
+wheelZoom :: Number
+           -> AVar UpdateView
+           -> CanvasElement
+           -> Eff _ Unit
+wheelZoom scale av cv =
+  canvasWheelCBImpl cv \dY ->
+    queueCmd av $ ZoomView $ 1.0 + (scale * dY)
 
 
 -- TODO differentiate scroll buffer & rendering buffer
@@ -300,35 +298,19 @@ type BrowserState = { visible  :: ViewRange }
                     -- , rendered :: ViewRange }
 
 
-
-updateViewTimed :: ViewRange
-                -> Milliseconds
-                -> AVar ViewRange
-                -> UpdateView
-                -> Aff _ Unit
-updateViewTimed (Pair limL limR) timeout av cmd = do
-  delay timeout
-  vr <- takeVar av
-      -- update view using received cmd, limiting view to provided boundaries
-  let (Pair l' r') = updateViewFold cmd vr
-      -- arbitrary minimum of 400 units shown, so things don't go too crazy when zoomed in
-      vr' = Pair (max limL l')
-                 (min (max r' (l' + BigInt.fromInt 400))
-                      limR)
-  putVar vr' av
-
-
 viewMachine :: forall r.
                CoordSys _ _
-            -> { viewRangeState :: AVar ViewRange
+            -> Milliseconds
+            -> { viewRange :: AVar ViewRange
                , viewCmds :: AVar UpdateView | r }
             -> AVar Unit
             -> Aff _ Unit
-viewMachine cs { viewRangeState, viewCmds } ready = do
+viewMachine cs timeout { viewRange, viewCmds } ready = do
 
   curCmdVar <- makeVar mempty
 
-  let viewLimit = Pair zero (cs^._TotalSize)
+  let limL = zero
+      limR = cs ^. _TotalSize
 
       loop' updater = do
         cmd <- takeVar viewCmds
@@ -339,19 +321,26 @@ viewMachine cs { viewRangeState, viewCmds } ready = do
         let cmd' = curCmd <> cmd
         putVar cmd' curCmdVar
 
-        liftEff $ do
-          log $ show curCmd <> " <> " <> show cmd <> " = " <> show cmd'
-
         updater' <- forkAff do
-                      updateViewTimed viewLimit (wrap 500.0) viewRangeState cmd'
+            delay timeout
+            vr <- takeVar viewRange
+                -- update view using received cmd, limiting view to provided boundaries
+            let (Pair l' r') = updateViewFold cmd' vr
+                -- arbitrary minimum of 400 units shown, so things don't go too crazy when zoomed in
+                -- TODO bake into updateViewFold or handle at a better place/in a nicer way
+                vr' = Pair (max limL l')
+                           (min (max r' (l' + BigInt.fromInt 400))
+                                limR)
 
-                      putVar unit ready
-
-                      takeVar curCmdVar *> putVar mempty curCmdVar
+            putVar vr' viewRange
+            putVar unit ready
+            takeVar curCmdVar *> putVar mempty curCmdVar
 
         loop' updater'
 
   loop' (pure unit)
+
+
 
 
 renderLoop :: CoordSys _ _
@@ -360,25 +349,27 @@ renderLoop :: CoordSys _ _
               , fixedUI :: Drawing }
            -> Number
            -> BrowserCanvas
-           -> { viewState   :: AVar BrowserState
+           -> { viewRange   :: AVar ViewRange
               , viewCmds    :: AVar UpdateView
-              , renderFiber :: AVar (Fiber _ Unit)}
+              , renderFiber :: AVar (Fiber _ Unit) }
+           -> AVar Unit
            -> Aff _ Unit
-renderLoop cSys browser trackDisplayWidth canvases state = forever do
+renderLoop cSys browser trackDisplayWidth canvases state ready = forever do
 
-  vState <- takeVar state.viewState
+  _ <- takeVar ready
 
+  visible <- readVar state.viewRange
   -- if there's a rendering fiber running, we kill it
   traverse_ (killFiber (error "Resetting renderer"))
     =<< tryTakeVar state.renderFiber
 
-  let scale = BigInt.toNumber (pairSize vState.visible) / trackDisplayWidth
-      (Pair l _ ) = vState.visible
+  let scale = BigInt.toNumber (pairSize visible) / trackDisplayWidth
+      (Pair l _ ) = visible
       offset = BigInt.toNumber l / scale
-      tracks = browser.tracks vState.visible
+      tracks = browser.tracks visible
 
   -- fork a new renderFiber
-  renderFiber <- forkAff $ renderGlyphs vState.visible scale tracks canvases
+  renderFiber <- forkAff $ renderGlyphs visible scale tracks canvases
   putVar renderFiber state.renderFiber
 
   liftEff $ do
@@ -390,22 +381,9 @@ renderLoop cSys browser trackDisplayWidth canvases state = forever do
     void $ Canvas.withContext trackCtx do
       void $ Canvas.translate
         { translateX: (-offset), translateY: zero } trackCtx
-      Drawing.render trackCtx $ browser.relativeUI vState.visible
+      Drawing.render trackCtx $ browser.relativeUI visible
 
     Drawing.render overlayCtx browser.fixedUI
-
-  -- wait until UI has been clicked, view scrolled, etc.
-  cmd <- takeVar state.viewCmds
-
-      -- update view using received cmd, limiting view to coordsys
-  let (Pair l' r') = updateViewFold cmd vState.visible
-      newState =
-        Pair (max zero l')
-             (min (max r'  -- arbitrary minimum of 400 units shown, so things don't go too crazy when zoomed in
-                      (l' + BigInt.fromInt 400))
-                  (cSys^._TotalSize))
-
-  putVar { visible: newState } state.viewState
 
 
 renderGlyphs :: Pair BigInt
@@ -415,7 +393,6 @@ renderGlyphs :: Pair BigInt
              -> Aff _ Unit
 renderGlyphs vw@(Pair l _) viewScale ts canvases = do
 
-
   -- Blank out the track canvas and get its context
   trackCtx <- liftEff do
     {width, height} <- Canvas.getCanvasDimensions canvases.track
@@ -423,8 +400,6 @@ renderGlyphs vw@(Pair l _) viewScale ts canvases = do
     Drawing.render trackCtx
       $ filled (fillColor white) $ rectangle 0.0 0.0 width height
     pure trackCtx
-
-
 
   let offset = BigInt.toNumber l / viewScale
       vw'@(Pair pxL pxR) = map (\x -> (BigInt.toNumber x / viewScale)) vw
@@ -449,7 +424,6 @@ renderGlyphs vw@(Pair l _) viewScale ts canvases = do
   finally (shiftView offset) do
 
     for_ ts \track -> do
-
       for_ track \t -> do
         case t of
           Left {drawing, points}  -> do
@@ -571,8 +545,9 @@ runBrowser config = launchAff $ do
     btnScroll 0.05 viewCmds
     btnZoom   0.10 viewCmds
     dragScroll trackWidth bCanvas viewCmds
+    wheelZoom 0.02 viewCmds bCanvas.overlay
 
-  viewState <- makeVar { visible: initialView }
+  viewRange <- makeVar initialView
 
   renderFiber <- makeEmptyVar
 
@@ -584,10 +559,12 @@ runBrowser config = launchAff $ do
                , min: s.min, max: s.max, sig: s.sig }
       tracks = demoTracksBed vscale trackData
       mainBrowser = browser cSys browserDimensions config.padding {legend, vscale} tracks
+      viewTimeout = wrap 100.0
 
-  _ <- forkAff $ renderLoop cSys mainBrowser trackWidth bCanvas { viewCmds, viewState, renderFiber }
+  viewReady <- makeVar unit
 
-
+  _ <- forkAff $ viewMachine cSys viewTimeout {viewRange, viewCmds} viewReady
+  _ <- forkAff $ renderLoop cSys mainBrowser trackWidth bCanvas { viewCmds, viewRange, renderFiber } viewReady
 
   pure unit
 

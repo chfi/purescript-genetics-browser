@@ -69,11 +69,6 @@ exports.newCanvas = function(size) {
     };
 };
 
-var evToPoint = function(e) {
-    return { x: e.clientX,
-             y: e.clientY
-           };
-}
 
 exports.canvasDragImpl = function(canvas) {
     return function(cb) {
@@ -114,15 +109,14 @@ exports.setViewUI = function(contents) {
 };
 
 
-exports.canvasWheelEvent = function(canvas) {
-    return function(sub) {
-        var cb = function(e) {
-            sub(e.deltaY);
-        };
-
-        canvas.addEventListener("wheel", cb);
+exports.canvasWheelCBImpl = function(canvas) {
+    return function(cb) {
         return function() {
-            canvas.removeEventListener("wheel", cb);
+            var evCb = function(e) {
+                cb(e.deltaY)();
+            };
+
+            canvas.addEventListener("wheel", evCb);
         }
     };
 };
