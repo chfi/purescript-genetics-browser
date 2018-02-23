@@ -40,15 +40,11 @@ import Network.HTTP.Affjax as Affjax
 import Unsafe.Coerce (unsafeCoerce)
 
 
-
-
 type BedFeature = Feature ( thickRange :: Pair Bp
                           , blocks :: Array (Pair Bp)
                           , geneId :: String
                           , geneName :: String
                           , chrId :: ChrId )
-
-
 
 
 bedToFeature :: CoordSys ChrId BigInt -> ParsedLine -> Maybe BedFeature
@@ -116,13 +112,12 @@ bedDraw gene = inj _range \w ->
   in { drawing: out <> fill, width: w * glyphW }
 
 
-
 bedGeneRenderer :: Renderer BedFeature
 bedGeneRenderer =
   inj _single
       { draw: bedDraw
       , horPlace
-      , verPlace: const (Normalized 0.5) }
+      , verPlace: const (Normalized 0.25) }
 
 
 

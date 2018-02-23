@@ -211,17 +211,19 @@ scaledSegments cs scale = (map <<< map) (scaleToScreen scale) $ cs ^. _Segments
 -- | They're concretized to `BigInt` for convenience; in truth they would
 -- | probably fit better in the UI module.
 
--- | Translate an BigInt pair to the right by `x` multiples of its size.
+-- | Translate an BigInt pair to the right by `x` times its size.
 translatePairBy :: Pair BigInt
                 -> Number
                 -> Pair BigInt
 translatePairBy p x = (_ + delta) <$> p
   where delta = BigInt.fromNumber $ x * (BigInt.toNumber $ pairSize p)
 
--- | Scale an Int pair by changing its radius to be `x` times the pair size.
+-- | Scale an Int pair by changing its length to be `x` times the pair size.
 scalePairBy :: Pair BigInt
             -> Number
             -> Pair BigInt
-scalePairBy p x = BigInt.fromNumber <$> Pair (l' - delta) (r' + delta)
-  where p'@(Pair l' r') = BigInt.toNumber <$> p
-        delta = ((pairSize p' * x) - (pairSize p')) / 2.0
+scalePairBy p x = result
+  where x' = max zero x
+        p'@(Pair l' r') = BigInt.toNumber <$> p
+        delta = ((pairSize p' * x') - (pairSize p')) / 2.0
+        result = BigInt.fromNumber <$> Pair (l' - delta) (r' + delta)

@@ -113,7 +113,12 @@ exports.canvasWheelCBImpl = function(canvas) {
     return function(cb) {
         return function() {
             var evCb = function(e) {
-                cb(e.deltaY)();
+                // hack to be sorta-compatible with both line and pixel modes
+                if (e.deltaMode === 0) {
+                    cb(e.deltaY * 0.1)();
+                } else {
+                    cb(e.deltaY)();
+                }
             };
 
             canvas.addEventListener("wheel", evCb);
