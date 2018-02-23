@@ -5,8 +5,10 @@ import Prelude
 import Color (black)
 import Control.Coroutine (Consumer, Process, Producer, connect, runProcess, ($$))
 import Control.Coroutine as Co
-import Control.Monad.Aff (Aff, Fiber, delay, finally, forkAff, killFiber, launchAff, launchAff_)
-import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, takeVar, tryTakeVar)
+import Control.Monad.Aff (Aff, Fiber, Milliseconds(..), delay, finally, forkAff, killFiber, launchAff, launchAff_)
+import Control.Monad.Aff as Aff
+import Control.Monad.Aff.AVar (AVar, AVarStatus(..), makeEmptyVar, makeVar, putVar, takeVar, tryTakeVar)
+import Control.Monad.Aff.AVar as Aff
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
@@ -106,6 +108,22 @@ data UpdateView =
     ScrollView Number
   | ZoomView Number
   | ModView (ViewRange -> ViewRange)
+
+
+instance showUpdateView :: Show UpdateView where
+  show (ScrollView x) = "(Scroll by " <> show x <> ")"
+  show (ZoomView s) = "(Zoom by " <> show s <> ")"
+  show _ = "(ModView)"
+
+
+    -- TODO idk if this instance makes sense??? whatevs
+instance semigroupUpdateView :: Semigroup UpdateView where
+  append (ScrollView x1) (ScrollView x2) = ScrollView (x1 + x2)
+  append (ZoomView s1) (ZoomView s2) = ZoomView (s1 + s2)
+  append _ y = y
+
+instance monoidUpdateView :: Monoid UpdateView where
+  mempty = ModView id
 
 updateViewFold :: UpdateView
                -> ViewRange
@@ -282,6 +300,60 @@ type BrowserState = { visible  :: ViewRange }
                     -- , rendered :: ViewRange }
 
 
+
+updateViewTimed :: ViewRange
+                -> Milliseconds
+                -> AVar ViewRange
+                -> UpdateView
+                -> Aff _ Unit
+updateViewTimed (Pair limL limR) timeout av cmd = do
+  delay timeout
+  vr <- takeVar av
+      -- update view using received cmd, limiting view to provided boundaries
+  let (Pair l' r') = updateViewFold cmd vr
+      -- arbitrary minimum of 400 units shown, so things don't go too crazy when zoomed in
+      vr' = Pair (max limL l')
+                 (min (max r' (l' + BigInt.fromInt 400))
+                      limR)
+  putVar vr' av
+
+
+viewMachine :: forall r.
+               CoordSys _ _
+            -> { viewRangeState :: AVar ViewRange
+               , viewCmds :: AVar UpdateView | r }
+            -> AVar Unit
+            -> Aff _ Unit
+viewMachine cs { viewRangeState, viewCmds } ready = do
+
+  curCmdVar <- makeVar mempty
+
+  let viewLimit = Pair zero (cs^._TotalSize)
+
+      loop' updater = do
+        cmd <- takeVar viewCmds
+
+        killFiber (error "Resetting view update") updater
+
+        curCmd <- takeVar curCmdVar
+        let cmd' = curCmd <> cmd
+        putVar cmd' curCmdVar
+
+        liftEff $ do
+          log $ show curCmd <> " <> " <> show cmd <> " = " <> show cmd'
+
+        updater' <- forkAff do
+                      updateViewTimed viewLimit (wrap 500.0) viewRangeState cmd'
+
+                      putVar unit ready
+
+                      takeVar curCmdVar *> putVar mempty curCmdVar
+
+        loop' updater'
+
+  loop' (pure unit)
+
+
 renderLoop :: CoordSys _ _
            -> { tracks     :: Pair BigInt -> List (Array RenderedTrack)
               , relativeUI :: Pair BigInt -> Drawing
@@ -291,7 +363,7 @@ renderLoop :: CoordSys _ _
            -> { viewState   :: AVar BrowserState
               , viewCmds    :: AVar UpdateView
               , renderFiber :: AVar (Fiber _ Unit)}
-           -> Aff _ _
+           -> Aff _ Unit
 renderLoop cSys browser trackDisplayWidth canvases state = forever do
 
   vState <- takeVar state.viewState
