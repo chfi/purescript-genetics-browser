@@ -245,8 +245,8 @@ mouseChrSizes =
       , Tuple "17"  "94987271"
       , Tuple "18"  "90702639"
       , Tuple "19"  "61431566"
-      , Tuple "X"   "17103129"
-      , Tuple "Y"   "9174469"
+      , Tuple "X"   "171031299"
+      , Tuple "Y"   "91744698"
       ]
 
 
@@ -294,10 +294,6 @@ renderBatch buffer {drawing, points} ctx = do
   runEffFn4 drawImageMany buffer ctx dim points
 
 
-type BrowserState = { visible  :: ViewRange }
-                    -- , rendered :: ViewRange }
-
-
 viewMachine :: forall r.
                CoordSys _ _
             -> Milliseconds
@@ -323,14 +319,18 @@ viewMachine cs timeout { viewRange, viewCmds } ready = do
 
         updater' <- forkAff do
             delay timeout
+
             vr <- takeVar viewRange
                 -- update view using received cmd, limiting view to provided boundaries
             let (Pair l' r') = updateViewFold cmd' vr
                 -- arbitrary minimum of 400 units shown, so things don't go too crazy when zoomed in
                 -- TODO bake into updateViewFold or handle at a better place/in a nicer way
-                vr' = Pair (max limL l')
-                           (min (max r' (l' + BigInt.fromInt 400))
-                                limR)
+                len = r' - l'
+                vr' = case l' < limL, r' > limR of
+                        true, false  -> Pair limL len
+                        false, true  -> Pair (limR - len) limR
+                        true, true   -> Pair limL limR
+                        false, false -> Pair l' r'
 
             putVar vr' viewRange
             putVar unit ready
