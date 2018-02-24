@@ -533,7 +533,7 @@ browser cs cdim padding ui inputTracks =
   let height = cdim.height - 2.0 * padding.vertical
       width  = cdim.width
 
-      trackCanvas = { width: width - ui.vscale.width - ui.legend.width
+      trackCanvas = { width: width - (ui.vscale.width + ui.legend.width)
                     , height }
 
       -- TODO make a type that corresponds to left-of-track and right-of-track to make this dynamic
@@ -575,8 +575,8 @@ browser cs cdim padding ui inputTracks =
           = fold $ rescaleNormSingleGlyphs cdim.height s
                 <$> (Map.lookup k m)
 
-      drawUI :: Pair BigInt -> (ChrId -> Pair Number -> (Array _)) -> Drawing
-      drawUI v = foldMap f <<< withPixelSegments cs cdim v
+      drawTrackUI :: Pair BigInt -> (ChrId -> Pair Number -> (Array _)) -> Drawing
+      drawTrackUI v = foldMap f <<< withPixelSegments cs trackCanvas v
         where f {drawing, point} = Drawing.translate point.x point.y drawing
 
       chrLabels :: _
@@ -584,7 +584,7 @@ browser cs cdim padding ui inputTracks =
       -- boxes     = boxesTrack height cs trackCanvas
 
       relativeUI :: Pair BigInt -> Drawing
-      relativeUI v =  drawUI v chrLabels
+      relativeUI v = drawTrackUI v chrLabels
 
   in { tracks
      , relativeUI
