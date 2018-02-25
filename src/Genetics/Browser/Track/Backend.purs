@@ -89,7 +89,7 @@ type Feature r = Record (FeatureR r)
 
 
 type DrawingR  = ( point :: Drawing
-                 , range :: Number -> { drawing :: Drawing, width :: Number } )
+                 , range :: Number -> { drawing :: Unit -> Drawing, width :: Number } )
 type DrawingV  = Variant DrawingR
 
 type HorPlaceR = ( point :: Normalized Number
@@ -121,7 +121,7 @@ type NormalizedGlyph = { drawing :: Variant DrawingR
 type BatchGlyph c = { drawing :: Drawing
                     , points :: Array c }
 
-type SingleGlyph = { drawing :: Drawing, point :: Point, width :: Number }
+type SingleGlyph = { drawing :: Unit -> Drawing, point :: Point, width :: Number }
 
 type BatchableGlyph = { drawing :: Drawing
                       , points :: Array (Normalized Point) }
@@ -181,13 +181,7 @@ render r as = case_
 type FixedUIComponent    = CanvasReadyDrawing
 type RelativeUIComponent = Pair BigInt -> CanvasReadyDrawing
 
-
--- type Browser = { tracks     :: Array _
---                , relativeUI :: Array RelativeUIComponent
---                , fixedUI    :: Array FixedUIComponent }
-
-
-type CanvasSingleGlyph = { drawing :: Drawing, point :: Point }
+type CanvasSingleGlyph = { drawing :: Unit -> Drawing, point :: Point }
 type CanvasBatchGlyph  = { drawing :: Drawing, points :: Array Point }
 
 type BatchedTrack = Array CanvasBatchGlyph
@@ -435,10 +429,10 @@ horPlaceOnSegment segmentPixels o =
 finalizeNormDrawing :: forall r.
                        Pair Number
                     -> { drawing :: DrawingV | r }
-                    -> { drawing :: Drawing, width :: Number }
+                    -> { drawing :: Unit -> Drawing, width :: Number }
 finalizeNormDrawing seg o =
     case_
-  # onMatch { point: \x -> { drawing: x, width: 1.0 }
+  # onMatch { point: \x -> { drawing: \_ -> x, width: 1.0 }
             , range: (_ $ pairSize seg) }
   $ o.drawing
 
@@ -577,7 +571,7 @@ browser cs cdim padding ui inputTracks =
 
       drawTrackUI :: Pair BigInt -> (ChrId -> Pair Number -> (Array _)) -> Drawing
       drawTrackUI v = foldMap f <<< withPixelSegments cs trackCanvas v
-        where f {drawing, point} = Drawing.translate point.x point.y drawing
+        where f {drawing, point} = Drawing.translate point.x point.y (drawing unit)
 
       chrLabels :: _
       chrLabels = renderUIElement $ chrLabelTrack cs trackCanvas

@@ -436,7 +436,7 @@ renderGlyphs vw@(Pair l _) viewScale ts canvases = do
             liftEff $ foreachE gs' \s ->
               Drawing.render trackCtx
                 $ Drawing.translate s.point.x s.point.y
-                $ s.drawing
+                $ s.drawing unit
 
         -- delay to give the UI thread a moment
         delay (wrap 3.0)
