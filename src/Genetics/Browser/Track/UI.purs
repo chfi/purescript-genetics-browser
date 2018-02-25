@@ -369,22 +369,30 @@ renderLoop cSys browser trackDisplayWidth canvases state ready = forever do
       tracks = browser.tracks visible
 
   -- fork a new renderFiber
-  renderFiber <- forkAff $ renderGlyphs visible scale tracks canvases
-  putVar renderFiber state.renderFiber
+  renderFiber <- forkAff do
 
-  liftEff $ do
-    trackCtx   <- getContext2D canvases.track
-    overlayCtx <- getContext2D canvases.overlay
+  -- Blank out the track canvas and get its context
+    trackCtx   <- liftEff $ getContext2D canvases.track
 
-    -- Shift canvas so we render to the visible part
-    -- this shit ugly af tho, all of this gotta get redone~~
-    void $ Canvas.withContext trackCtx do
-      void $ Canvas.translate
-        { translateX: (-offset), translateY: zero } trackCtx
+    let shiftView x =
+          liftEff $ void $ Canvas.translate { translateX: x, translateY: zero } trackCtx
+
+    liftEff do
+      overlayCtx <- getContext2D canvases.overlay
+      Drawing.render overlayCtx browser.fixedUI
+
+      trackCtx <- getContext2D canvases.track
+      {width, height} <- Canvas.getCanvasDimensions canvases.track
+      Drawing.render trackCtx
+        $ filled (fillColor white) $ rectangle 0.0 0.0 width height
+
+      shiftView (-offset)
       Drawing.render trackCtx $ browser.relativeUI visible
 
-    Drawing.render overlayCtx browser.fixedUI
+    finally (liftEff $ shiftView offset) do
+      renderGlyphs visible scale tracks canvases
 
+  putVar renderFiber state.renderFiber
 
 renderGlyphs :: Pair BigInt
              -> Number
@@ -392,18 +400,7 @@ renderGlyphs :: Pair BigInt
              -> BrowserCanvas
              -> Aff _ Unit
 renderGlyphs vw@(Pair l _) viewScale ts canvases = do
-
-  -- Blank out the track canvas and get its context
-  trackCtx <- liftEff do
-    {width, height} <- Canvas.getCanvasDimensions canvases.track
-    trackCtx <- getContext2D canvases.track
-    Drawing.render trackCtx
-      $ filled (fillColor white) $ rectangle 0.0 0.0 width height
-    pure trackCtx
-
-  let offset = BigInt.toNumber l / viewScale
-      vw'@(Pair pxL pxR) = map (\x -> (BigInt.toNumber x / viewScale)) vw
-
+  let vw'@(Pair pxL pxR) = map (\x -> (BigInt.toNumber x / viewScale)) vw
   -- Predicates to filter out glyphs that would not be visible on screen
      -- Hack to render more of the canvas just to be sure
       pxL' = pxL - (pxR - pxL)
@@ -414,32 +411,25 @@ renderGlyphs vw@(Pair l _) viewScale ts canvases = do
              && s.point.x - s.width > pxL'
              && s.point.x + s.width < pxR'
 
-      shiftView x =
-        void $ liftEff $ Canvas.translate { translateX: x, translateY: zero } trackCtx
+  trackCtx <- liftEff $ Canvas.getContext2D canvases.track
 
-  -- Shift canvas so we render to the visible part
-  shiftView (-offset)
+  for_ ts \track -> do
+    for_ track \t -> do
+      case t of
+        Left {drawing, points}  -> do
+          let points' = filter predB points
+          liftEff $
+            renderBatch canvases.buffer {drawing, points: points'} trackCtx
 
-  -- Make sure we unshift even if renderer is killed
-  finally (shiftView offset) do
+        Right gs -> do
+          let gs' = filter predS gs
+          liftEff $ foreachE gs' \s -> do
+            Drawing.render trackCtx
+              $ Drawing.translate s.point.x s.point.y
+              $ s.drawing unit
 
-    for_ ts \track -> do
-      for_ track \t -> do
-        case t of
-          Left {drawing, points}  -> do
-            let points' = filter predB points
-            liftEff $
-              renderBatch canvases.buffer {drawing, points: points'} trackCtx
-
-          Right gs -> do
-            let gs' = filter predS gs
-            liftEff $ foreachE gs' \s ->
-              Drawing.render trackCtx
-                $ Drawing.translate s.point.x s.point.y
-                $ s.drawing unit
-
-        -- delay to give the UI thread a moment
-        delay (wrap 3.0)
+      -- delay to give the UI thread a moment
+      delay (wrap 3.0)
 
 
 -- TODO this could almost certainly be done better
