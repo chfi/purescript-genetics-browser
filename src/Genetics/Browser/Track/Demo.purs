@@ -4,17 +4,21 @@ import Prelude
 
 import Color (Color, black)
 import Color.Scheme.Clrs (aqua, blue, navy, red, teal)
-import Color.Scheme.X11 (lightgrey)
+import Color.Scheme.X11 (darkgrey, lightgrey)
 import Control.Coroutine (Producer, Transformer, transform, ($~), (~~))
 import Control.Monad.Aff (Aff, throwError)
+import Control.Monad.Eff (foreachE)
+import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
+import Control.MonadPlus (guard)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Exists (Exists, mkExists)
 import Data.Filterable (filterMap, filtered)
-import Data.Foldable (class Foldable)
+import Data.Foldable (class Foldable, foldMap)
 import Data.Lens (to, view, (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
@@ -52,19 +56,23 @@ bedToFeature cs pl = do
   seg@(Pair offset _ ) <- cs ^? _Segments <<< ix pl.chrom
 
   -- TODO validate ranges maybe, idk
-  let frameSize = wrap $ BigInt.toNumber $ pairSize seg
+  let toBp :: BigInt -> Bp
+      toBp = wrap <<< BigInt.toNumber
 
-      helper :: BigInt -> Bp
-      helper = wrap <<< BigInt.toNumber <<< (_ + offset)
+      frameSize = toBp $ pairSize seg
       position = inj _range
-                 $ helper <$> Pair pl.chromStart pl.chromEnd
-      thickRange = helper <$> Pair pl.thickStart pl.thickEnd
+                 $ toBp  <$> Pair pl.chromStart pl.chromEnd
+      thickRange = toBp  <$> Pair pl.thickStart pl.thickEnd
+
+      blocks = Array.zipWith
+                 (\start size -> map toBp (Pair start size))
+                 pl.blockStarts pl.blockSizes
 
 
   pure { position
        , frameSize
        , thickRange
-       , blocks: []
+       , blocks
        , geneId: pl.geneId
        , geneName: pl.geneName
        , chrId: pl.chrom
@@ -104,12 +112,27 @@ bedDraw :: BedFeature
         -> DrawingV
 bedDraw gene = inj _range \w ->
   let (Pair l r) = featureInterval gene
-      glyphW = unwrap $ (r - l) / gene.frameSize
-      rect = rectangle 0.0 0.0 (w * glyphW) 20.0
-      out  = outlined (outlineColor black <> lineWidth 1.0) rect
-      fill = filled   (fillColor lightgrey) rect
+      toLocal x = w * (unwrap $ x / gene.frameSize)
 
-  in { drawing: out <> fill, width: w * glyphW }
+      width = toLocal (r - l)
+
+      exon block =
+        let p@(Pair exL' size') = toLocal <$> block
+            s = rectangle exL' zero size' 40.0
+        in (outlined (outlineColor black <> lineWidth 1.0) s)
+        <> (filled (fillColor lightgrey) s)
+
+      introns _ =
+        let s = rectangle 0.0 18.0 width 2.0
+        in outlined (outlineColor black <> lineWidth 3.0) s
+        <> filled   (fillColor darkgrey) s
+
+      drawing =
+        if width < one
+        then mempty
+        else \_ -> introns unit <> foldMap exon gene.blocks
+
+  in { drawing, width }
 
 
 bedGeneRenderer :: Renderer BedFeature
@@ -117,7 +140,7 @@ bedGeneRenderer =
   inj _single
       { draw: bedDraw
       , horPlace
-      , verPlace: const (Normalized 0.25) }
+      , verPlace: const (Normalized 0.10) }
 
 
 
