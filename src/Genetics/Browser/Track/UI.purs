@@ -44,7 +44,7 @@ import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Demo (BedFeature, GWASFeature, Annot, annotLegendTest, demoTracksBed, getAnnotations, getBedGenes, getGWAS, produceAnnots, produceGWAS, produceGenes)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (CoordSys, _TotalSize, coordSys, pairSize, scalePairBy, translatePairBy)
 import Graphics.Canvas (CanvasElement, Context2D, getContext2D)
@@ -517,6 +517,7 @@ runBrowser config = launchAff $ do
       legendWidth = 120.0
       trackWidth = width - (vScaleWidth + legendWidth)
 
+
   bCanvas <- do
     doc <- liftEff $ DOM.htmlDocumentToDocument
            <$> (DOM.document =<< DOM.window)
@@ -531,8 +532,11 @@ runBrowser config = launchAff $ do
           , translateY: zero }
 
 
+  let cSys :: CoordSys ChrId BigInt
+      cSys = coordSys mouseChrSizes
+
   trackData <- do
-    genes <- traverse (getBedGenes cSys) config.urls.genes
+    genes <- traverse (getGenes cSys) config.urls.genes
     gwas  <- traverse (getGWAS  cSys) config.urls.gwas
     rawAnnotations <-
       traverse (getAnnotations cSys) config.urls.annotations
@@ -543,8 +547,6 @@ runBrowser config = launchAff $ do
                        <$> gwas <*> rawAnnotations
 
     pure { genes, gwas, annotations }
-
-
 
   let initialView :: Pair BigInt
       initialView = Pair zero (cSys^._TotalSize)
@@ -566,7 +568,7 @@ runBrowser config = launchAff $ do
       s = config.score
       vscale = { width: vScaleWidth, color: black
                , min: s.min, max: s.max, sig: s.sig }
-      tracks = demoTracksBed vscale trackData
+      tracks = demoTracks vscale trackData
       mainBrowser = browser cSys browserDimensions config.padding {legend, vscale} tracks
       viewTimeout = wrap 100.0
 

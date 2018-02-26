@@ -3,13 +3,10 @@ module Genetics.Browser.Track.Demo where
 import Prelude
 
 import Color (Color, black)
-import Color.Scheme.Clrs (aqua, blue, navy, red, teal)
+import Color.Scheme.Clrs (blue, navy, red)
 import Color.Scheme.X11 (darkgrey, lightgrey)
-import Control.Coroutine (Producer, Transformer, transform, ($~), (~~))
+import Control.Coroutine (Producer, transform, ($~), (~~))
 import Control.Monad.Aff (Aff, throwError)
-import Control.Monad.Eff (foreachE)
-import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
 import Control.MonadPlus (guard)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
@@ -19,7 +16,7 @@ import Data.BigInt as BigInt
 import Data.Exists (Exists, mkExists)
 import Data.Filterable (filterMap, filtered)
 import Data.Foldable (class Foldable, foldMap)
-import Data.Lens (to, view, (^?))
+import Data.Lens (view, (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -32,8 +29,7 @@ import Data.Pair (Pair(..))
 import Data.String as String
 import Data.Traversable (traverse)
 import Data.Variant (case_, inj, onMatch)
-import Debug.Trace as Debug
-import Genetics.Browser.Track.Backend (DrawingV, Feature, HPos, LegendEntry, Renderer, Track(Track), VScale, _batch, _point, _range, _single, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend, verPlace)
+import Genetics.Browser.Track.Backend (DrawingV, Feature, LegendEntry, Renderer, Track(Track), VScale, _batch, _point, _range, _single, featureInterval, groupToChrs, horPlace, mkIcon, trackLegend)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize)
@@ -41,7 +37,6 @@ import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineC
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
-import Unsafe.Coerce (unsafeCoerce)
 
 
 type BedFeature = Feature ( thickRange :: Pair Bp
@@ -79,17 +74,13 @@ bedToFeature cs pl = do
        }
 
 
-getBedGenes :: CoordSys ChrId BigInt
+getGenes :: CoordSys ChrId BigInt
             -> String
             -> Aff _ (Map ChrId (Array BedFeature))
-getBedGenes cs url = do
+getGenes cs url = do
   ls <- fetchBed url
 
   let fs = filterMap (bedToFeature cs) ls
-  -- let d = 3000
-  --     n = 10
-  --     fs = Debug.trace ("debugging w/ only " <> show n <> " features") \_ ->
-  --            filterMap (bedToFeature cs) (Array.take n (Array.drop d ls))
 
   pure $ groupToChrs $ fs
 
@@ -143,8 +134,8 @@ bedDraw gene = inj _range \w ->
   in { drawing, width }
 
 
-bedGeneRenderer :: Renderer BedFeature
-bedGeneRenderer =
+geneRenderer :: Renderer BedFeature
+geneRenderer =
   inj _single
       { draw: bedDraw
       , horPlace
@@ -190,16 +181,7 @@ produceAnnots :: CoordSys ChrId _
                   (Map ChrId
                    (Array (Annot ())))
                    (Aff _) Unit)
-produceAnnots cs url = featureProd url $ (map toAnnot <$> (geneJSONParse cs))
-  where toAnnot :: Gene () -> Annot ()
-  -- where toAnnot :: _
-        toAnnot gene = { geneID: gene.geneID
-                       , desc: gene.desc
-                       , position: gene.position
-                       , frameSize: gene.frameSize
-                       , name: gene.name
-                       , chrId: gene.chrId }
-
+produceAnnots cs url = featureProd url $ (annotJSONParse cs)
 
 
 fetchJSON :: forall a.
@@ -225,8 +207,6 @@ gwasDraw color =
       fill = filled (fillColor color) c
   in out <> fill
 
-
-
 scoreVerPlace :: forall r1 r2.
                   { min :: Number, max :: Number | r1 }
                -> Feature (score :: Number | r2)
@@ -236,8 +216,6 @@ scoreVerPlace s x = Normalized $ (x.score - s.min) / (s.max - s.min)
 
 type GWASFeature r = Feature ( score :: Number
                              , chrId :: ChrId | r )
-
-
 
 gemmaJSONParse :: CoordSys ChrId BigInt
                -> Json
@@ -256,21 +234,17 @@ gemmaJSONParse cs j = do
        , chrId }
 
 
-
-type GeneRow r = ( geneID :: String
-                 , desc :: String
-                 , start :: Bp
-                 , end :: Bp
-                 , name :: String
-                 , chrId :: ChrId | r )
-
-type Gene r = Feature (GeneRow r)
+type AnnotRow r = ( geneID :: String
+                   , desc :: String
+                   , name :: String
+                   , chrId :: ChrId | r )
+type Annot r = Feature (AnnotRow r)
 
 
-geneJSONParse :: CoordSys ChrId BigInt
+annotJSONParse :: CoordSys ChrId BigInt
               -> Json
-              -> Maybe (Gene ())
-geneJSONParse cs j = do
+              -> Maybe (Annot ())
+annotJSONParse cs j = do
   obj    <- j ^? _Object
   geneID <- obj ^? ix "Gene stable ID" <<< _String
   desc   <- obj ^? ix "Gene description" <<< _String
@@ -283,52 +257,25 @@ geneJSONParse cs j = do
 
   pure { position: inj _range (Pair start end)
        , frameSize: chrSize
-       , geneID, desc, name, start, end, chrId }
+       , geneID, desc, name, chrId }
 
 
-fetchGeneJSON :: CoordSys _ _ -> String -> Aff _ (Array (Gene ()))
-fetchGeneJSON cs = fetchJSON (geneJSONParse cs)
-
-
-type AnnotRow r = ( geneID :: String
-                   , desc :: String
-                   , name :: String
-                   , chrId :: ChrId | r )
-type Annot r = Feature (AnnotRow r)
-
-
-fetchAnnotJSON :: CoordSys _ _
-               -> String
+fetchAnnotJSON :: CoordSys ChrId BigInt -> String
                -> Aff _ (Array (Annot ()))
-fetchAnnotJSON cs str = map toAnnot <$> fetchJSON (geneJSONParse cs) str
-  where toAnnot :: Gene () -> Annot ()
-        toAnnot gene = { geneID: gene.geneID
-                       , desc: gene.desc
-                       , position: gene.position
-                       , frameSize: gene.frameSize
-                       , name: gene.name
-                       , chrId: gene.chrId }
+fetchAnnotJSON cs str = fetchJSON (annotJSONParse cs) str
 
 
-getGWAS :: CoordSys ChrId _
-        -> String
+getGWAS :: CoordSys ChrId BigInt -> String
         -> Aff _ (Map ChrId (Array (GWASFeature ())))
 getGWAS cs url = groupToChrs
                   <$> fetchJSON (gemmaJSONParse cs) url
 
 
-getAnnotations :: CoordSys ChrId _
-               -> String
+getAnnotations :: CoordSys ChrId BigInt -> String
                -> Aff _ (Map ChrId (Array (Annot ())))
 getAnnotations cs url = groupToChrs
                         <$> fetchAnnotJSON cs url
 
-
-getGenes :: CoordSys ChrId _
-         -> String
-         -> Aff _ (Map ChrId (Array (Gene ())))
-getGenes cs url = groupToChrs
-                  <$> fetchJSON (geneJSONParse cs) url
 
 
 pointRenderer :: forall r1 r2.
@@ -337,13 +284,6 @@ pointRenderer :: forall r1 r2.
               -> Renderer (Feature (score :: Number | r1))
 pointRenderer s draw = inj _single { horPlace, verPlace: scoreVerPlace s, draw }
 
-
-lhs :: HPos -> Normalized Number
-lhs = case_
-  # onMatch
-     { point: (\x -> x)
-     , range: (\(Pair l _) -> l)
-     }
 
 batchPointRenderer :: forall r1 r2.
                       { min :: Number, max :: Number, sig :: Number | r2 }
@@ -354,19 +294,9 @@ batchPointRenderer s drawing = inj _batch { drawing, place  }
         place f = let (Normalized y) = scoreVerPlace s f
                       (Normalized x) = lhs $ horPlace f
                   in Normalized {x,y}
-
-
-basicRenderers :: forall r.
-                  { min :: Number, max :: Number, sig :: Number | r }
-               -> { gwas        :: Renderer (GWASFeature _)
-                  , annotations :: Renderer (Annot _)
-                  , genes       :: Renderer BedFeature
-                  }
-basicRenderers s = { gwas:        batchPointRenderer s (gwasDraw navy)
-                   , annotations: pointRenderer s annotDraw
-                   , genes:       bedGeneRenderer
-                   }
-
+        lhs = case_ # onMatch
+                      { point: (\x -> x)
+                      , range: (\(Pair l _) -> l) }
 
 
 -- TODO Configgable Annotation -> LegendEntry function (somehow?!)
@@ -399,61 +329,6 @@ annotDraw an = inj _point $ (lg.icon) <> text'
                   (fillColor black) an.name
 
 
-
-
-
-
-
-mouseChrIds :: Array ChrId
-mouseChrIds =
-            [ (ChrId "1")
-            , (ChrId "2")
-            , (ChrId "3")
-            , (ChrId "4")
-            , (ChrId "5")
-            , (ChrId "6")
-            , (ChrId "7")
-            , (ChrId "8")
-            , (ChrId "9")
-            , (ChrId "10")
-            , (ChrId "11")
-            , (ChrId "12")
-            , (ChrId "13")
-            , (ChrId "14")
-            , (ChrId "15")
-            , (ChrId "16")
-            , (ChrId "17")
-            , (ChrId "18")
-            , (ChrId "19")
-            , (ChrId "X")
-            , (ChrId "Y")
-            ]
-
-
-mouseChrs :: Map ChrId Bp
-mouseChrs = Map.fromFoldable $ Array.zip mouseChrIds $
-            [ (Bp 195471971.0)
-            , (Bp 182113224.0)
-            , (Bp 160039680.0)
-            , (Bp 156508116.0)
-            , (Bp 151834684.0)
-            , (Bp 149736546.0)
-            , (Bp 145441459.0)
-            , (Bp 129401213.0)
-            , (Bp 124595110.0)
-            , (Bp 130694993.0)
-            , (Bp 122082543.0)
-            , (Bp 120129022.0)
-            , (Bp 120421639.0)
-            , (Bp 124902244.0)
-            , (Bp 104043685.0)
-            , (Bp 98207768.0)
-            , (Bp 94987271.0)
-            , (Bp 90702639.0)
-            , (Bp 61431566.0)
-            , (Bp 17103129.0)
-            , (Bp 9174469.0)
-            ]
 demoTracks :: VScale
            -> { gwas        :: Maybe (Map ChrId (Array (GWASFeature ()         )))
               , annotations :: Maybe (Map ChrId (Array (Annot (score :: Number))))
