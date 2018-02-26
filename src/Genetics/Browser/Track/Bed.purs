@@ -2,22 +2,15 @@ module Genetics.Browser.Track.Bed where
 
 import Prelude
 
-import Control.Coroutine (Producer, Transformer, producer, transform)
+import Control.Coroutine (Producer, Transformer, transform)
 import Control.Coroutine.Aff as Aff
-import Control.Monad.Aff (Aff, Fiber, delay, error, forkAff, runAff, throwError)
-import Control.Monad.Aff.AVar (AVAR, AVar, makeEmptyVar, makeVar, putVar, takeVar)
-import Control.Monad.Aff.Class (class MonadAff, liftAff)
-import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Exception (throw)
+import Control.Monad.Aff (Aff, error, throwError)
+import Control.Monad.Aff.AVar (makeVar, putVar, takeVar)
 import Control.Monad.Except (runExcept)
-import Control.Monad.Free.Trans (hoistFreeT)
-import Control.Monad.Trans.Class (lift)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
-import Data.Either (Either)
 import Data.Foldable (foldMap)
 import Data.Foreign (Foreign, MultipleErrors, readArray, renderForeignError)
 import Data.Int as Int

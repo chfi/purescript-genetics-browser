@@ -3,12 +3,14 @@ module Genetics.Browser.Track.UI where
 import Prelude
 
 import Color (black)
-import Control.Coroutine (Consumer, Process, runProcess, ($$))
+import Control.Coroutine (Consumer, Producer, connect, runProcess)
 import Control.Coroutine as Co
 import Control.Monad.Aff (Aff, Fiber, Milliseconds, delay, finally, forkAff, killFiber, launchAff, launchAff_)
 import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, readVar, takeVar, tryTakeVar)
+import Control.Monad.Aff.AVar as AVar
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Eff.Uncurried (EffFn4, runEffFn4)
 import Control.Monad.Error.Class (throwError)
@@ -53,7 +55,6 @@ import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
 import Graphics.Drawing as Drawing
 import Partial.Unsafe (unsafeCrashWith, unsafePartial)
 import Unsafe.Coerce (unsafeCoerce)
-
 
 
 foreign import getScreenSize :: forall eff. Eff eff { width :: Number, height :: Number }
@@ -146,18 +147,16 @@ btnZoom x av = do
   buttonEvent "zoomIn"  $ queueCmd av $ ZoomView $ 1.0 - x
 
 
--- TODO handle normalization of view
 -- TODO sync up graphical canvas-scrolling with actual browser viewstate
+--      (is that necessary?)
 dragScroll :: Number
            -> BrowserCanvas
            -> AVar UpdateView
            -> Eff _ Unit
-dragScroll width cnv av =
-  let f = case _ of
-        Left  {x,y} -> queueCmd av $ ScrollView $ g (-x)
-        Right {x,y} -> scrollCanvas cnv.buffer cnv.track {x: -x, y: zero}
-      g x = x / width
-  in canvasDrag f cnv.overlay
+dragScroll width cnv av = canvasDrag f cnv.overlay
+  where f = case _ of
+              Left  {x,y} -> queueCmd av $ ScrollView $ (-x) / width
+              Right {x,y} -> scrollCanvas cnv.buffer cnv.track {x: -x, y: zero}
 
 
 foreign import canvasWheelCBImpl :: forall eff.
@@ -166,9 +165,9 @@ foreign import canvasWheelCBImpl :: forall eff.
                                  -> Eff eff Unit
 
 wheelZoom :: Number
-           -> AVar UpdateView
-           -> CanvasElement
-           -> Eff _ Unit
+          -> AVar UpdateView
+          -> CanvasElement
+          -> Eff _ Unit
 wheelZoom scale av cv =
   canvasWheelCBImpl cv \dY ->
     queueCmd av $ ZoomView $ 1.0 + (scale * dY)
@@ -218,9 +217,6 @@ createBrowserCanvas el dim trackTT = do
 
   pure { buffer, track, overlay }
 
-
-cSys :: CoordSys ChrId BigInt
-cSys = coordSys mouseChrSizes
 
 mouseChrSizes :: Array (Tuple ChrId BigInt)
 mouseChrSizes =
@@ -274,24 +270,6 @@ foreign import drawImageMany :: forall eff a.
                                 Unit
 
 
-
-renderBatch :: CanvasElement
-            -> { drawing :: Drawing, points :: Array Point }
-            -> Context2D
-            -> Eff _ Unit
-renderBatch buffer {drawing, points} ctx = do
-  -- hardcoded glyph sizes for now.
-  let r = 13.0
-      d = r * 2.0
-      dim = { width: 100.0, height: d }
-                          -- width even more hardcoded to deal with long text!
-  _ <- Canvas.setCanvasDimensions dim buffer
-  bfrCtx <- Canvas.getContext2D buffer
-  Drawing.render bfrCtx $ Drawing.translate r r drawing
-  let img = Canvas.canvasElementToImageSource buffer
-  runEffFn4 drawImageMany buffer ctx dim points
-
-
 viewMachine :: forall r.
                CoordSys _ _
             -> Milliseconds
@@ -321,8 +299,8 @@ viewMachine cs timeout { viewRange, viewCmds } ready = do
             vr <- takeVar viewRange
                 -- update view using received cmd, limiting view to provided boundaries
             let (Pair l' r') = updateViewFold cmd' vr
-                -- arbitrary minimum of 400 units shown, so things don't go too crazy when zoomed in
                 -- TODO bake into updateViewFold or handle at a better place/in a nicer way
+                -- TODO handle minimum size
                 len = r' - l'
                 vr' = case l' < limL, r' > limR of
                         true, false  -> Pair limL len
@@ -340,7 +318,8 @@ viewMachine cs timeout { viewRange, viewCmds } ready = do
 
 
 
-
+-- TODO the browser state could really stand to be factored into a proper type
+-- TODO bake the ready-state into the browser state
 renderLoop :: CoordSys _ _
            -> { tracks     :: Pair BigInt -> List (Array RenderedTrack)
               , relativeUI :: Pair BigInt -> Drawing
@@ -413,6 +392,27 @@ renderLoop cSys browser trackDisplayWidth canvases state ready = forever do
 
   putVar renderFiber state.renderFiber
 
+
+
+
+-- TODO this should be smarter and have fewer magic numbers
+renderBatch :: CanvasElement
+            -> { drawing :: Drawing, points :: Array Point }
+            -> Context2D
+            -> Eff _ Unit
+renderBatch buffer {drawing, points} ctx = do
+  -- hardcoded glyph sizes for now.
+  let r = 13.0
+      d = r * 2.0
+      dim = { width: 100.0, height: d }
+                          -- width even more hardcoded to deal with long text!
+  _ <- Canvas.setCanvasDimensions dim buffer
+  bfrCtx <- Canvas.getContext2D buffer
+  Drawing.render bfrCtx $ Drawing.translate r r drawing
+  let img = Canvas.canvasElementToImageSource buffer
+  runEffFn4 drawImageMany buffer ctx dim points
+
+
 renderGlyphs :: Pair BigInt
              -> Number
              -> List (Array RenderedTrack)
@@ -473,7 +473,18 @@ chunkConsumer av = Co.consumer \m ->
 
 
 type TrackVar a = AVar (Map ChrId (Array a))
+type TrackProducer eff a = Producer (Map ChrId (Array a)) (Aff eff) Unit
 
+-- Feels like this one takes care of a bit too much...
+fetchLoop1 :: forall a.
+              (Maybe (Aff _ (TrackProducer _ a)))
+           -> Aff _ (TrackVar a)
+fetchLoop1 Nothing = AVar.makeEmptyVar
+fetchLoop1 (Just startProd) = do
+  prod <- startProd
+  avar <- makeVar mempty
+  _ <- forkAff $ runProcess $ prod `connect` chunkConsumer avar
+  pure avar
 
 -- | Starts threads that fetch & parse each of the provided tracks,
 -- | filling an AVar over time per track, which can be used by other parts of the application
@@ -486,26 +497,13 @@ fetchLoop :: CoordSys ChrId BigInt
                , annotations :: TrackVar (Annot ())
                }
 fetchLoop cs urls = do
-  gwasProd   <- traverse (produceGWAS cs) urls.gwas
-  annotsProd <- traverse (produceAnnots cs) urls.annotations
-  genesProd  <- traverse (produceGenes cs) urls.genes
-
-  gwas        <- makeVar mempty
-  annotations <- makeVar mempty
-  genes       <- makeVar mempty
-
-  let gwasProc :: Maybe (Process (Aff _) Unit)
-      gwasProc   = (_ $$ chunkConsumer gwas)   <$> gwasProd
-      annotsProc = (_ $$ chunkConsumer annotations) <$> annotsProd
-      genesProc  = (_ $$ chunkConsumer genes)  <$> genesProd
-
-  _ <- traverse forkAff (runProcess <$> gwasProc)
-  _ <- traverse forkAff (runProcess <$> annotsProc)
-  _ <- traverse forkAff (runProcess <$> genesProc)
-
-  pure { gwas, annotations, genes }
+  gwas <-        fetchLoop1 $ produceGWAS   cs <$> urls.gwas
+  annotations <- fetchLoop1 $ produceAnnots cs <$> urls.annotations
+  genes <-       fetchLoop1 $ produceGenes  cs <$> urls.genes
+  pure { gwas, genes, annotations }
 
 
+-- TODO configure UI widths
 runBrowser :: Conf -> Eff _ _
 runBrowser config = launchAff $ do
 

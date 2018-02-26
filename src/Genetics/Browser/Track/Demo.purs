@@ -162,9 +162,11 @@ featureProd :: forall r.
                  (Aff _) Unit)
 featureProd url parse = do
   prod <- fetchJsonChunks url
-
   pure $ prod $~ (transform $ groupToChrs <<< filterMap parse)
 
+
+-- TODO bundle up all the producers into one function on a record of URLs
+--      to a record of producers (maprecord? applyrecord?)
 produceGWAS :: CoordSys ChrId _
             -> String
             -> Aff _
