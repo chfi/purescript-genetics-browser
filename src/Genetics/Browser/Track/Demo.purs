@@ -118,19 +118,27 @@ bedDraw gene = inj _range \w ->
 
       exon block =
         let p@(Pair exL' size') = toLocal <$> block
-            s = rectangle exL' zero size' 40.0
-        in (outlined (outlineColor black <> lineWidth 1.0) s)
+            s = rectangle exL' zero size' 30.0
+        in (outlined (outlineColor darkgrey <> lineWidth 1.0) s)
         <> (filled (fillColor lightgrey) s)
 
       introns _ =
-        let s = rectangle 0.0 18.0 width 2.0
+        let s = rectangle 1.5 14.0 (width-1.5) 2.0
         in outlined (outlineColor black <> lineWidth 3.0) s
-        <> filled   (fillColor darkgrey) s
+        <> filled   (fillColor black) s
+
+      label _ =
+        Drawing.text
+          (font sansSerif 12 mempty)
+             (2.5) (35.0)
+             (fillColor black) gene.geneName
 
       drawing =
         if width < one
         then mempty
-        else \_ -> introns unit <> foldMap exon gene.blocks
+        else \_ -> introns unit
+                <> foldMap exon gene.blocks
+                <> label unit
 
   in { drawing, width }
 

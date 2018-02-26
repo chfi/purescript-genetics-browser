@@ -262,10 +262,8 @@ type Conf = { browserHeight :: Number
             , urls :: DataURLs
             }
 
-
-foreign import timeFun :: forall eff a. (Unit -> a) -> Eff eff Unit
-
-
+-- runs console.time() with the provided string, returns the effect to stop the timer
+foreign import timeEff :: forall eff. String -> Eff eff (Eff eff Unit)
 
 foreign import drawImageMany :: forall eff a.
                                 EffFn4 eff
@@ -351,7 +349,10 @@ renderLoop :: CoordSys _ _
            -> BrowserCanvas
            -> { viewRange   :: AVar ViewRange
               , viewCmds    :: AVar UpdateView
-              , renderFiber :: AVar (Fiber _ Unit) }
+              , renderFiber :: AVar (Fiber _ Unit)
+              , cachedTracks :: AVar { viewSize :: BigInt
+                                     , glyphs :: List (Array RenderedTrack) }
+              }
            -> AVar Unit
            -> Aff _ Unit
 renderLoop cSys browser trackDisplayWidth canvases state ready = forever do
@@ -363,19 +364,37 @@ renderLoop cSys browser trackDisplayWidth canvases state ready = forever do
   traverse_ (killFiber (error "Resetting renderer"))
     =<< tryTakeVar state.renderFiber
 
-  let scale = BigInt.toNumber (pairSize visible) / trackDisplayWidth
-      (Pair l _ ) = visible
-      offset = BigInt.toNumber l / scale
-      tracks = browser.tracks visible
+
+  -- if the view scale is unchanged, use the cached glyphs
+  tracks <- do
+    cache <- AVar.tryTakeVar state.cachedTracks
+    case cache of
+      Just ct
+        | ct.viewSize == pairSize visible -> do
+            AVar.putVar ct state.cachedTracks
+            pure ct.glyphs
+      _ -> do
+        let viewSize = pairSize visible
+            glyphs = browser.tracks visible
+
+        AVar.putVar {viewSize, glyphs} state.cachedTracks
+        pure glyphs
+
 
   -- fork a new renderFiber
   renderFiber <- forkAff do
 
-  -- Blank out the track canvas and get its context
     trackCtx   <- liftEff $ getContext2D canvases.track
 
-    let shiftView x =
-          liftEff $ void $ Canvas.translate { translateX: x, translateY: zero } trackCtx
+    let scale = BigInt.toNumber (pairSize visible) / trackDisplayWidth
+        (Pair offset _) =
+          ((_/scale) <<< BigInt.toNumber) <$> visible
+
+        -- used instead of withContext to be able to thread the rendering and
+        -- reset the offset if the fiber is killed
+        shiftView x =
+          void $ Canvas.translate
+            { translateX: x, translateY: zero } trackCtx
 
     liftEff do
       overlayCtx <- getContext2D canvases.overlay
@@ -553,8 +572,14 @@ runBrowser config = launchAff $ do
 
   viewReady <- makeVar unit
 
+  cachedTracks <- AVar.makeEmptyVar
+
   _ <- forkAff $ viewMachine cSys viewTimeout {viewRange, viewCmds} viewReady
-  _ <- forkAff $ renderLoop cSys mainBrowser trackWidth bCanvas { viewCmds, viewRange, renderFiber } viewReady
+  _ <- forkAff
+         $ renderLoop cSys mainBrowser
+           trackWidth bCanvas
+           { viewCmds, viewRange, renderFiber, cachedTracks }
+           viewReady
 
   pure unit
 

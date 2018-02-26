@@ -17,6 +17,15 @@ exports.getScreenSize = function() {
     return { width: w, height: h };
 };
 
+exports.timeEff = function(name) {
+    return function() {
+        console.time(name);
+        return function() {
+            console.timeEnd(name);
+        }
+    };
+};
+
 
 exports.timeFun = function(f) {
     return function() {
