@@ -41,7 +41,6 @@ import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class RowLacks)
 
 
-
 intersection :: forall k a b.
                 Ord k
              => Map k a
@@ -68,12 +67,6 @@ zipMapsWith :: forall k a b c.
             -> Map k b
             -> Map k c
 zipMapsWith f a b = uncurry f <$> zipMaps a b
-
-
-type ChrCtx r = Map ChrId (Record r)
-
-
-
 
 
 _point = SProxy :: SProxy "point"
@@ -111,20 +104,16 @@ _single = (SProxy :: SProxy "single")
 type Renderer a = Variant ( batch :: BatchRenderer a
                           , single :: SingleRenderer a )
 
-
 type NormalizedGlyph = { drawing :: Variant DrawingR
                        , horPos  :: Variant HorPlaceR
                        , verPos  :: Normalized Number
                        }
-
 
 type BatchGlyph c = { drawing :: Drawing
                     , points :: Array c }
 
 type SingleGlyph = { drawing :: Unit -> Drawing, point :: Point, width :: Number }
 
-type BatchableGlyph = { drawing :: Drawing
-                      , points :: Array (Normalized Point) }
 
 
 horPlace :: forall r.
@@ -139,12 +128,6 @@ horPlace {position, frameSize} =
       }
     $ position
 
-
-verPlace :: forall r.
-            (Getter' (Feature r) (Normalized Number))
-         -> Feature r
-         -> Normalized Number
-verPlace = view
 
 
 renderSingle :: forall a.
@@ -178,15 +161,6 @@ render r as = case_
   $ r
 
 
-type FixedUIComponent    = CanvasReadyDrawing
-type RelativeUIComponent = Pair BigInt -> CanvasReadyDrawing
-
-type CanvasSingleGlyph = { drawing :: Unit -> Drawing, point :: Point }
-type CanvasBatchGlyph  = { drawing :: Drawing, points :: Array Point }
-
-type BatchedTrack = Array CanvasBatchGlyph
-
-type CanvasReadyDrawing = Drawing
 
 horRulerTrack :: forall r.
                  { min :: Number, max :: Number, sig :: Number | r }
@@ -412,7 +386,7 @@ trackLegend :: forall f a.
 trackLegend f as = Array.nubBy eqLegend $ Array.fromFoldable $ map f as
 
 
-data Track a = Track (Map ChrId (Array a)) (Renderer a)
+data Track a = Track (Renderer a) (Map ChrId (Array a))
 
 
 horPlaceOnSegment :: forall r.
@@ -556,7 +530,7 @@ browser cs cdim padding ui inputTracks =
       normTracks :: List (Map ChrId
                           (Either (BatchGlyph (Normalized Point))
                                   (Array NormalizedGlyph)))
-      normTracks = runExists (\(Track as r) -> render r <$> as) <$> inputTracks
+      normTracks = runExists (\(Track r as) -> render r <$> as) <$> inputTracks
 
       tracks :: Pair BigInt -> List (Array (Either (BatchGlyph Point) (Array SingleGlyph)))
       tracks v = (renderNormalizedTrack cs trackCanvas v) <$> normTracks

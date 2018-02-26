@@ -152,12 +152,6 @@ bedGeneRenderer =
 
 
 
-bedGenesTrack :: VScale
-              -> Map ChrId (Array BedFeature)
-              -> Track BedFeature
-bedGenesTrack vs dat = Track dat bedGeneRenderer
-
-
 fetchJsonChunks :: String
                 -> Aff _ (Producer (Array Json) (Aff _) Unit)
 fetchJsonChunks url = do
@@ -237,8 +231,7 @@ scoreVerPlace :: forall r1 r2.
                   { min :: Number, max :: Number | r1 }
                -> Feature (score :: Number | r2)
                -> Normalized Number
-scoreVerPlace s =
-  verPlace (to (\x -> Normalized $ (x.score - s.min) / (s.max - s.min)))
+scoreVerPlace s x = Normalized $ (x.score - s.min) / (s.max - s.min)
 
 
 type GWASFeature r = Feature ( score :: Number
@@ -406,31 +399,9 @@ annotDraw an = inj _point $ (lg.icon) <> text'
                   (fillColor black) an.name
 
 
-gwasTrack :: VScale
-          -> Map ChrId (Array (GWASFeature ()))
-          -> Track (GWASFeature ())
-gwasTrack vs dat = Track dat ((basicRenderers vs).gwas)
-
-annotationsTrack :: VScale
-                 -> Map ChrId (Array (Annot (score :: Number)))
-                 -> Track (Annot (score :: Number))
-annotationsTrack vs dat = Track dat ((basicRenderers vs).annotations)
 
 
 
-
-
-demoTracksBed :: VScale
-              -> { gwas        :: Maybe (Map ChrId (Array (GWASFeature ()         )))
-                 , annotations :: Maybe (Map ChrId (Array (Annot (score :: Number))))
-                 , genes       :: Maybe (Map ChrId (Array BedFeature)) }
-              -> List (Exists Track)
-demoTracksBed vs {gwas, annotations, genes} =
-  List.fromFoldable $ filtered
-  $ [ mkExists <$> gwasTrack vs        <$> gwas
-    , mkExists <$> annotationsTrack vs <$> annotations
-    , mkExists <$> bedGenesTrack vs    <$> genes
-    ]
 
 
 mouseChrIds :: Array ChrId
@@ -483,3 +454,17 @@ mouseChrs = Map.fromFoldable $ Array.zip mouseChrIds $
             , (Bp 17103129.0)
             , (Bp 9174469.0)
             ]
+demoTracks :: VScale
+           -> { gwas        :: Maybe (Map ChrId (Array (GWASFeature ()         )))
+              , annotations :: Maybe (Map ChrId (Array (Annot (score :: Number))))
+              , genes       :: Maybe (Map ChrId (Array BedFeature)) }
+           -> List (Exists Track)
+demoTracks vs {gwas, annotations, genes} =
+  let mkGwas   = Track $ batchPointRenderer vs (gwasDraw navy)
+      mkAnnots = Track $ pointRenderer vs annotDraw
+      mkGenes  = Track $ geneRenderer
+  in List.fromFoldable $ filtered
+     [ mkExists <$> mkGwas <$> gwas
+     , mkExists <$> mkAnnots <$> annotations
+     , mkExists <$> mkGenes <$> genes
+     ]
