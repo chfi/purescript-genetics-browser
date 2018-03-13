@@ -5,11 +5,11 @@
 Make sure you have Purescript installed globally, e.g. using NPM:
 ```shell
 npm install -g purescript
-npm install
 ```
 
 Install dependencies
 ```shell
+npm install
 npm run deps
 ```
 
