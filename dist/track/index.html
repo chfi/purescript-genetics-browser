@@ -1,7 +1,8 @@
 <!doctype html>
 <html>
   <body style="margin: 0">
-    <h1>browsing~~</h1>
+
+    <h1>Genome browser</h1>
 
     <div id="browser"> </div>
 
@@ -17,14 +18,26 @@
     <div id="view"></div>
     <script src="./app.js"></script>
     <script>
+
+      var localUrls =
+      { genes:       "./data/mouse.json",
+        gwas:        "./data/gwas.json",
+        annotations: "./data/annots_fake.json"
+      };
+
+      var urlRoot = "https://raw.githubusercontent.com/chfi/genetics-browser-example/master/track/data/";
+
+      var githubUrls =
+      { genes:       urlRoot + "mouse.json",
+        gwas:        urlRoot + "gwas.json",
+        annotations: urlRoot + "annots_fake.json"
+      };
+
       var config =
       { browserHeight: 400.0,
         padding: { vertical: 50.0, horizontal: 0.0 },
         score: { min: 0.15, max: 0.45, sig: 0.25 },
-        urls: { genes: "./mouse.json",
-                gwas: "./gwas.json",
-                annotations: "./annots_fake.json"
-        }
+        urls: githubUrls
       };
 
       GGB.initBrowser(config)();
