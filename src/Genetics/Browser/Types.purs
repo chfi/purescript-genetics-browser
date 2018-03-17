@@ -5,7 +5,9 @@ import Data.Foreign.Class (class Decode, class Encode)
 import Data.Lens (iso)
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Types (Iso')
-import Data.Newtype (class Newtype, unwrap)
+import Data.Maybe (Maybe(..))
+import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.String as String
 
 type Point = { x :: Number, y :: Number}
 
@@ -79,8 +81,34 @@ instance hCoordMBp :: HCoordinate MBp where
 -- | Newtype wrapper for a chromosome identifier
 newtype ChrId = ChrId String
 derive instance newtypeChrId :: Newtype ChrId _
-derive newtype instance eqChrId :: Eq ChrId
-derive newtype instance ordChrId :: Ord ChrId
+
+chrId :: String -> ChrId
+chrId str =
+  let str' = String.toLower str
+  in case String.stripPrefix (wrap "chr") str' of
+       Nothing  -> wrap $ "chr" <> str'
+       Just chr -> wrap chr
+
+validChrId :: ChrId -> ChrId
+validChrId chr =
+  let chr' = String.toLower $ unwrap chr
+  in case String.stripPrefix (wrap "chr") chr' of
+       Nothing -> wrap $ "chr" <> chr'
+       Just c  -> wrap $ c
+
+instance eqChrId :: Eq ChrId where
+  eq chrA chrB =
+    let (ChrId a) = validChrId chrA
+        (ChrId b) = validChrId chrB
+    in a == b
+
+-- TODO this might not even be what we want
+instance ordChrId :: Ord ChrId where
+  compare chrA chrB =
+    let (ChrId a) = validChrId chrA
+        (ChrId b) = validChrId chrB
+    in a `compare` b
+
 derive newtype instance encodeChrId :: Encode ChrId
 derive newtype instance decodeChrId :: Decode ChrId
 derive newtype instance showChrId :: Show ChrId
