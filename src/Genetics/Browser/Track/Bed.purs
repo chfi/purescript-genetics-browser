@@ -119,7 +119,7 @@ validLine l = (l { chrom = _
 
 validateBedChunk :: Array Foreign -> Validated (Array ParsedLine)
 validateBedChunk d =
-  case (runExcept $ traverse read d) :: Either MultipleErrors (Array RawBedLine) of
+  case (traverse read d) :: Either MultipleErrors (Array RawBedLine) of
 
     Left err -> invalid $ map renderForeignError err
     Right ls -> traverse validLine ls

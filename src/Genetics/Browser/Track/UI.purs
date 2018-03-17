@@ -32,6 +32,7 @@ import Data.BigInt as BigInt
 import Data.Either (Either(..), note)
 import Data.Filterable (filter)
 import Data.Foldable (class Foldable, foldMap, for_, null)
+import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
 import Data.Lens (to, (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
@@ -47,14 +48,16 @@ import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (CoordSys(..), _TotalSize, coordSys, pairSize, scalePairBy, translatePairBy)
+import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, Context2D, getContext2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
 import Graphics.Drawing as Drawing
 import Partial.Unsafe (unsafeCrashWith, unsafePartial)
+import Simple.JSON (read, readJSON)
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -144,19 +147,6 @@ mouseChrSizes =
       , Tuple "X"   "171031299"
       , Tuple "Y"   "91744698"
       ]
-
-
-type DataURLs = { gwas        :: Maybe String
-                , annotations :: Maybe String
-                , genes       :: Maybe String
-                }
-
-
-type Conf = { browserHeight :: Number
-            , padding :: Padding
-            , score :: { min :: Number, max :: Number, sig :: Number }
-            , urls :: DataURLs
-            }
 
 -- runs console.time() with the provided string, returns the effect to stop the timer
 foreign import timeEff :: forall eff. String -> Eff eff (Eff eff Unit)
@@ -409,7 +399,9 @@ runBrowser config = launchAff $ do
       vscale = { width: vScaleWidth, color: black
                , min: s.min, max: s.max, sig: s.sig }
       tracks = demoTracks vscale trackData
-      mainBrowser = browser cSys browserDimensions config.padding {legend, vscale} tracks
+      padding = { horizontal: config.trackPadding.left
+                , vertical: config.trackPadding.top }
+      mainBrowser = browser cSys browserDimensions padding {legend, vscale} tracks
       viewTimeout = wrap 100.0
 
   viewReady <- makeVar unit
@@ -427,52 +419,30 @@ runBrowser config = launchAff $ do
 
 
 
+type DataURLs = { gwas        :: Maybe String
+                , annotations :: Maybe String
+                , genes       :: Maybe String
+                }
 
--- TODO do this parsing better. good enough for now, but jesus.
---              do it applicative. semiring or at least semigroup
-parseConfig :: Json -> Either String Conf
-parseConfig j = do
-  obj <- note "Provide a JSON object as configuration" $ j ^? _Object
-  browserHeight <-
-    note "`browserHeight` should be a Number" $ obj ^? ix "browserHeight" <<< _Number
-
-  padding <- do
-    p <- note "`padding` should be an object" $ obj ^? ix "padding" <<< _Object
-    vertical <-
-      note "`padding.vertical` should be a Number" $ p ^? ix "vertical" <<< _Number
-    horizontal <-
-      note "`padding.horizontal` should be a Number" $ p ^? ix "horizontal" <<< _Number
-    pure {vertical, horizontal}
-
-  score <- do
-    s <- note "`score` should be an object" $ obj ^? ix "score" <<< _Object
-    min <-
-      note "`score.min` should be a Number" $ s ^? ix "min" <<< _Number
-    max <-
-      note "`score.max` should be a Number" $ s ^? ix "max" <<< _Number
-    sig <-
-      note "`score.sig` should be a Number" $ s ^? ix "sig" <<< _Number
-
-    pure {min, max, sig}
-
-  urls <- do
-    u <- note "`urls` should be an object" $ obj ^? ix "urls" <<< _Object
-
-    let gwas = u ^? ix "gwas" <<< _String
-        annotations = u ^? ix "annotations" <<< _String
-        genes = u ^? ix "genes" <<< _String
-
-    pure {gwas, annotations, genes}
-
-  pure {browserHeight, padding, score, urls}
+type Conf = { browserHeight :: Number
+            , trackPadding :: TrackPadding
+            , score :: { min :: Number, max :: Number, sig :: Number }
+            , urls :: DataURLs
+            }
 
 
-initBrowser :: Json -> Eff _ _
-initBrowser conf = do
+initBrowser :: Foreign -> Eff _ _
+initBrowser rawConfig = do
 
-  case parseConfig conf of
-    Left err -> unsafeCrashWith err
-    Right c  -> runBrowser c
+  let conf :: Either MultipleErrors Conf
+      conf = read rawConfig
+
+  case conf of
+    Left errs -> traverse_ (log <<< renderForeignError) errs
+    Right c   -> do
+      log $ unsafeStringify c
+
+  log "hello world"
 
 
 
