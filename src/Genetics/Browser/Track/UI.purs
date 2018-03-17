@@ -47,8 +47,9 @@ import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
-import Genetics.Browser.Types.Coordinates (CoordSys, _TotalSize, coordSys, pairSize, scalePairBy, translatePairBy)
+import Genetics.Browser.Types.Coordinates (CoordSys(..), _TotalSize, coordSys, pairSize, scalePairBy, translatePairBy)
 import Graphics.Canvas (CanvasElement, Context2D, getContext2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
@@ -57,36 +58,8 @@ import Partial.Unsafe (unsafeCrashWith, unsafePartial)
 import Unsafe.Coerce (unsafeCoerce)
 
 
-foreign import getScreenSize :: forall eff. Eff eff { width :: Number, height :: Number }
-
--- 1st element is a backbuffer, 2nd the one shown on screen
-foreign import scrollCanvas :: forall eff.
-                               CanvasElement
-                            -> CanvasElement
-                            -> Point
-                            -> Eff eff Unit
-
-
-foreign import canvasDragImpl :: forall eff.
-                                 CanvasElement
-                              -> ( { during :: Nullable Point
-                                   , total :: Nullable Point } -> Eff eff Unit )
-                              -> Eff eff Unit
-
-canvasDrag :: (Either Point Point -> Eff _ Unit)
-           -> CanvasElement
-           -> Eff _ Unit
-canvasDrag f el =
-  let toEither g {during, total} = case toMaybe during of
-        Just p  -> g $ Right p
-        Nothing -> g $ Left $ fromMaybe {x:zero, y:zero} $ toMaybe total
-  in canvasDragImpl el (toEither f)
-
--- creates a new CanvasElement, not attached to the DOM and thus not visible
-foreign import newCanvas :: forall eff.
-                            { width :: Number, height :: Number }
-                         -> Eff eff CanvasElement
-
+foreign import windowInnerSize :: forall e.
+                                  Eff e Canvas.Dimensions
 
 -- set an event to fire on the given button id
 
@@ -94,9 +67,6 @@ foreign import buttonEvent :: forall eff.
                               String
                            -> Eff eff Unit
                            -> Eff eff Unit
-
-
-foreign import setViewUI :: forall eff. String -> Eff eff Unit
 
 
 type ViewRange = Pair BigInt
@@ -147,76 +117,6 @@ btnZoom x av = do
   buttonEvent "zoomIn"  $ queueCmd av $ ZoomView $ 1.0 - x
 
 
--- TODO sync up graphical canvas-scrolling with actual browser viewstate
---      (is that necessary?)
-dragScroll :: Number
-           -> BrowserCanvas
-           -> AVar UpdateView
-           -> Eff _ Unit
-dragScroll width cnv av = canvasDrag f cnv.overlay
-  where f = case _ of
-              Left  {x,y} -> queueCmd av $ ScrollView $ (-x) / width
-              Right {x,y} -> scrollCanvas cnv.buffer cnv.track {x: -x, y: zero}
-
-
-foreign import canvasWheelCBImpl :: forall eff.
-                                    CanvasElement
-                                 -> (Number -> Eff eff Unit)
-                                 -> Eff eff Unit
-
-wheelZoom :: Number
-          -> AVar UpdateView
-          -> CanvasElement
-          -> Eff _ Unit
-wheelZoom scale av cv =
-  canvasWheelCBImpl cv \dY ->
-    queueCmd av $ ZoomView $ 1.0 + (scale * dY)
-
-
--- TODO differentiate scroll buffer & rendering buffer
-type BrowserCanvas = { buffer  :: CanvasElement
-                     , track   :: CanvasElement
-                     , overlay :: CanvasElement
-                     }
-
-createBrowserCanvas :: Element
-                    -> { width :: Number, height :: Number }
-                    -> Canvas.TranslateTransform
-                    -> Eff _ BrowserCanvas
-createBrowserCanvas el dim trackTT = do
-  let node :: CanvasElement -> Node
-      node = unsafeCoerce
-      element :: CanvasElement -> Element
-      element = unsafeCoerce
-
-  buffer  <- newCanvas dim
-  track   <- newCanvas dim
-  -- Translate the origin of the Track canvas;
-  -- useful to place the origin within the vertical padding and horizontal UI elements
-  void $ Canvas.getContext2D track >>= Canvas.translate trackTT
-
-  overlay <- newCanvas dim
-
-  DOM.setId (wrap "buffer")  (element buffer)
-  DOM.setId (wrap "track")   (element track)
-  DOM.setId (wrap "overlay") (element overlay)
-
-  DOM.setAttribute "style" (   "width: "  <> show dim.width  <> "px"
-                          <> "; height: " <> show dim.height <> "px"
-                          <> "; position:relative"
-                          <> "; border: 1px solid black; display: block; margin: 0; padding: 0"
-                          ) el
-
-  let css i = "position:absolute; z-index: " <> i
-
-  DOM.setAttribute "style" (css "1") (element track)
-  DOM.setAttribute "style" (css "2") (element overlay)
-
-  _ <- DOM.appendChild (node track)   (toNode el)
-  _ <- DOM.appendChild (node overlay) (toNode el)
-
-  pure { buffer, track, overlay }
-
 
 mouseChrSizes :: Array (Tuple ChrId BigInt)
 mouseChrSizes =
@@ -260,15 +160,6 @@ type Conf = { browserHeight :: Number
 
 -- runs console.time() with the provided string, returns the effect to stop the timer
 foreign import timeEff :: forall eff. String -> Eff eff (Eff eff Unit)
-
-foreign import drawImageMany :: forall eff a.
-                                EffFn4 eff
-                                CanvasElement
-                                Context2D
-                                { width :: Number, height :: Number }
-                                (Array Point)
-                                Unit
-
 
 viewMachine :: forall r.
                CoordSys _ _
@@ -334,7 +225,9 @@ renderLoop :: CoordSys _ _
               }
            -> AVar Unit
            -> Aff _ Unit
-renderLoop cSys browser trackDisplayWidth canvases state ready = forever do
+renderLoop cSys browser trackDisplayWidth canvas state ready = pure unit
+{-
+renderLoop cSys browser trackDisplayWidth canvas state ready = forever do
 
   _ <- takeVar ready
 
@@ -449,65 +342,14 @@ renderGlyphs vw@(Pair l _) viewScale ts canvases = do
 
       -- delay to give the UI thread a moment
       delay (wrap 3.0)
-
-
--- TODO this could almost certainly be done better
-chunkConsumer :: forall m a.
-                 Foldable m
-              => Monoid (m a)
-              => AVar (m a)
-              -> Consumer (m a) (Aff _) Unit
-chunkConsumer av = Co.consumer \m ->
-  if null m
-     then pure $ Just unit
-     else do
-       sofar <- takeVar av
-
-       let new = sofar <> m
-
-       putVar new av
-       delay (wrap 20.0)
-
-       pure Nothing
-
-
-
-type TrackVar a = AVar (Map ChrId (Array a))
-type TrackProducer eff a = Producer (Map ChrId (Array a)) (Aff eff) Unit
-
--- Feels like this one takes care of a bit too much...
-fetchLoop1 :: forall a.
-              (Maybe (Aff _ (TrackProducer _ a)))
-           -> Aff _ (TrackVar a)
-fetchLoop1 Nothing = AVar.makeEmptyVar
-fetchLoop1 (Just startProd) = do
-  prod <- startProd
-  avar <- makeVar mempty
-  _ <- forkAff $ runProcess $ prod `connect` chunkConsumer avar
-  pure avar
-
--- | Starts threads that fetch & parse each of the provided tracks,
--- | filling an AVar over time per track, which can be used by other parts of the application
--- | (read only, should be a newtype)
-fetchLoop :: CoordSys ChrId BigInt
-          -> DataURLs
-          -> Aff _
-               { gwas :: TrackVar (GWASFeature ())
-               , genes :: TrackVar BedFeature
-               , annotations :: TrackVar (Annot ())
-               }
-fetchLoop cs urls = do
-  gwas <-        fetchLoop1 $ produceGWAS   cs <$> urls.gwas
-  annotations <- fetchLoop1 $ produceAnnots cs <$> urls.annotations
-  genes <-       fetchLoop1 $ produceGenes  cs <$> urls.genes
-  pure { gwas, genes, annotations }
+-}
 
 
 -- TODO configure UI widths
 runBrowser :: Conf -> Eff _ _
 runBrowser config = launchAff $ do
 
-  {width} <- liftEff $ getScreenSize
+  {width} <- liftEff $ windowInnerSize
 
   let height = config.browserHeight
       browserDimensions = {width, height}
@@ -516,18 +358,18 @@ runBrowser config = launchAff $ do
       trackWidth = width - (vScaleWidth + legendWidth)
 
 
-  bCanvas <- do
-    doc <- liftEff $ DOM.htmlDocumentToDocument
-           <$> (DOM.document =<< DOM.window)
-    cont <- liftEff $ DOM.querySelector (wrap "#browser") (toParentNode doc)
+  -- bCanvas <- do
+  --   doc <- liftEff $ DOM.htmlDocumentToDocument
+  --          <$> (DOM.document =<< DOM.window)
+  --   cont <- liftEff $ DOM.querySelector (wrap "#browser") (toParentNode doc)
 
-    case cont of
-      Nothing -> throwError $ error "Could not find browser element"
-      Just el -> liftEff do
-        createBrowserCanvas
-          el browserDimensions
-          { translateX: vScaleWidth
-          , translateY: zero }
+  --   case cont of
+  --     Nothing -> throwError $ error "Could not find browser element"
+  --     Just el -> liftEff do
+  --       createBrowserCanvas
+  --         el browserDimensions
+  --         { translateX: vScaleWidth
+  --         , translateY: zero }
 
 
   let cSys :: CoordSys ChrId BigInt
@@ -553,8 +395,8 @@ runBrowser config = launchAff $ do
   liftEff $ do
     btnScroll 0.05 viewCmds
     btnZoom   0.10 viewCmds
-    dragScroll trackWidth bCanvas viewCmds
-    wheelZoom 0.02 viewCmds bCanvas.overlay
+    -- dragScroll trackWidth bCanvas viewCmds
+    -- wheelZoom 0.02 viewCmds bCanvas.overlay
 
   viewRange <- makeVar initialView
 
@@ -575,11 +417,11 @@ runBrowser config = launchAff $ do
   cachedTracks <- AVar.makeEmptyVar
 
   _ <- forkAff $ viewMachine cSys viewTimeout {viewRange, viewCmds} viewReady
-  _ <- forkAff
-         $ renderLoop cSys mainBrowser
-           trackWidth bCanvas
-           { viewCmds, viewRange, renderFiber, cachedTracks }
-           viewReady
+  -- _ <- forkAff
+  --        $ renderLoop cSys mainBrowser
+  --          trackWidth bCanvas
+  --          { viewCmds, viewRange, renderFiber, cachedTracks }
+  --          viewReady
 
   pure unit
 
@@ -631,3 +473,51 @@ initBrowser conf = do
   case parseConfig conf of
     Left err -> unsafeCrashWith err
     Right c  -> runBrowser c
+
+
+
+-- TODO this could almost certainly be done better
+chunkConsumer :: forall m a.
+                 Foldable m
+              => Monoid (m a)
+              => AVar (m a)
+              -> Consumer (m a) (Aff _) Unit
+chunkConsumer av = Co.consumer \m ->
+  if null m
+     then pure $ Just unit
+     else do
+       sofar <- takeVar av
+       putVar (sofar <> m) av
+       delay (wrap 20.0)
+       pure Nothing
+
+
+type TrackVar a = AVar (Map ChrId (Array a))
+type TrackProducer eff a = Producer (Map ChrId (Array a)) (Aff eff) Unit
+
+-- Feels like this one takes care of a bit too much...
+fetchLoop1 :: forall a.
+              (Maybe (Aff _ (TrackProducer _ a)))
+           -> Aff _ (TrackVar a)
+fetchLoop1 Nothing = AVar.makeEmptyVar
+fetchLoop1 (Just startProd) = do
+  prod <- startProd
+  avar <- makeVar mempty
+  _ <- forkAff $ runProcess $ prod `connect` chunkConsumer avar
+  pure avar
+
+-- | Starts threads that fetch & parse each of the provided tracks,
+-- | filling an AVar over time per track, which can be used by other parts of the application
+-- | (read only, should be a newtype)
+fetchLoop :: CoordSys ChrId BigInt
+          -> DataURLs
+          -> Aff _
+               { gwas :: TrackVar (GWASFeature ())
+               , genes :: TrackVar BedFeature
+               , annotations :: TrackVar (Annot ())
+               }
+fetchLoop cs urls = do
+  gwas <-        fetchLoop1 $ produceGWAS   cs <$> urls.gwas
+  annotations <- fetchLoop1 $ produceAnnots cs <$> urls.annotations
+  genes <-       fetchLoop1 $ produceGenes  cs <$> urls.genes
+  pure { gwas, genes, annotations }
