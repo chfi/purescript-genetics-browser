@@ -5,6 +5,11 @@ module Genetics.Browser.Track.UI.Canvas
        ( BrowserCanvas
        , browserCanvas
        , TrackPadding
+       , drawToBuffer
+       , flipBuffer
+       , blankBuffer
+       , BufferedCanvas
+       , TrackCanvas
        ) where
 
 
@@ -20,7 +25,7 @@ import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
-import Control.Monad.Eff.Uncurried (EffFn2, EffFn4, runEffFn2, runEffFn4)
+import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Rec.Class (forever)
 import DOM.Classy.Node (toNode)
@@ -40,9 +45,8 @@ import Data.BigInt as BigInt
 import Data.Either (Either(..), note)
 import Data.Filterable (filter)
 import Data.Foldable (class Foldable, foldMap, for_, intercalate, null)
-import Data.Foreign (Foreign, F)
-import Data.Lens (to, united, (^.), (^?))
-import Data.Lens.Index (ix)
+import Data.Lens (iso, view, (^.))
+import Data.Lens.Iso (Iso')
 import Data.List (List)
 import Data.List as List
 import Data.Map (Map)
@@ -53,7 +57,7 @@ import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
 import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse, traverse_)
-import Data.Tuple (Tuple(Tuple))
+import Data.Tuple (Tuple(Tuple), uncurry)
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
@@ -67,16 +71,52 @@ import Simple.JSON (readJSON)
 import Unsafe.Coerce (unsafeCoerce)
 
 
--- | Create a new CanvasElement, not attached to the DOM
+_Element :: Iso' CanvasElement Element
+_Element = iso unsafeCoerce unsafeCoerce
+
+-- | Create a new CanvasElement, not attached to the DOM, with the provided String as its CSS class
 foreign import createCanvas :: forall eff.
                                { width :: Number, height :: Number }
+                            -> String
                             -> Eff eff CanvasElement
 
 
-foreign import setCanvasZIndex :: forall eff.
-                                  Int
-                               -> CanvasElement
-                               -> Eff eff Unit
+foreign import setElementStyleImpl :: forall e.
+                                      EffFn3 e
+                                      Element String String Unit
+
+setElementStyle :: Element
+                -> String
+                -> String
+                -> Eff _ Unit
+setElementStyle = runEffFn3 setElementStyleImpl
+
+setElementStyles :: Element -> Array (Tuple String String) -> Eff _ Unit
+setElementStyles el =
+  traverse_ (uncurry $ setElementStyle el)
+
+setCanvasStyles :: CanvasElement -> Array (Tuple String String) -> Eff _ Unit
+setCanvasStyles = setElementStyles <<< view _Element
+
+
+setCanvasStyle :: CanvasElement
+               -> String
+               -> String
+               -> Eff _ Unit
+setCanvasStyle ce = setElementStyle (ce ^. _Element)
+
+setCanvasZIndex :: CanvasElement -> Int -> Eff _ Unit
+setCanvasZIndex ce i = setCanvasStyle ce "z-index" (show i)
+
+setCanvasPosition :: forall r.
+                     { left :: Number, top :: Number | r }
+                  -> CanvasElement
+                  -> Eff _ Unit
+setCanvasPosition {left, top} ce =
+  setCanvasStyles ce
+    [ Tuple "position" "absolute"
+    , Tuple "top"  (show top  <> "px")
+    , Tuple "left" (show left <> "px") ]
 
 
 foreign import appendCanvasElem :: forall e.
@@ -85,16 +125,8 @@ foreign import appendCanvasElem :: forall e.
                                 -> Eff e Unit
 
 
-
-
 -- | Sets some of the browser container's CSS to reasonable defaults
-foreign import setContainerStyle :: forall e. Element -> Eff e Unit
-
--- | Sets the provided element's CSS `width` and `height` accordingly
-foreign import setElementSize :: forall e.
-                                 Canvas.Dimensions
-                              -> Element
-                              -> Eff e Unit
+foreign import setContainerStyle :: forall e. Element -> Canvas.Dimensions -> Eff e Unit
 
 
 foreign import scrollCanvas :: forall eff.
@@ -147,6 +179,10 @@ wheelZoom scale av cv =
     queueCmd av $ ZoomView $ 1.0 + (scale * dY)
 -}
 
+-- TODO browser background color shouldn't be hardcoded
+backgroundColor :: String
+backgroundColor = "white"
+
 
 -- TODO the back canvas should have the option of being bigger than
 -- the front, to minimize redrawing
@@ -158,25 +194,59 @@ newtype BufferedCanvas =
 
 derive instance newtypeBufferedCanvas :: Newtype BufferedCanvas _
 
-
 bufferedCanvas :: Canvas.Dimensions
                -> Eff _ BufferedCanvas
 bufferedCanvas dim = do
-  back  <- createCanvas dim
-  front <- createCanvas dim
-  pure $ BufferedCanvas { back, front }
+  back  <- createCanvas dim "buffer"
+  front <- createCanvas dim "front"
+  let bc = BufferedCanvas { back, front }
+  blankBuffer bc
+  pure bc
 
 
 setBufferedCanvasSize :: Canvas.Dimensions
                       -> BufferedCanvas
                       -> Eff _ Unit
-setBufferedCanvasSize dim (BufferedCanvas {back, front}) = do
+setBufferedCanvasSize dim bc@(BufferedCanvas {back, front}) = do
   _ <- Canvas.setCanvasDimensions dim back
   _ <- Canvas.setCanvasDimensions dim front
+  blankBuffer bc
   pure unit
 
 
-  -- DOM.setId (wrap "buffer")  (element buffer)
+drawToBuffer :: BufferedCanvas
+             -> (Context2D -> Eff _ Unit)
+             -> Eff _ Unit
+drawToBuffer (BufferedCanvas {back}) f = do
+  ctx <- Canvas.getContext2D back
+  f ctx
+
+
+blankBuffer :: BufferedCanvas
+            -> Eff _ Unit
+blankBuffer (BufferedCanvas {back}) = do
+  backCtx <- Canvas.getContext2D back
+  {width, height} <- Canvas.getCanvasDimensions back
+  _ <- Canvas.setFillStyle backgroundColor backCtx
+  _ <- Canvas.fillRect backCtx { x: 0.0, y: 0.0, w: width, h: height }
+  pure unit
+
+
+flipBuffer :: BufferedCanvas
+           -> Eff _ Unit
+flipBuffer (BufferedCanvas {back, front}) = do
+-- NOTE this assumes back and front are the same size
+  frontCtx <- Canvas.getContext2D front
+  let imgSrc = Canvas.canvasElementToImageSource back
+
+  {width, height} <- Canvas.getCanvasDimensions front
+
+  _ <- Canvas.fillRect frontCtx { x: 0.0, y: 0.0, w: width, h: height }
+  _ <- Canvas.drawImage frontCtx imgSrc 0.0 0.0
+  pure unit
+
+
+
 
 -- | The `width` & `height` of the TrackCanvas is the area glyphs render to;
 -- | the browser shows a `width` pixels slice of the whole coordinate system.
@@ -197,7 +267,7 @@ trackCanvas :: Canvas.Dimensions
             -> Eff _ TrackCanvas
 trackCanvas dim = do
   canvas <- bufferedCanvas dim
-  glyphBuffer <- createCanvas glyphBufferSize
+  glyphBuffer <- createCanvas glyphBufferSize "glyphBuffer"
 
   pure $ TrackCanvas { width: dim.width
                      , height: dim.height
@@ -230,7 +300,6 @@ newtype BrowserCanvas =
                 , trackPadding :: TrackPadding
                 , dimensions   :: Canvas.Dimensions
                 , overlay      :: CanvasElement
-                -- , container    :: Element
                 }
 
 
@@ -241,6 +310,7 @@ subtractPadding :: Canvas.Dimensions
 subtractPadding {width, height} pad =
   { width:  width - pad.left - pad.right
   , height: height - pad.top - pad.bottom }
+
 
 setBrowserCanvasSize :: Canvas.Dimensions
                      -> BrowserCanvas
@@ -267,18 +337,20 @@ browserCanvas :: Canvas.Dimensions
               -> Eff _ BrowserCanvas
 browserCanvas dimensions trackPadding el = do
 
-  setContainerStyle el
-  setElementSize dimensions el
+  setContainerStyle el dimensions
 
   let trackDim = subtractPadding dimensions trackPadding
   track   <- trackCanvas trackDim
-  overlay <- createCanvas dimensions
+  overlay <- createCanvas dimensions "overlay"
 
   let trackEl = _.front  $ unwrap
                 $ _.canvas $ unwrap $ track
 
-  setCanvasZIndex 1 trackEl
-  setCanvasZIndex 2 overlay
+  setCanvasZIndex trackEl 1
+  setCanvasZIndex overlay 2
+
+  setCanvasPosition trackPadding trackEl
+  setCanvasPosition {left: 0.0, top: 0.0} overlay
 
   appendCanvasElem el trackEl
   appendCanvasElem el overlay

@@ -1,21 +1,19 @@
 "use strict";
 
 exports.createCanvas = function(size) {
-    return function() {
-        var c = document.createElement('canvas');
-        c.width  = size.width;
-        c.height = size.height;
-        return c;
+    return function(className) {
+        return function() {
+            var c = document.createElement('canvas');
+            c.width  = size.width;
+            c.height = size.height;
+            c.className = className;
+            return c;
+        };
     };
 };
 
-exports.setCanvasZIndex = function(z) {
-    return function(c) {
-        return function() {
-            c.style["position"] = "absolute";
-            c.style["z-index"] = z;
-        };
-    };
+exports.setElementStyleImpl = function(e,k,v) {
+    e.style[k] = v;
 }
 
 exports.appendCanvasElem = function(cont) {
@@ -27,20 +25,15 @@ exports.appendCanvasElem = function(cont) {
 }
 
 exports.setContainerStyle = function(e) {
-    return function() {
-        e.style.position = "relative";
-        e.style.border   = "1px";
-        e.style.display  = "block";
-        e.style.margin   = "0";
-        e.style.padding  = "0";
-    }
-};
-
-exports.setElementSize = function(d) {
-    return function(e) {
+    return function(dim) {
         return function() {
-            e.style.width  = d.width;
-            e.style.height = d.height;
+            e.style.position = "relative";
+            e.style.border   = "1px solid black";
+            e.style.display  = "block";
+            e.style.margin   = "0";
+            e.style.padding  = "0";
+            e.style.width = dim.width + "px";
+            e.style.height = dim.height + "px";
         };
     };
 };
