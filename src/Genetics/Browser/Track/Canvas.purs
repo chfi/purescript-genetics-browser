@@ -5,11 +5,15 @@ module Genetics.Browser.Track.UI.Canvas
        ( BrowserCanvas
        , browserCanvas
        , TrackPadding
+       , debugBrowserCanvas
        , drawToBuffer
        , flipBuffer
        , blankBuffer
        , BufferedCanvas
        , TrackCanvas
+       , drawOnTrack
+       , flipTrack
+       , blankTrack
        ) where
 
 
@@ -302,6 +306,10 @@ newtype BrowserCanvas =
                 , overlay      :: CanvasElement
                 }
 
+foreign import debugBrowserCanvas :: forall e.
+                                     String
+                                  -> BrowserCanvas
+                                  -> Eff e Unit
 
 
 subtractPadding :: Canvas.Dimensions
@@ -357,3 +365,28 @@ browserCanvas dimensions trackPadding el = do
 
   pure $ BrowserCanvas { track, trackPadding
                        , overlay, dimensions }
+
+flipTrack :: BrowserCanvas
+          -> Eff _ Unit
+flipTrack (BrowserCanvas bc) = do
+  let (TrackCanvas tc) = bc.track
+      buffered = tc.canvas
+
+  flipBuffer buffered
+
+blankTrack :: BrowserCanvas
+           -> Eff _ Unit
+blankTrack (BrowserCanvas bc) = do
+  let (TrackCanvas tc) = bc.track
+      buffered = tc.canvas
+
+  blankBuffer buffered
+
+drawOnTrack :: BrowserCanvas
+            -> (Context2D -> Eff _ Unit)
+            -> Eff _ Unit
+drawOnTrack (BrowserCanvas bc) f = do
+  let (TrackCanvas tc) = bc.track
+      buffered = tc.canvas
+
+  drawToBuffer buffered f

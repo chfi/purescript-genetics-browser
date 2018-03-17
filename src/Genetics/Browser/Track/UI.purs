@@ -48,11 +48,11 @@ import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, debugBrowserCanvas, drawOnTrack, flipTrack)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (CoordSys(..), _TotalSize, coordSys, pairSize, scalePairBy, translatePairBy)
 import Global.Unsafe (unsafeStringify)
-import Graphics.Canvas (CanvasElement, Context2D, getContext2D)
+import Graphics.Canvas (CanvasElement, Context2D, fillRect, getContext2D, setFillStyle)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
 import Graphics.Drawing as Drawing
@@ -430,19 +430,42 @@ type Conf = { browserHeight :: Number
             , urls :: DataURLs
             }
 
+foreign import setWindow :: forall e a. String -> a -> Eff e Unit
+
 
 initBrowser :: Foreign -> Eff _ _
 initBrowser rawConfig = do
 
-  let conf :: Either MultipleErrors Conf
-      conf = read rawConfig
+  el' <- do
+    doc <- DOM.htmlDocumentToDocument
+           <$> (DOM.document =<< DOM.window)
+    DOM.querySelector (wrap "#browser") (toParentNode doc)
 
-  case conf of
+  case read rawConfig :: Either MultipleErrors Conf of
     Left errs -> traverse_ (log <<< renderForeignError) errs
     Right c   -> do
-      log $ unsafeStringify c
+      case el' of
+        Nothing -> log "Could not find element '#browser'"
+        Just el -> do
 
-  log "hello world"
+          {width} <- windowInnerSize
+          let dimensions = { width, height: c.browserHeight }
+          bc <- browserCanvas dimensions c.trackPadding el
+
+          debugBrowserCanvas "debugBC" bc
+
+          let drawR :: Number -> Number -> Eff _ Unit
+              drawR x y = drawOnTrack bc \ctx -> do
+                _ <- setFillStyle "red" ctx
+                _ <- fillRect ctx { x, y, w: 20.0, h: 20.0 }
+                pure unit
+
+
+          setWindow "drawRect" drawR
+          setWindow "flipTrack" (flipTrack bc)
+          setWindow "blankTrack" (blankTrack bc)
+
+          log $ unsafeStringify c
 
 
 

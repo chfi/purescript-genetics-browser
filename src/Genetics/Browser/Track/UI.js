@@ -34,3 +34,11 @@ exports.timeFun = function(f) {
         console.timeEnd();
     };
 };
+
+exports.setWindow = function(k) {
+    return function(v) {
+        return function() {
+            window[k] = v;
+        };
+    };
+};
