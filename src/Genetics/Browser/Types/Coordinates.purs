@@ -13,7 +13,7 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe)
 import Data.Monoid.Additive (Additive(..))
-import Data.Newtype (class Newtype, alaF)
+import Data.Newtype (class Newtype, alaF, unwrap)
 import Data.Pair (Pair(..))
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Types (Point)
@@ -171,6 +171,50 @@ segmentsInPair :: forall i c.
 segmentsInPair cs x = Map.filter (any (_ `inPair` x)) $ cs ^. _Segments
 
 
+
+newtype ViewScale = ViewScale { pixelWidth :: Number, coordWidth :: BigInt }
+
+derive instance eqViewScale :: Eq ViewScale
+
+newtype CoordSysView = CoordSysView (Pair BigInt)
+
+derive instance coordsysviewNewtype :: Newtype CoordSysView _
+
+setViewWidth :: BigInt
+             -> Pair BigInt
+             -> Pair BigInt
+setViewWidth w p@(Pair l r) =
+  let width = pairSize p
+      rad = width / BigInt.fromInt 2
+      mid = l + rad
+  in Pair (mid - w) (mid + r)
+
+normalizeView :: forall i.
+                 CoordSys i BigInt
+              -> BigInt
+              -> CoordSysView
+              -> CoordSysView
+normalizeView cs minWidth csv =
+  let limL = zero
+      limR = cs ^. _TotalSize
+      p = unwrap csv
+      len = max minWidth (pairSize p)
+      (Pair l r) = setViewWidth len p
+      vr' = case l < limL, r > limR of
+              true, false  -> Pair limL len
+              false, true  -> Pair (limR - len) limR
+              true, true   -> Pair limL limR
+              false, false -> Pair l r
+  in CoordSysView vr'
+
+
+
+viewScale :: forall r.
+             { width :: Number | r } -> CoordSysView -> ViewScale
+viewScale {width} (CoordSysView csView) =
+  let coordWidth = pairSize csView
+  in ViewScale { pixelWidth: width, coordWidth }
+
 -- | The scale of the browser view is defined by how much of the coordinate system is visible,
 -- | and how big the screen it must fit into.
 type Scale = { screenWidth :: Number, viewWidth :: BigInt }
@@ -185,6 +229,12 @@ scaleToScreen :: Scale
 scaleToScreen {screenWidth, viewWidth} x =
   BigInt.toNumber x * (screenWidth / (BigInt.toNumber viewWidth))
 
+scaleToScreen' :: ViewScale
+               -> BigInt
+               -> Number
+scaleToScreen' (ViewScale {pixelWidth, coordWidth}) x =
+  BigInt.toNumber x * (pixelWidth / (BigInt.toNumber coordWidth))
+
 
 -- | Given the width of the display in pixels, and how much of the coordinate system
 -- | that is currently visible, scale a point given in pixels from the left-hand edge
@@ -196,6 +246,17 @@ scaleToGlobal :: Scale
 scaleToGlobal {screenWidth, viewWidth} x =
   BigInt.fromNumber $ x * ((BigInt.toNumber viewWidth) / screenWidth)
 
+scaleToGlobal' :: ViewScale
+              -> Number
+              -> BigInt
+scaleToGlobal' (ViewScale {pixelWidth, coordWidth}) x =
+  BigInt.fromNumber $ x * ((BigInt.toNumber coordWidth) / pixelWidth)
+
+
+pixelsView :: ViewScale -> CoordSysView -> Pair Number
+pixelsView vs (CoordSysView (Pair l r)) =
+  let f = scaleToScreen' vs
+  in Pair (f l) (f r)
 
 -- | Given a coordinate system and browser scale,
 -- | return the browser segments scaled to canvas coordinates.
@@ -205,6 +266,11 @@ scaledSegments :: forall i.
                -> Segments i Number
 scaledSegments cs scale = (map <<< map) (scaleToScreen scale) $ cs ^. _Segments
 
+scaledSegments' :: forall i.
+                  CoordSys i BigInt
+               -> ViewScale
+               -> Segments i Number
+scaledSegments' cs scale = (map <<< map) (scaleToScreen' scale) $ cs ^. _Segments
 
 
 -- | Helper functions for translating and scaling pairs.
@@ -218,6 +284,12 @@ translatePairBy :: Pair BigInt
 translatePairBy p x = (_ + delta) <$> p
   where delta = BigInt.fromNumber $ x * (BigInt.toNumber $ pairSize p)
 
+translateViewBy :: CoordSysView
+                -> Number
+                -> CoordSysView
+translateViewBy (CoordSysView p) x = CoordSysView $ translatePairBy p x
+
+
 -- | Scale an Int pair by changing its length to be `x` times the pair size.
 scalePairBy :: Pair BigInt
             -> Number
@@ -227,3 +299,9 @@ scalePairBy p x = result
         p'@(Pair l' r') = BigInt.toNumber <$> p
         delta = ((pairSize p' * x') - (pairSize p')) / 2.0
         result = BigInt.fromNumber <$> Pair (l' - delta) (r' + delta)
+
+
+scaleViewBy :: CoordSysView
+            -> Number
+            -> CoordSysView
+scaleViewBy (CoordSysView p) x = CoordSysView $ scalePairBy p x
