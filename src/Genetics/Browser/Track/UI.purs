@@ -3,15 +3,17 @@ module Genetics.Browser.Track.UI where
 import Prelude
 
 import Color (black)
+import Color.Scheme.Clrs (blue, red)
 import Control.Coroutine (Consumer, Producer, connect, runProcess)
 import Control.Coroutine as Co
-import Control.Monad.Aff (Aff, Fiber, Milliseconds, delay, finally, forkAff, killFiber, launchAff, launchAff_)
+import Control.Monad.Aff (Aff, Fiber, Milliseconds(..), delay, finally, forkAff, killFiber, launchAff, launchAff_)
 import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, readVar, takeVar, tryTakeVar)
 import Control.Monad.Aff.AVar as AVar
-import Control.Monad.Eff (Eff, foreachE)
+import Control.Monad.Eff (Eff, forE, foreachE)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
+import Control.Monad.Eff.Random (random, randomRange)
 import Control.Monad.Eff.Uncurried (EffFn4, runEffFn4)
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Rec.Class (forever)
@@ -40,17 +42,17 @@ import Data.List as List
 import Data.Map (Map)
 import Data.Maybe (Maybe(Just, Nothing), fromJust, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
-import Data.Newtype (wrap)
+import Data.Newtype (ala, over, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
 import Data.Symbol (SProxy(..))
-import Data.Traversable (traverse, traverse_)
+import Data.Traversable (for, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, debugBrowserCanvas, drawOnTrack, flipTrack)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, gwasGlyphTest, produceAnnots, produceGWAS, produceGenes)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, debugBrowserCanvas, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser, renderSingleGlyphs, renderTrack, trackViewScale, transTrack)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
-import Genetics.Browser.Types.Coordinates (CoordSys(..), _TotalSize, coordSys, pairSize, scalePairBy, translatePairBy)
+import Genetics.Browser.Types.Coordinates (CoordSys(..), CoordSysView(..), ViewScale(..), _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scalePairBy, scaleViewBy, translatePairBy, translateViewBy)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, Context2D, fillRect, getContext2D, setFillStyle)
 import Graphics.Canvas as Canvas
@@ -64,8 +66,7 @@ import Unsafe.Coerce (unsafeCoerce)
 foreign import windowInnerSize :: forall e.
                                   Eff e Canvas.Dimensions
 
--- set an event to fire on the given button id
-
+-- | Set an event to fire on the given button id
 foreign import buttonEvent :: forall eff.
                               String
                            -> Eff eff Unit
@@ -77,7 +78,7 @@ type ViewRange = Pair BigInt
 data UpdateView =
     ScrollView Number
   | ZoomView Number
-  | ModView (ViewRange -> ViewRange)
+  | ModView (Pair BigInt -> Pair BigInt)
 
 
 instance showUpdateView :: Show UpdateView where
@@ -95,13 +96,14 @@ instance semigroupUpdateView :: Semigroup UpdateView where
 instance monoidUpdateView :: Monoid UpdateView where
   mempty = ModView id
 
+
 updateViewFold :: UpdateView
-               -> ViewRange
-               -> ViewRange
-updateViewFold uv iv@(Pair l r) = case uv of
-  ZoomView   x -> iv `scalePairBy`     x
-  ScrollView x -> iv `translatePairBy` x
-  ModView f    -> f iv
+               -> CoordSysView
+               -> CoordSysView
+updateViewFold uv iv = case uv of
+  ZoomView   x -> iv `scaleViewBy`     x
+  ScrollView x -> iv `translateViewBy` x
+  ModView f    -> over CoordSysView f iv
 
 
 queueCmd :: AVar UpdateView -> UpdateView -> Eff _ Unit
@@ -151,22 +153,29 @@ mouseChrSizes =
 -- runs console.time() with the provided string, returns the effect to stop the timer
 foreign import timeEff :: forall eff. String -> Eff eff (Eff eff Unit)
 
-viewMachine :: forall r.
-               CoordSys _ _
-            -> Milliseconds
-            -> { viewRange :: AVar ViewRange
-               , viewCmds :: AVar UpdateView | r }
-            -> AVar Unit
-            -> Aff _ Unit
-viewMachine cs timeout { viewRange, viewCmds } ready = do
+type UIState e = { view :: AVar CoordSysView
+                 , viewCmd :: AVar UpdateView
+                 , viewReady :: AVar Unit
+                 , renderFiber :: AVar (Fiber e Unit)
+                 , cachedTracks :: AVar { cachedScale :: ViewScale
+                                        , glyphs :: List (Array RenderedTrack) }
+                 }
 
+
+uiViewUpdate :: forall r.
+                CoordSys _ BigInt
+             -> Milliseconds
+             -> { view :: AVar CoordSysView
+                , viewCmd :: AVar UpdateView
+                , viewReady :: AVar Unit| r }
+             -> Aff _ Unit
+uiViewUpdate cs timeout { view, viewCmd, viewReady } = do
   curCmdVar <- makeVar mempty
 
-  let limL = zero
-      limR = cs ^. _TotalSize
+  let normView = normalizeView cs (BigInt.fromInt 2000)
 
       loop' updater = do
-        cmd <- takeVar viewCmds
+        cmd <- takeVar viewCmd
 
         killFiber (error "Resetting view update") updater
 
@@ -176,21 +185,10 @@ viewMachine cs timeout { viewRange, viewCmds } ready = do
 
         updater' <- forkAff do
             delay timeout
-
-            vr <- takeVar viewRange
-                -- update view using received cmd, limiting view to provided boundaries
-            let (Pair l' r') = updateViewFold cmd' vr
-                -- TODO bake into updateViewFold or handle at a better place/in a nicer way
-                -- TODO handle minimum size
-                len = r' - l'
-                vr' = case l' < limL, r' > limR of
-                        true, false  -> Pair limL len
-                        false, true  -> Pair (limR - len) limR
-                        true, true   -> Pair limL limR
-                        false, false -> Pair l' r'
-
-            putVar vr' viewRange
-            putVar unit ready
+            vr <- takeVar view
+            putVar (updateViewFold cmd' vr) view
+            -- putVar (normView $ updateViewFold cmd' vr) view
+            putVar unit viewReady
             takeVar curCmdVar *> putVar mempty curCmdVar
 
         loop' updater'
@@ -199,145 +197,64 @@ viewMachine cs timeout { viewRange, viewCmds } ready = do
 
 
 
--- TODO the browser state could really stand to be factored into a proper type
--- TODO bake the ready-state into the browser state
 renderLoop :: CoordSys _ _
            -> { tracks     :: Pair BigInt -> List (Array RenderedTrack)
               , relativeUI :: Pair BigInt -> Drawing
               , fixedUI :: Drawing }
-           -> Number
            -> BrowserCanvas
-           -> { viewRange   :: AVar ViewRange
-              , viewCmds    :: AVar UpdateView
-              , renderFiber :: AVar (Fiber _ Unit)
-              , cachedTracks :: AVar { viewSize :: BigInt
-                                     , glyphs :: List (Array RenderedTrack) }
-              }
-           -> AVar Unit
+           -> UIState _
            -> Aff _ Unit
-renderLoop cSys browser trackDisplayWidth canvas state ready = pure unit
-{-
-renderLoop cSys browser trackDisplayWidth canvas state ready = forever do
+renderLoop cSys browser canvas state = forever do
 
-  _ <- takeVar ready
+  _ <- takeVar state.viewReady
 
-  visible <- readVar state.viewRange
+  csView <- readVar state.view
   -- if there's a rendering fiber running, we kill it
   traverse_ (killFiber (error "Resetting renderer"))
     =<< tryTakeVar state.renderFiber
 
+  let uiScale = trackViewScale canvas csView
 
   -- if the view scale is unchanged, use the cached glyphs
-  tracks <- do
+  tracks' <- do
     cache <- AVar.tryTakeVar state.cachedTracks
     case cache of
       Just ct
-        | ct.viewSize == pairSize visible -> do
+        | ct.cachedScale == uiScale -> do
             AVar.putVar ct state.cachedTracks
             pure ct.glyphs
       _ -> do
-        let viewSize = pairSize visible
-            glyphs = browser.tracks visible
+        let cachedScale = uiScale
+            glyphs = browser.tracks (unwrap csView)
 
-        AVar.putVar {viewSize, glyphs} state.cachedTracks
+        AVar.putVar {cachedScale, glyphs} state.cachedTracks
         pure glyphs
 
-
   -- fork a new renderFiber
-  renderFiber <- forkAff do
 
-    trackCtx   <- liftEff $ getContext2D canvases.track
+  let (Pair offset _) = pixelsView uiScale csView
 
-    let scale = BigInt.toNumber (pairSize visible) / trackDisplayWidth
-        (Pair offset _) =
-          ((_/scale) <<< BigInt.toNumber) <$> visible
+      relativeUI = browser.relativeUI (unwrap csView)
+      fixedUI = browser.fixedUI
 
-        -- used instead of withContext to be able to thread the rendering and
-        -- reset the offset if the fiber is killed
-        shiftView x =
-          void $ Canvas.translate
-            { translateX: x, translateY: zero } trackCtx
+      ui ::  { tracks     :: List (Array RenderedTrack)
+             , relativeUI :: Drawing
+             , fixedUI :: Drawing }
+      ui = { tracks: tracks'
+           , relativeUI, fixedUI }
 
-    liftEff do
-      overlayCtx <- getContext2D canvases.overlay
-      Drawing.render overlayCtx browser.fixedUI
-
-      trackCtx <- getContext2D canvases.track
-      {width, height} <- Canvas.getCanvasDimensions canvases.track
-      Drawing.render trackCtx
-        $ filled (fillColor white) $ rectangle 0.0 0.0 width height
-
-      shiftView (-offset)
-      Drawing.render trackCtx $ browser.relativeUI visible
-
-    finally (liftEff $ shiftView offset) do
-      renderGlyphs visible scale tracks canvases
+  renderFiber <- forkAff
+                 $ renderBrowser (wrap 3.0) canvas offset ui
 
   putVar renderFiber state.renderFiber
 
 
 
 
--- TODO this should be smarter and have fewer magic numbers
-renderBatch :: CanvasElement
-            -> { drawing :: Drawing, points :: Array Point }
-            -> Context2D
-            -> Eff _ Unit
-renderBatch buffer {drawing, points} ctx = do
-  -- hardcoded glyph sizes for now.
-  let r = 13.0
-      d = r * 2.0
-      dim = { width: 100.0, height: d }
-                          -- width even more hardcoded to deal with long text!
-  _ <- Canvas.setCanvasDimensions dim buffer
-  bfrCtx <- Canvas.getContext2D buffer
-  Drawing.render bfrCtx $ Drawing.translate r r drawing
-  let img = Canvas.canvasElementToImageSource buffer
-  runEffFn4 drawImageMany buffer ctx dim points
-
-
-renderGlyphs :: Pair BigInt
-             -> Number
-             -> List (Array RenderedTrack)
-             -> BrowserCanvas
-             -> Aff _ Unit
-renderGlyphs vw@(Pair l _) viewScale ts canvases = do
-  let vw'@(Pair pxL pxR) = map (\x -> (BigInt.toNumber x / viewScale)) vw
-  -- Predicates to filter out glyphs that would not be visible on screen
-     -- Hack to render more of the canvas just to be sure
-      pxL' = pxL - (pxR - pxL)
-      pxR' = pxR + (pxR - pxL)
-      predB p = p.x - 10.0 > pxL'
-             && p.x + 10.0 < pxR'
-      predS s = s.width >= one
-             && s.point.x - s.width > pxL'
-             && s.point.x + s.width < pxR'
-
-  trackCtx <- liftEff $ Canvas.getContext2D canvases.track
-
-  for_ ts \track -> do
-    for_ track \t -> do
-      case t of
-        Left {drawing, points}  -> do
-          let points' = filter predB points
-          liftEff $
-            renderBatch canvases.buffer {drawing, points: points'} trackCtx
-
-        Right gs -> do
-          let gs' = filter predS gs
-          liftEff $ foreachE gs' \s -> do
-            Drawing.render trackCtx
-              $ Drawing.translate s.point.x s.point.y
-              $ s.drawing unit
-
-      -- delay to give the UI thread a moment
-      delay (wrap 3.0)
--}
-
 
 -- TODO configure UI widths
-runBrowser :: Conf -> Eff _ _
-runBrowser config = launchAff $ do
+runBrowser :: Conf -> BrowserCanvas -> Eff _ _
+runBrowser config bc = launchAff $ do
 
   {width} <- liftEff $ windowInnerSize
 
@@ -347,19 +264,6 @@ runBrowser config = launchAff $ do
       legendWidth = 120.0
       trackWidth = width - (vScaleWidth + legendWidth)
 
-
-  -- bCanvas <- do
-  --   doc <- liftEff $ DOM.htmlDocumentToDocument
-  --          <$> (DOM.document =<< DOM.window)
-  --   cont <- liftEff $ DOM.querySelector (wrap "#browser") (toParentNode doc)
-
-  --   case cont of
-  --     Nothing -> throwError $ error "Could not find browser element"
-  --     Just el -> liftEff do
-  --       createBrowserCanvas
-  --         el browserDimensions
-  --         { translateX: vScaleWidth
-  --         , translateY: zero }
 
 
   let cSys :: CoordSys ChrId BigInt
@@ -378,42 +282,47 @@ runBrowser config = launchAff $ do
 
     pure { genes, gwas, annotations }
 
-  let initialView :: Pair BigInt
-      initialView = Pair zero (cSys^._TotalSize)
+  let initialView :: CoordSysView
+      initialView = wrap $ Pair zero (cSys^._TotalSize)
 
-  viewCmds <- makeEmptyVar
+  viewCmd <- makeEmptyVar
   liftEff $ do
-    btnScroll 0.05 viewCmds
-    btnZoom   0.10 viewCmds
-    -- dragScroll trackWidth bCanvas viewCmds
-    -- wheelZoom 0.02 viewCmds bCanvas.overlay
+    btnScroll 0.05 viewCmd
+    btnZoom   0.10 viewCmd
+    -- dragScroll trackWidth bCanvas viewCmd
+    -- wheelZoom 0.02 viewCmd bCanvas.overlay
 
-  viewRange <- makeVar initialView
-
+  view <- makeVar initialView
+  viewReady <- makeVar unit
   renderFiber <- makeEmptyVar
+  cachedTracks <- AVar.makeEmptyVar
+
+  let initState :: UIState _
+      initState = { view, viewCmd, viewReady, renderFiber, cachedTracks }
 
   let
       entries = foldMap annotLegendTest trackData.annotations
       legend = { width: legendWidth, entries }
+
       s = config.score
+
       vscale = { width: vScaleWidth, color: black
                , min: s.min, max: s.max, sig: s.sig }
+
       tracks = demoTracks vscale trackData
+
       padding = { horizontal: config.trackPadding.left
                 , vertical: config.trackPadding.top }
+
       mainBrowser = browser cSys browserDimensions padding {legend, vscale} tracks
+
+      viewTimeout :: Milliseconds
       viewTimeout = wrap 100.0
 
-  viewReady <- makeVar unit
 
-  cachedTracks <- AVar.makeEmptyVar
+  _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
+  _ <- forkAff $ renderLoop cSys mainBrowser bc initState
 
-  _ <- forkAff $ viewMachine cSys viewTimeout {viewRange, viewCmds} viewReady
-  -- _ <- forkAff
-  --        $ renderLoop cSys mainBrowser
-  --          trackWidth bCanvas
-  --          { viewCmds, viewRange, renderFiber, cachedTracks }
-  --          viewReady
 
   pure unit
 
@@ -466,6 +375,8 @@ initBrowser rawConfig = do
           setWindow "blankTrack" (blankTrack bc)
 
           log $ unsafeStringify c
+          void $ runBrowser c bc
+
 
 
 
