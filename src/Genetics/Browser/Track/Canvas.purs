@@ -1,27 +1,15 @@
 -- | This module provides a HTML5 canvas interface for the genetics browser,
 -- | which wraps and optimizes all rendering calls
 
-module Genetics.Browser.Track.UI.Canvas
-       ( BrowserCanvas
-       , browserCanvas
-       , TrackPadding
-       , debugBrowserCanvas
-       , drawToBuffer
-       , flipBuffer
-       , blankBuffer
-       , BufferedCanvas
-       , TrackCanvas
-       , drawOnTrack
-       , flipTrack
-       , blankTrack
-       ) where
+module Genetics.Browser.Track.UI.Canvas where
 
 
 import Prelude
 
-import Control.Monad.Aff (Aff, delay)
+import Control.Monad.Aff (Aff, Milliseconds(..), delay)
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Uncurried (EffFn3, EffFn4, runEffFn3, runEffFn4)
 import DOM.Node.Types (Element)
 import Data.Bitraversable (bitraverse, bitraverse_)
@@ -29,6 +17,7 @@ import Data.Either (Either(..), either)
 import Data.Foldable (for_)
 import Data.Lens (iso, view, (^.))
 import Data.Lens.Iso (Iso')
+import Data.List (List)
 import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Nullable (Nullable, toMaybe)
@@ -37,8 +26,10 @@ import Data.Traversable (traverse_)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Genetics.Browser.Track.Backend (BatchGlyph, SingleGlyph, RenderedTrack)
 import Genetics.Browser.Types (Point)
+import Genetics.Browser.Types.Coordinates (CoordSysView(..), ViewScale(..), viewScale)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
+import Graphics.Drawing (Drawing)
 import Graphics.Drawing as Drawing
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -216,7 +207,6 @@ drawToBuffer (BufferedCanvas {back}) f = do
   ctx <- Canvas.getContext2D back
   f ctx
 
-
 blankBuffer :: BufferedCanvas
             -> Eff _ Unit
 blankBuffer (BufferedCanvas {back}) = do
@@ -358,6 +348,12 @@ browserCanvas dimensions trackPadding el = do
                        , overlay, dimensions }
 
 
+trackViewScale :: BrowserCanvas
+               -> CoordSysView
+               -> ViewScale
+trackViewScale (BrowserCanvas bc) = viewScale (unwrap $ bc.track)
+
+
 renderSingleGlyphs :: TrackCanvas
                    -> Array SingleGlyph
                    -> Eff _ Unit
@@ -396,6 +392,36 @@ renderGlyphs track offset rts = do
   for_ rts $ either
     (renderBatchGlyphs track)
     (renderSingleGlyphs track)
+
+
+renderBrowser :: Milliseconds
+              -> BrowserCanvas
+              -> Number
+              -> { tracks     :: List (Array RenderedTrack)
+                 , relativeUI :: Drawing
+                 , fixedUI :: Drawing }
+              -> Aff _ _
+renderBrowser d (BrowserCanvas bc) offset ui = do
+
+  let bfr = (unwrap bc.track).canvas
+
+  liftEff $ blankBuffer bfr
+
+  liftEff $ translateBuffer {x: offset, y: zero} bfr
+
+  for_ ui.tracks \t -> do
+      liftEff $ for_ t $ either
+        (renderBatchGlyphs  bc.track)
+        (renderSingleGlyphs bc.track)
+
+      liftEff $ flipBuffer bfr
+      delay d
+
+  overlayCtx <- liftEff $ Canvas.getContext2D bc.overlay
+  liftEff $ Drawing.render overlayCtx ui.fixedUI
+  liftEff $ drawToBuffer bfr \tCtx -> Drawing.render tCtx $ ui.relativeUI
+
+  liftEff $ flipBuffer bfr
 
 
 flipTrack :: BrowserCanvas
