@@ -26,6 +26,7 @@ import Control.Monad.Eff.Uncurried (EffFn3, EffFn4, runEffFn3, runEffFn4)
 import DOM.Node.Types (Element)
 import Data.Bitraversable (bitraverse, bitraverse_)
 import Data.Either (Either(..), either)
+import Data.Foldable (for_)
 import Data.Lens (iso, view, (^.))
 import Data.Lens.Iso (Iso')
 import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
@@ -107,6 +108,13 @@ foreign import drawCopies :: forall eff a.
                              { width :: Number, height :: Number }
                              (Array Point)
                              Unit
+
+
+foreign import setCanvasTranslation :: forall e.
+                                       Point
+                                    -> CanvasElement
+                                    -> Eff e Unit
+
 
 foreign import scrollCanvas :: forall eff.
                                CanvasElement
@@ -191,6 +199,14 @@ setBufferedCanvasSize dim bc@(BufferedCanvas {back, front}) = do
   _ <- Canvas.setCanvasDimensions dim front
   blankBuffer bc
   pure unit
+
+
+translateBuffer :: Point
+                -> BufferedCanvas
+                -> Eff _ Unit
+translateBuffer p (BufferedCanvas bc) = do
+  setCanvasTranslation p bc.back
+  setCanvasTranslation p bc.front
 
 
 drawToBuffer :: BufferedCanvas
@@ -375,8 +391,9 @@ renderGlyphs :: TrackCanvas
              -> Number
              -> Array RenderedTrack
              -> Eff _ Unit
-renderGlyphs track =
-  traverse_ $ either
+renderGlyphs track offset rts = do
+  translateBuffer {x: offset, y: zero} (unwrap track).canvas
+  for_ rts $ either
     (renderBatchGlyphs track)
     (renderSingleGlyphs track)
 
@@ -397,6 +414,10 @@ blankTrack (BrowserCanvas bc) = do
 
   blankBuffer buffered
 
+renderTrack :: BrowserCanvas
+            -> (TrackCanvas -> Eff _ Unit)
+            -> Eff _ Unit
+renderTrack (BrowserCanvas bc) f = f bc.track
 drawOnTrack :: BrowserCanvas
             -> (Context2D -> Eff _ Unit)
             -> Eff _ Unit

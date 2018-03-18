@@ -48,6 +48,15 @@ exports.drawCopies = function(bfr, ctx, dim, ps) {
     });
 };
 
+exports.setCanvasTranslation = function(p) {
+    return function(c) {
+        return function() {
+            var ctx = c.getContext('2d');
+            ctx.setTransform(1, 0, 0, 1, p.x, p.y);
+        };
+    };
+};
+
 
 // scrolls a canvas, given a "back buffer" canvas to copy the current context to
 exports.scrollCanvas = function(backCanvas) {
