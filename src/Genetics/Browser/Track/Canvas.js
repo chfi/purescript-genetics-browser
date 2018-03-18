@@ -38,9 +38,13 @@ exports.setContainerStyle = function(e) {
     };
 };
 
-exports.drawImageMany = function(bfr, ctx, dim, ps) {
+exports.drawCopies = function(bfr, ctx, dim, ps) {
     ps.forEach(function(p) {
-        ctx.drawImage(bfr, 0, 0, dim.width, dim.height, p.x, p.y, dim.width, dim.height);
+        ctx.drawImage(bfr,
+                      0, 0,
+                      dim.width, dim.height,
+                      p.x, p.y,
+                      dim.width, dim.height);
     });
 };
 

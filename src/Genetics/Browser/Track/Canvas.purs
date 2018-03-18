@@ -19,59 +19,26 @@ module Genetics.Browser.Track.UI.Canvas
 
 import Prelude
 
-import Color (black)
-import Control.Coroutine (Consumer, Producer, connect, runProcess)
-import Control.Coroutine as Co
-import Control.Monad.Aff (Aff, Fiber, Milliseconds, delay, finally, forkAff, killFiber, launchAff, launchAff_)
-import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, readVar, takeVar, tryTakeVar)
-import Control.Monad.Aff.AVar as AVar
+import Control.Monad.Aff (Aff, delay)
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
-import Control.Monad.Eff.Exception (error)
-import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
-import Control.Monad.Error.Class (throwError)
-import Control.Monad.Rec.Class (forever)
-import DOM.Classy.Node (toNode)
-import DOM.Classy.ParentNode (toParentNode)
-import DOM.HTML (window) as DOM
-import DOM.HTML.Types (htmlDocumentToDocument) as DOM
-import DOM.HTML.Window (document) as DOM
-import DOM.Node.Element as DOM
-import DOM.Node.Node (appendChild) as DOM
-import DOM.Node.ParentNode (querySelector) as DOM
-import DOM.Node.Types (Element, Node)
-import Data.Argonaut (Json, _Number, _Object, _String)
-import Data.Array as Array
-import Data.Bifunctor (bimap)
-import Data.BigInt (BigInt)
-import Data.BigInt as BigInt
-import Data.Either (Either(..), note)
-import Data.Filterable (filter)
-import Data.Foldable (class Foldable, foldMap, for_, intercalate, null)
+import Control.Monad.Eff.Uncurried (EffFn3, EffFn4, runEffFn3, runEffFn4)
+import DOM.Node.Types (Element)
+import Data.Bitraversable (bitraverse, bitraverse_)
+import Data.Either (Either(..), either)
 import Data.Lens (iso, view, (^.))
 import Data.Lens.Iso (Iso')
-import Data.List (List)
-import Data.List as List
-import Data.Map (Map)
-import Data.Maybe (Maybe(Just, Nothing), fromJust, fromMaybe)
-import Data.Monoid (class Monoid, mempty)
-import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
+import Data.Newtype (class Newtype, unwrap)
 import Data.Nullable (Nullable, toMaybe)
-import Data.Pair (Pair(..))
-import Data.Symbol (SProxy(..))
-import Data.Traversable (traverse, traverse_)
+import Data.Time.Duration (Milliseconds(..))
+import Data.Traversable (traverse_)
 import Data.Tuple (Tuple(Tuple), uncurry)
-import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes)
-import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
-import Genetics.Browser.Types.Coordinates (CoordSys(..), _TotalSize, coordSys, pairSize, scalePairBy, translatePairBy)
-import Graphics.Canvas (CanvasElement, Context2D, getContext2D)
+import Genetics.Browser.Track.Backend (BatchGlyph, SingleGlyph, RenderedTrack)
+import Genetics.Browser.Types (Point)
+import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
 import Graphics.Drawing as Drawing
-import Partial.Unsafe (unsafeCrashWith, unsafePartial)
-import Simple.JSON (readJSON)
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -132,6 +99,14 @@ foreign import appendCanvasElem :: forall e.
 -- | Sets some of the browser container's CSS to reasonable defaults
 foreign import setContainerStyle :: forall e. Element -> Canvas.Dimensions -> Eff e Unit
 
+
+foreign import drawCopies :: forall eff a.
+                             EffFn4 eff
+                             CanvasElement
+                             Context2D
+                             { width :: Number, height :: Number }
+                             (Array Point)
+                             Unit
 
 foreign import scrollCanvas :: forall eff.
                                CanvasElement
@@ -365,6 +340,46 @@ browserCanvas dimensions trackPadding el = do
 
   pure $ BrowserCanvas { track, trackPadding
                        , overlay, dimensions }
+
+
+renderSingleGlyphs :: TrackCanvas
+                   -> Array SingleGlyph
+                   -> Eff _ Unit
+renderSingleGlyphs (TrackCanvas tc) glyphs = do
+  let draw ctx = foreachE glyphs \s -> do
+        Drawing.render ctx
+          $ Drawing.translate s.point.x s.point.y
+          $ s.drawing unit
+
+  drawToBuffer tc.canvas draw
+
+
+renderBatchGlyphs :: TrackCanvas
+                  -> BatchGlyph Point
+                  -> Eff _ Unit
+renderBatchGlyphs (TrackCanvas tc) {drawing, points} = do
+  glyphBfr <- Canvas.getContext2D tc.glyphBuffer
+
+  let r = glyphBufferSize.width / 2.0
+      d = r * 2.0
+      dim = { width: glyphBufferSize.width, height: d }
+
+  Drawing.render glyphBfr
+    $ Drawing.translate r r drawing
+
+  drawToBuffer tc.canvas \ctx ->
+    runEffFn4 drawCopies tc.glyphBuffer ctx dim points
+
+
+renderGlyphs :: TrackCanvas
+             -> Number
+             -> Array RenderedTrack
+             -> Eff _ Unit
+renderGlyphs track =
+  traverse_ $ either
+    (renderBatchGlyphs track)
+    (renderSingleGlyphs track)
+
 
 flipTrack :: BrowserCanvas
           -> Eff _ Unit
