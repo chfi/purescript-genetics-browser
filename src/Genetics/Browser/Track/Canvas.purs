@@ -10,7 +10,7 @@ import Control.Monad.Aff (Aff, Milliseconds(..), delay)
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
-import Control.Monad.Eff.Uncurried (EffFn3, EffFn4, runEffFn3, runEffFn4)
+import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
 import DOM.Node.Types (Element)
 import Data.Bitraversable (bitraverse, bitraverse_)
 import Data.Either (Either(..), either)
@@ -105,6 +105,17 @@ foreign import setCanvasTranslation :: forall e.
                                        Point
                                     -> CanvasElement
                                     -> Eff e Unit
+
+
+foreign import canvasClickImpl :: forall e.
+                                  EffFn2 e
+                                  CanvasElement
+                                  (Point -> Eff e Unit)
+                                  Unit
+
+
+canvasClick :: CanvasElement -> (Point -> Eff _ Unit) -> Eff _ Unit
+canvasClick = runEffFn2 canvasClickImpl
 
 
 foreign import scrollCanvas :: forall eff.
@@ -367,6 +378,18 @@ browserCanvas dimensions trackPadding el = do
 
   pure $ BrowserCanvas { track, trackPadding
                        , overlay, dimensions }
+
+
+browserOnClick :: BrowserCanvas
+               -> { track   :: Point -> Eff _ Unit
+                  , overlay :: Point -> Eff _ Unit }
+               -> Eff _ Unit
+browserOnClick (BrowserCanvas bc) {track, overlay} =
+  canvasClick bc.overlay \o -> do
+    let t = { x: o.x - bc.trackPadding.left
+            , y: o.y - bc.trackPadding.top }
+    overlay o
+    track t
 
 
 trackViewScale :: BrowserCanvas

@@ -50,7 +50,7 @@ import Data.Traversable (for, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, gwasGlyphTest, produceAnnots, produceGWAS, produceGenes)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, debugBrowserCanvas, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser, renderSingleGlyphs, renderTrack, trackViewScale, transTrack)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, debugBrowserCanvas, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser, renderSingleGlyphs, renderTrack, subtractPadding, trackViewScale, transTrack, uiSlots)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
 import Genetics.Browser.Types.Coordinates (CoordSys(..), CoordSysView(..), ViewScale(..), _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scalePairBy, scaleViewBy, showViewScale, translatePairBy, translateViewBy)
 import Global.Unsafe (unsafeStringify)
@@ -361,6 +361,10 @@ runBrowser config bc = launchAff $ do
   liftEff do
     setWindow "mainBrowser" mainBrowser
     setWindow "peekView" (peekUIState initState)
+
+    browserOnClick bc
+      { track:   \p -> log ("track: "   <> show p.x <> ", " <> show p.y)
+      , overlay: \p -> log ("overlay: " <> show p.x <> ", " <> show p.y) }
 
   _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
   _ <- forkAff $ renderLoop cSys mainBrowser bc initState
