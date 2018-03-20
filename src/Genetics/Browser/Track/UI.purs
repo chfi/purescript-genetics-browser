@@ -52,7 +52,7 @@ import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeat
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, gwasGlyphTest, produceAnnots, produceGWAS, produceGenes)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, debugBrowserCanvas, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser, renderSingleGlyphs, renderTrack, trackViewScale, transTrack)
 import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
-import Genetics.Browser.Types.Coordinates (CoordSys(..), CoordSysView(..), ViewScale(..), _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scalePairBy, scaleViewBy, translatePairBy, translateViewBy)
+import Genetics.Browser.Types.Coordinates (CoordSys(..), CoordSysView(..), ViewScale(..), _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scalePairBy, scaleViewBy, showViewScale, translatePairBy, translateViewBy)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, Context2D, fillRect, getContext2D, setFillStyle)
 import Graphics.Canvas as Canvas
@@ -162,6 +162,27 @@ type UIState e = { view :: AVar CoordSysView
                  }
 
 
+
+diffView :: CoordSysView -> CoordSysView -> CoordSysView
+diffView v1 v2 =
+  let (Pair l1 r1) = unwrap v1
+      (Pair l2 r2) = unwrap v2
+  in wrap $ Pair (l2 - l1) (r2 - r1)
+
+showView :: CoordSysView -> String
+showView (CoordSysView (Pair l r)) = BigInt.toString l <> " - " <> BigInt.toString r
+
+
+peekUIState :: UIState _
+            -> Eff _ Unit
+peekUIState s = launchAff_ do
+  view <- AVar.tryReadVar s.view
+  case view of
+    Nothing -> liftEff $ log "CoordSysView state empty"
+    Just v  ->
+      liftEff $ log $ "CoordSysView: " <> showView v
+
+
 uiViewUpdate :: forall r.
                 CoordSys _ BigInt
              -> Milliseconds
@@ -178,6 +199,7 @@ uiViewUpdate cs timeout { view, viewCmd, viewReady } = do
         cmd <- takeVar viewCmd
 
         killFiber (error "Resetting view update") updater
+        liftEff $ log $ "forking view update"
 
         curCmd <- takeVar curCmdVar
         let cmd' = curCmd <> cmd
@@ -185,8 +207,16 @@ uiViewUpdate cs timeout { view, viewCmd, viewReady } = do
 
         updater' <- forkAff do
             delay timeout
+            liftEff $ log "Running view update"
             vr <- takeVar view
-            putVar (updateViewFold cmd' vr) view
+
+            liftEff $ log $ "   <  " <> showView vr
+            let vr' = updateViewFold cmd' vr
+
+            putVar vr' view
+            liftEff $ log $ "   |  " <> show cmd'
+            liftEff $ log $ "   >  " <> showView vr'
+            liftEff $ log $ "diff: " <> showView (diffView vr vr')
             -- putVar (normView $ updateViewFold cmd' vr) view
             putVar unit viewReady
             takeVar curCmdVar *> putVar mempty curCmdVar
@@ -314,11 +344,15 @@ runBrowser config bc = launchAff $ do
       padding = { horizontal: config.trackPadding.left
                 , vertical: config.trackPadding.top }
 
-      mainBrowser = browser cSys browserDimensions padding {legend, vscale} tracks
+
+      mainBrowser = browser cSys trackDimensions browserDimensions {legend, vscale} tracks
 
       viewTimeout :: Milliseconds
       viewTimeout = wrap 100.0
 
+  liftEff do
+    setWindow "mainBrowser" mainBrowser
+    setWindow "peekView" (peekUIState initState)
 
   _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
   _ <- forkAff $ renderLoop cSys mainBrowser bc initState
