@@ -286,6 +286,10 @@ renderLoop cSys browser canvas state = forever do
 runBrowser :: Conf -> BrowserCanvas -> Eff _ _
 runBrowser config bc = launchAff $ do
 
+
+  let browserDimensions = (unwrap bc).dimensions
+      trackDimensions = subtractPadding browserDimensions (unwrap bc).trackPadding
+
   {width} <- liftEff $ windowInnerSize
 
   let height = config.browserHeight

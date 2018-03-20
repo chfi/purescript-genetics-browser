@@ -95,8 +95,8 @@ foreign import setContainerStyle :: forall e. Element -> Canvas.Dimensions -> Ef
 foreign import drawCopies :: forall eff a.
                              EffFn4 eff
                              CanvasElement
-                             Context2D
                              { width :: Number, height :: Number }
+                             Context2D
                              (Array Point)
                              Unit
 
@@ -363,7 +363,10 @@ renderSingleGlyphs (TrackCanvas tc) glyphs = do
           $ Drawing.translate s.point.x s.point.y
           $ s.drawing unit
 
-  drawToBuffer tc.canvas draw
+  -- drawToBuffer tc.canvas draw
+
+  ctx <- Canvas.getContext2D (unwrap tc.canvas).front
+  draw ctx
 
 
 renderBatchGlyphs :: TrackCanvas
@@ -372,15 +375,15 @@ renderBatchGlyphs :: TrackCanvas
 renderBatchGlyphs (TrackCanvas tc) {drawing, points} = do
   glyphBfr <- Canvas.getContext2D tc.glyphBuffer
 
-  let r = glyphBufferSize.width / 2.0
-      d = r * 2.0
-      dim = { width: glyphBufferSize.width, height: d }
+  let x0 = glyphBufferSize.width  / 2.0
+      y0 = glyphBufferSize.height / 2.0
 
   Drawing.render glyphBfr
-    $ Drawing.translate r r drawing
+    $ Drawing.translate x0 y0 drawing
 
-  drawToBuffer tc.canvas \ctx ->
-    runEffFn4 drawCopies tc.glyphBuffer ctx dim points
+  ctx <- Canvas.getContext2D (unwrap tc.canvas).front
+
+  runEffFn4 drawCopies tc.glyphBuffer glyphBufferSize ctx points
 
 
 renderGlyphs :: TrackCanvas
@@ -404,25 +407,40 @@ renderBrowser :: Milliseconds
 renderBrowser d (BrowserCanvas bc) offset ui = do
 
   let bfr = (unwrap bc.track).canvas
+      cnv = (unwrap bfr).front
 
-  liftEff $ blankBuffer bfr
+  -- liftEff $ blankBuffer bfr
 
-  liftEff $ translateBuffer {x: offset, y: zero} bfr
+  -- backCtx <- Canvas.getContext2D back
+  -- translateBuffer {x: zero, y: zero} bc
+  -- setCanvasTranslation {x: 0.0, y: 0.0 } back
+
+  ctx <- liftEff $ Canvas.getContext2D cnv
+  liftEff do
+    {width, height} <- Canvas.getCanvasDimensions cnv
+    _ <- Canvas.setFillStyle backgroundColor ctx
+    translateBuffer {x: zero, y: zero} bfr
+    void $ Canvas.fillRect ctx { x: 0.0, y: 0.0, w: width, h: height }
+
+  liftEff $ translateBuffer {x: (-offset), y: zero} bfr
 
   for_ ui.tracks \t -> do
       liftEff $ for_ t $ either
         (renderBatchGlyphs  bc.track)
         (renderSingleGlyphs bc.track)
 
-      liftEff $ flipBuffer bfr
+      -- liftEff $ flipBuffer bfr
       delay d
 
-  overlayCtx <- liftEff $ Canvas.getContext2D bc.overlay
-  liftEff $ Drawing.render overlayCtx ui.fixedUI
-  liftEff $ drawToBuffer bfr \tCtx -> Drawing.render tCtx $ ui.relativeUI
+  liftEff do
 
-  liftEff $ flipBuffer bfr
+    overlayCtx <- Canvas.getContext2D bc.overlay
+    Drawing.render overlayCtx ui.fixedUI
 
+    Drawing.render ctx ui.relativeUI
+
+  -- drawToBuffer bfr \tCtx -> Drawing.render tCtx $ ui.relativeUI
+  -- liftEff $ flipBuffer bfr
 
 flipTrack :: BrowserCanvas
           -> Eff _ Unit

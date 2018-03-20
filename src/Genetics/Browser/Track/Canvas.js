@@ -38,13 +38,14 @@ exports.setContainerStyle = function(e) {
     };
 };
 
-exports.drawCopies = function(bfr, ctx, dim, ps) {
+exports.drawCopies = function(bfr, bfrDim, ctx, ps) {
     ps.forEach(function(p) {
         ctx.drawImage(bfr,
                       0, 0,
-                      dim.width, dim.height,
-                      p.x, p.y,
-                      dim.width, dim.height);
+                      bfrDim.width, bfrDim.height,
+                      p.x - (bfrDim.width  / 2.0),
+                      p.y - (bfrDim.height / 2.0),
+                      bfrDim.width, bfrDim.height);
     });
 };
 
