@@ -33,9 +33,17 @@
         annotations: urlRoot + "annots_fake.json"
       };
 
+
+      var vscaleWidth = 60.0;
+      var legendWidth = 120.0;
+
       var config =
       { browserHeight: 400.0,
-        trackPadding: { top: 25.0, bottom: 25.0, left: 0.0, right: 0.0 },
+        trackPadding:
+        { top: 25.0,
+          bottom: 25.0,
+          left: vscaleWidth,
+          right: legendWidth },
         score: { min: 0.15, max: 0.45, sig: 0.25 },
         urls: githubUrls
       };

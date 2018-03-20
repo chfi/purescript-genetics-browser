@@ -31,10 +31,10 @@ import Data.Symbol (class IsSymbol, SProxy(SProxy))
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple, snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
-import Genetics.Browser.Types (Bp, ChrId, Point)
+import Genetics.Browser.Types (Bp, ChrId)
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize, pairsOverlap, scaledSegments)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
+import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
@@ -268,9 +268,9 @@ drawVScale :: forall r.
            -> Drawing
 drawVScale vscale height =
   -- should have some padding here too; hardcode for now
-  let hPad = vscale.width  / 5.0
+  let hPad = vscale.width  / 8.0
       vPad = height / 10.0
-      x = vscale.width / 2.0
+      x = 7.0 * hPad
 
       y1 = 0.0
       y2 = height
@@ -286,10 +286,10 @@ drawVScale vscale height =
                           (y1 + i*(y2-y1))) n
 
       ft = font sansSerif 10 mempty
-      mkT y = Drawing.text ft (x-12.0) y (fillColor black)
+      mkT y = Drawing.text ft hPad y (fillColor black)
 
-      topLabel = mkT (y1-(0.5*vPad)) $ show vscale.max
-      btmLabel = mkT (y2+vPad)       $ show vscale.min
+      topLabel = mkT (y1+5.0) $ show vscale.max
+      btmLabel = mkT (y2+5.0)       $ show vscale.min
 
   in outlined (outlineColor vscale.color <> lineWidth 2.0) (p <> ps)
      <> topLabel <> btmLabel
@@ -486,44 +486,39 @@ renderNormalizedTrack cs cdim bView ngs =
   in foldMapWithIndex renderSeg segs
 
 
+type UISlot = { offset :: Point
+              , size   :: Canvas.Dimensions }
+
+type UISlots = { left   :: UISlot
+               , right  :: UISlot
+               , top    :: UISlot
+               , bottom :: UISlot }
 
 type RenderedTrack = Either (BatchGlyph Point) (Array SingleGlyph)
 
 browser :: CoordSys ChrId BigInt
         -> Canvas.Dimensions
-        -> Padding
+        -> Canvas.Dimensions
+        -> UISlots
         -> { legend :: Legend, vscale :: VScale }
         -> List (Exists Track)
         -> { tracks     :: Pair BigInt -> List (Array RenderedTrack)
            , relativeUI :: Pair BigInt -> Drawing
            , fixedUI    :: Drawing }
-browser cs cdim padding ui inputTracks =
-  let height = cdim.height - 2.0 * padding.vertical
-      width  = cdim.width
-
-      trackCanvas = { width: width - (ui.vscale.width + ui.legend.width)
-                    , height }
-
-      -- TODO make a type that corresponds to left-of-track and right-of-track to make this dynamic
-      drawOverlay x w d =
-          (translate x zero
+browser cs trackDim overlayDim uiSlots ui inputTracks =
+  let
+      drawInSlot {offset, size} d =
+          (translate offset.x offset.y
            $ filled (fillColor white)
-           $ rectangle zero zero w cdim.height )
-        <> translate x padding.vertical d
+           $ rectangle zero zero size.width size.height)
+        <> translate offset.x offset.y d
 
-      vScale = drawOverlay
-                 zero
-                 ui.vscale.width
-                 (drawVScale ui.vscale height)
+      vScale = drawInSlot uiSlots.left (drawVScale ui.vscale uiSlots.left.size.height)
 
-      legend = drawOverlay
-                 (cdim.width - ui.legend.width)
-                 ui.legend.width
-                 (drawLegend ui.legend height)
-
+      legend = drawInSlot uiSlots.right (drawLegend ui.legend uiSlots.right.size.height)
 
       ruler   = Drawing.translate ui.vscale.width zero
-                $ horRulerTrack ui.vscale red trackCanvas
+                $ horRulerTrack ui.vscale red trackDim
 
       fixedUI = ruler <> vScale <> legend
 
@@ -533,23 +528,21 @@ browser cs cdim padding ui inputTracks =
       normTracks = runExists (\(Track r as) -> render r <$> as) <$> inputTracks
 
       tracks :: Pair BigInt -> List (Array (Either (BatchGlyph Point) (Array SingleGlyph)))
-      tracks v = (renderNormalizedTrack cs trackCanvas v) <$> normTracks
-
+      tracks v = (renderNormalizedTrack cs trackDim v) <$> normTracks
 
 
       renderUIElement :: Map ChrId (Array NormalizedGlyph)
                       -> ChrId -> Pair Number -> Array SingleGlyph
       renderUIElement m k s
-          = fold $ rescaleNormSingleGlyphs cdim.height s
+          = fold $ rescaleNormSingleGlyphs trackDim.height s
                 <$> (Map.lookup k m)
 
       drawTrackUI :: Pair BigInt -> (ChrId -> Pair Number -> (Array _)) -> Drawing
-      drawTrackUI v = foldMap f <<< withPixelSegments cs trackCanvas v
+      drawTrackUI v = foldMap f <<< withPixelSegments cs trackDim v
         where f {drawing, point} = Drawing.translate point.x point.y (drawing unit)
 
       chrLabels :: _
-      chrLabels = renderUIElement $ chrLabelTrack cs trackCanvas
-      -- boxes     = boxesTrack height cs trackCanvas
+      chrLabels = renderUIElement $ chrLabelTrack cs trackDim
 
       relativeUI :: Pair BigInt -> Drawing
       relativeUI v = drawTrackUI v chrLabels

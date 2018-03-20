@@ -349,7 +349,11 @@ runBrowser config bc = launchAff $ do
                 , vertical: config.trackPadding.top }
 
 
-      mainBrowser = browser cSys trackDimensions browserDimensions {legend, vscale} tracks
+      mainBrowser = browser
+                    cSys
+                    trackDimensions
+                    browserDimensions
+                    (uiSlots bc) {legend, vscale} tracks
 
       viewTimeout :: Milliseconds
       viewTimeout = wrap 100.0

@@ -24,7 +24,7 @@ import Data.Nullable (Nullable, toMaybe)
 import Data.Time.Duration (Milliseconds(..))
 import Data.Traversable (traverse_)
 import Data.Tuple (Tuple(Tuple), uncurry)
-import Genetics.Browser.Track.Backend (BatchGlyph, SingleGlyph, RenderedTrack)
+import Genetics.Browser.Track.Backend (BatchGlyph, RenderedTrack, SingleGlyph, UISlots)
 import Genetics.Browser.Types (Point)
 import Genetics.Browser.Types.Coordinates (CoordSysView(..), ViewScale(..), viewScale)
 import Graphics.Canvas (CanvasElement, Context2D)
@@ -287,6 +287,10 @@ newtype BrowserCanvas =
                 , overlay      :: CanvasElement
                 }
 
+
+derive instance newtypeBrowserCanvas :: Newtype BrowserCanvas _
+
+
 foreign import debugBrowserCanvas :: forall e.
                                      String
                                   -> BrowserCanvas
@@ -299,6 +303,23 @@ subtractPadding :: Canvas.Dimensions
 subtractPadding {width, height} pad =
   { width:  width - pad.left - pad.right
   , height: height - pad.top - pad.bottom }
+
+uiSlots :: BrowserCanvas
+        -> UISlots
+uiSlots (BrowserCanvas bc) =
+  let track   = subtractPadding bc.dimensions bc.trackPadding
+      overlay = bc.dimensions
+      pad     = bc.trackPadding
+  in { left:   { offset: { x: 0.0, y: pad.top }
+               , size:   { height: track.height, width: pad.left }}
+     , right:  { offset: { x: overlay.width - pad.right, y: pad.top }
+               , size:   { height: track.height, width: pad.right }}
+     , top:    { offset: { x: pad.left, y: 0.0 }
+               , size:   { height: pad.top, width: track.width }}
+     , bottom: { offset: { x: overlay.width  - pad.right
+                         , y: overlay.height - pad.bottom }
+               , size:   { height: pad.bottom, width: track.width }}
+    }
 
 
 setBrowserCanvasSize :: Canvas.Dimensions
