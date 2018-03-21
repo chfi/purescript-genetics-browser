@@ -17,6 +17,7 @@ import Data.Newtype (class Newtype, alaF, unwrap)
 import Data.Pair (Pair(..))
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Types (Point)
+import Global.Unsafe (unsafeStringify)
 
 
 -- | The global coordinate system works by taking the sum of the chromosome sizes,
@@ -176,19 +177,23 @@ newtype ViewScale = ViewScale { pixelWidth :: Number, coordWidth :: BigInt }
 
 derive instance eqViewScale :: Eq ViewScale
 
+showViewScale :: ViewScale -> String
+showViewScale = unsafeStringify
+
 newtype CoordSysView = CoordSysView (Pair BigInt)
 
 derive instance coordsysviewNewtype :: Newtype CoordSysView _
 
+-- TODO test that this is idempotent
 setViewWidth :: BigInt
              -> Pair BigInt
              -> Pair BigInt
-setViewWidth w p@(Pair l r) =
-  let width = pairSize p
-      rad = width / BigInt.fromInt 2
-      mid = l + rad
-  in Pair (mid - w) (mid + r)
+setViewWidth newW p@(Pair l r) =
+  let oldW = pairSize p
+      d = (newW - oldW) / (BigInt.fromInt 2)
+  in  Pair (l - d) (r + d)
 
+-- TODO test that this is idempotent
 normalizeView :: forall i.
                  CoordSys i BigInt
               -> BigInt
@@ -197,14 +202,17 @@ normalizeView :: forall i.
 normalizeView cs minWidth csv =
   let limL = zero
       limR = cs ^. _TotalSize
-      p = unwrap csv
-      len = max minWidth (pairSize p)
-      (Pair l r) = setViewWidth len p
-      vr' = case l < limL, r > limR of
-              true, false  -> Pair limL len
-              false, true  -> Pair (limR - len) limR
+
+      (Pair l r) = unwrap csv
+      width = r - l
+
+      (Pair l' r') = case l < limL, r > limR of
+              true, false  -> Pair limL width
+              false, true  -> Pair (limR - width) limR
               true, true   -> Pair limL limR
               false, false -> Pair l r
+
+      vr' = setViewWidth (min limR (max width minWidth)) (Pair l' r')
   in CoordSysView vr'
 
 
@@ -214,6 +222,10 @@ viewScale :: forall r.
 viewScale {width} (CoordSysView csView) =
   let coordWidth = pairSize csView
   in ViewScale { pixelWidth: width, coordWidth }
+
+xPerPixel :: ViewScale -> Number
+xPerPixel (ViewScale {pixelWidth, coordWidth}) =
+  (BigInt.toNumber coordWidth) / pixelWidth
 
 -- | The scale of the browser view is defined by how much of the coordinate system is visible,
 -- | and how big the screen it must fit into.

@@ -3,64 +3,54 @@ module Genetics.Browser.Track.UI where
 import Prelude
 
 import Color (black)
-import Color.Scheme.Clrs (blue, red)
+import Color.Scheme.Clrs (blue)
 import Control.Coroutine (Consumer, Producer, connect, runProcess)
 import Control.Coroutine as Co
-import Control.Monad.Aff (Aff, Fiber, Milliseconds(..), delay, finally, forkAff, killFiber, launchAff, launchAff_)
+import Control.Monad.Aff (Aff, Fiber, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_)
 import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, readVar, takeVar, tryTakeVar)
 import Control.Monad.Aff.AVar as AVar
-import Control.Monad.Eff (Eff, forE, foreachE)
+import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
-import Control.Monad.Eff.Random (random, randomRange)
-import Control.Monad.Eff.Uncurried (EffFn4, runEffFn4)
-import Control.Monad.Error.Class (throwError)
+import Control.Monad.Eff.Random (randomRange)
 import Control.Monad.Rec.Class (forever)
-import DOM.Classy.Node (toNode)
 import DOM.Classy.ParentNode (toParentNode)
 import DOM.HTML (window) as DOM
 import DOM.HTML.Types (htmlDocumentToDocument) as DOM
 import DOM.HTML.Window (document) as DOM
-import DOM.Node.Element as DOM
-import DOM.Node.Node (appendChild) as DOM
 import DOM.Node.ParentNode (querySelector) as DOM
-import DOM.Node.Types (Element, Node)
-import Data.Argonaut (Json, _Number, _Object, _String)
 import Data.Array as Array
 import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Either (Either(..), note)
-import Data.Filterable (filter)
-import Data.Foldable (class Foldable, foldMap, for_, null)
+import Data.Either (Either(Right, Left))
+import Data.Foldable (class Foldable, foldMap, null)
 import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
-import Data.Lens (to, (^.), (^?))
-import Data.Lens.Index (ix)
+import Data.Lens (Iso', iso, re, to, united, (^.))
+import Data.Lens.Iso.Newtype (_Newtype)
 import Data.List (List)
-import Data.List as List
 import Data.Map (Map)
-import Data.Maybe (Maybe(Just, Nothing), fromJust, fromMaybe)
+import Data.Maybe (Maybe(..), fromJust)
 import Data.Monoid (class Monoid, mempty)
-import Data.Newtype (ala, over, unwrap, wrap)
-import Data.Nullable (Nullable, toMaybe)
+import Data.Newtype (over, unwrap, wrap)
 import Data.Pair (Pair(..))
+import Data.Pair as Pair
 import Data.Symbol (SProxy(..))
 import Data.Traversable (for, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
-import Genetics.Browser.Track.Backend (Padding, RenderedTrack, browser, bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, gwasGlyphTest, produceAnnots, produceGWAS, produceGenes)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, debugBrowserCanvas, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser, renderSingleGlyphs, renderTrack, subtractPadding, trackViewScale, transTrack, uiSlots)
-import Genetics.Browser.Types (Bp(..), ChrId(ChrId), Point)
-import Genetics.Browser.Types.Coordinates (CoordSys(..), CoordSysView(..), ViewScale(..), _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scalePairBy, scaleViewBy, showViewScale, translatePairBy, translateViewBy)
+import Genetics.Browser.Track.Backend (RenderedTrack, browser, bumpFeatures, zipMapsWith)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser, renderSingleGlyphs, renderTrack, subtractPadding, trackViewScale, transTrack, uiSlots)
+import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, showViewScale, translateViewBy)
 import Global.Unsafe (unsafeStringify)
-import Graphics.Canvas (CanvasElement, Context2D, fillRect, getContext2D, setFillStyle)
+import Graphics.Canvas (fillRect, setFillStyle)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing, fillColor, filled, rectangle, white)
-import Graphics.Drawing as Drawing
-import Partial.Unsafe (unsafeCrashWith, unsafePartial)
-import Simple.JSON (read, readJSON)
-import Unsafe.Coerce (unsafeCoerce)
+import Graphics.Drawing (Drawing)
+import Partial.Unsafe (unsafePartial)
+import Simple.JSON (read)
+
 
 
 foreign import windowInnerSize :: forall e.
@@ -71,9 +61,6 @@ foreign import buttonEvent :: forall eff.
                               String
                            -> Eff eff Unit
                            -> Eff eff Unit
-
-
-type ViewRange = Pair BigInt
 
 data UpdateView =
     ScrollView Number
@@ -162,7 +149,6 @@ type UIState e = { view :: AVar CoordSysView
                  }
 
 
-
 diffView :: CoordSysView -> CoordSysView -> CoordSysView
 diffView v1 v2 =
   let (Pair l1 r1) = unwrap v1
@@ -173,14 +159,36 @@ showView :: CoordSysView -> String
 showView (CoordSysView (Pair l r)) = BigInt.toString l <> " - " <> BigInt.toString r
 
 
-peekUIState :: UIState _
-            -> Eff _ Unit
-peekUIState s = launchAff_ do
-  view <- AVar.tryReadVar s.view
-  case view of
-    Nothing -> liftEff $ log "CoordSysView state empty"
-    Just v  ->
-      liftEff $ log $ "CoordSysView: " <> showView v
+_PairRec :: forall a. Iso' (Pair a) { l :: a, r :: a }
+_PairRec = iso (\(Pair l r) -> {l, r}) (\ {l, r} -> Pair l r)
+
+
+
+debugView :: UIState _
+          -> Eff _ { get :: _
+                   , set :: _ }
+debugView s = do
+  let get name = launchAff_ do
+         view <- AVar.tryReadVar s.view
+         liftEff case view of
+           Nothing -> do
+             log "CoordSysView state empty"
+             setWindow name unit
+           Just (v :: _)  -> do
+             log $ "CoordSysView: " <> showView v
+             setWindow name $ unwrap v ^. _PairRec
+
+  let set lr = launchAff_ do
+         view <- AVar.tryTakeVar s.view
+         case view of
+           Nothing -> pure unit
+           Just _  -> do
+             let v' = wrap $ lr ^. re _PairRec
+             _ <- AVar.tryPutVar unit s.viewReady
+             AVar.putVar v' s.view
+
+  pure {get, set}
+
 
 
 uiViewUpdate :: forall r.
@@ -193,8 +201,7 @@ uiViewUpdate :: forall r.
 uiViewUpdate cs timeout { view, viewCmd, viewReady } = do
   curCmdVar <- makeVar mempty
 
-  let normView = normalizeView cs (BigInt.fromInt 2000)
-
+  let normView = normalizeView cs (BigInt.fromInt 200000)
       loop' updater = do
         cmd <- takeVar viewCmd
 
@@ -210,14 +217,10 @@ uiViewUpdate cs timeout { view, viewCmd, viewReady } = do
             liftEff $ log "Running view update"
             vr <- takeVar view
 
-            liftEff $ log $ "   <  " <> showView vr
-            let vr' = updateViewFold cmd' vr
+            let vr' = normView $ updateViewFold cmd' vr
 
             putVar vr' view
-            liftEff $ log $ "   |  " <> show cmd'
-            liftEff $ log $ "   >  " <> showView vr'
-            liftEff $ log $ "diff: " <> showView (diffView vr vr')
-            -- putVar (normView $ updateViewFold cmd' vr) view
+
             putVar unit viewReady
             takeVar curCmdVar *> putVar mempty curCmdVar
 
@@ -360,7 +363,7 @@ runBrowser config bc = launchAff $ do
 
   liftEff do
     setWindow "mainBrowser" mainBrowser
-    setWindow "peekView" (peekUIState initState)
+    setWindow "debugView" (debugView initState)
 
     browserOnClick bc
       { track:   \p -> log ("track: "   <> show p.x <> ", " <> show p.y)
