@@ -3,7 +3,7 @@ module Genetics.Browser.Track.Backend where
 import Prelude
 
 import Color (Color, black, white)
-import Color.Scheme.Clrs (red)
+import Color.Scheme.Clrs (navy, red)
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
@@ -26,19 +26,21 @@ import Data.Maybe (Maybe(Just, Nothing), fromMaybe, maybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (unwrap)
 import Data.Pair (Pair(..))
+import Data.Pair as Pair
 import Data.Record as Record
 import Data.Symbol (class IsSymbol, SProxy(SProxy))
 import Data.Traversable (traverse)
-import Data.Tuple (Tuple, snd, uncurry)
+import Data.Tuple (Tuple(..), snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Genetics.Browser.Types (Bp, ChrId)
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize, pairsOverlap, scaledSegments)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), ViewScale(..), _Segments, pairSize, pairsOverlap, scaledSegments)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
+import Graphics.Drawing (Drawing, FillStyle, OutlineStyle, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class RowLacks)
+import Unsafe.Coerce (unsafeCoerce)
 
 
 intersection :: forall k a b.
@@ -72,6 +74,114 @@ zipMapsWith f a b = uncurry f <$> zipMaps a b
 _point = SProxy :: SProxy "point"
 _range = SProxy :: SProxy "range"
 
+
+-- Simplify & let all feature positions be represented as ranges
+type GenPos = Pair Bp
+
+-- The very basic shapes a glyph can consist of (for now)
+data GlyphShape
+  = GCircle Number
+  | GRect Number Number
+  | GMany (List GlyphShape)
+
+-- A `GlyphDrawing` is a shape plus styles informing how to render it (from purescript-drawing)
+data GlyphDrawing
+  = GDrawing OutlineStyle FillStyle GlyphShape
+
+-- A `Glyph p` is a given `GlyphDrawing` and zero or more points (of whatever type) to place it at
+data Glyph p
+  = Glyph GlyphDrawing (Array p)
+
+{-
+-- alternatively, we could enforce 2D glyphs here, idk if worthwhile
+data Glyph' p
+  = Glyph' GlyphDrawing (Array {x :: p, y :: p})
+-}
+
+type NPoint = { x :: Normalized Number
+              , y :: Normalized Number }
+
+
+type HitArea p = { point :: p, shape :: GlyphShape }
+
+type FeatureSpot p a =
+  { feature :: a
+  , hitArea :: HitArea p }
+
+
+type RenderOutput a p =
+  { glyphs     :: Array (Glyph p) -- an array of the same or smaller size than the number of features
+  , features   :: Array (FeatureSpot p a)    -- the features contained in the provided "rectangle" of `p`s
+  }
+
+type NormalRenderOutput a =
+  RenderOutput a NPoint
+
+type ScreenRenderOutput a =
+  RenderOutput a Point
+
+type NormalToScreen a = NormalRenderOutput a
+                     -> ViewScale
+                     -> ScreenRenderOutput a
+
+type RendererN a
+  = { segmentSize :: a -> Bp
+    , render      :: Array a -> NormalRenderOutput a }
+
+type RendererS a
+  = { segmentSize :: a -> Bp
+    , render      :: Array a -> ViewScale -> ScreenRenderOutput a }
+
+
+
+gwasRendererN :: forall r a.
+                 { min :: Number, max :: Number, sig :: Number | r }
+              -> CoordSys ChrId BigInt
+              -> RendererN { score :: Number, pos :: GenPos, segmentSize :: Bp }
+gwasRendererN vscale csys = { segmentSize, render }
+  where featurePos  s = s.pos
+        segmentSize s = s.segmentSize
+
+        render :: Array _
+               -> { glyphs   :: Array (Glyph NPoint)
+                  , features :: Array (FeatureSpot NPoint _) }
+        render input =
+          let fps :: Array (Tuple _ NPoint)
+              fps = map (\f -> Tuple f (npoint f)) input
+
+              glyphs = [glyph (snd $ Array.unzip fps)]
+
+              hit (Tuple a p) = { feature: a, hitArea: { point: p, shape: gshape }}
+              features = map hit fps
+
+          in { glyphs, features }
+
+        radius = 2.2
+        color = navy
+
+        gshape :: GlyphShape
+        gshape = GCircle radius
+
+        glyph = Glyph (GDrawing (Drawing.outlineColor color)
+                                (Drawing.fillColor color) gshape)
+
+        npoint :: { score :: Number, pos :: GenPos, segmentSize :: Bp }
+               -> NPoint
+        npoint s =
+          { x: Normalized (unwrap $ (Pair.fst s.pos) / s.segmentSize)
+          , y: Normalized ((s.score - vscale.min) / (vscale.max - vscale.min)) }
+
+
+
+-- | Basic normalized-to-screen transformation, that only rescales to fit
+rescaleToScreen :: Number
+                -> NormalRenderOutput _
+                -> ViewScale
+                -> ScreenRenderOutput _
+rescaleToScreen height nro vs = unsafeCoerce unit
+
+
+
 type GenomePosV = Variant ( point :: Bp
                           , range :: Pair Bp )
 
@@ -79,6 +189,8 @@ type FeatureR r = ( position :: GenomePosV
                   , frameSize :: Bp
                   | r )
 type Feature r = Record (FeatureR r)
+
+
 
 
 type DrawingR  = ( point :: Drawing
@@ -104,6 +216,9 @@ _single = (SProxy :: SProxy "single")
 type Renderer a = Variant ( batch :: BatchRenderer a
                           , single :: SingleRenderer a )
 
+
+
+
 type NormalizedGlyph = { drawing :: Variant DrawingR
                        , horPos  :: Variant HorPlaceR
                        , verPos  :: Normalized Number
@@ -113,7 +228,6 @@ type BatchGlyph c = { drawing :: Drawing
                     , points :: Array c }
 
 type SingleGlyph = { drawing :: Unit -> Drawing, point :: Point, width :: Number }
-
 
 
 horPlace :: forall r.
