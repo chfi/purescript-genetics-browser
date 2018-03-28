@@ -27,13 +27,14 @@ import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (unwrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
+import Data.Profunctor.Strong (fanout)
 import Data.Record as Record
 import Data.Symbol (class IsSymbol, SProxy(SProxy))
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..), snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Genetics.Browser.Types (Bp, ChrId)
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), ViewScale(..), _Segments, pairSize, pairsOverlap, scaledSegments)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), Normalized(..), ViewScale(..), _Segments, pairSize, pairsOverlap, scaledSegments, viewScale)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, FillStyle, OutlineStyle, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
@@ -63,7 +64,7 @@ zipMaps a b =
 
 
 zipMapsWith :: forall k a b c.
-               Ord k
+            Ord k
             => (a -> b -> c)
             -> Map k a
             -> Map k b
@@ -73,6 +74,9 @@ zipMapsWith f a b = uncurry f <$> zipMaps a b
 
 _point = SProxy :: SProxy "point"
 _range = SProxy :: SProxy "range"
+
+_batch = (SProxy :: SProxy "batch")
+_single = (SProxy :: SProxy "single")
 
 
 -- Simplify & let all feature positions be represented as ranges
@@ -88,98 +92,9 @@ data GlyphShape
 data GlyphDrawing
   = GDrawing OutlineStyle FillStyle GlyphShape
 
--- A `Glyph p` is a given `GlyphDrawing` and zero or more points (of whatever type) to place it at
-data Glyph p
-  = Glyph GlyphDrawing (Array p)
-
-{-
--- alternatively, we could enforce 2D glyphs here, idk if worthwhile
-data Glyph' p
-  = Glyph' GlyphDrawing (Array {x :: p, y :: p})
--}
 
 type NPoint = { x :: Normalized Number
               , y :: Normalized Number }
-
-
-type HitArea p = { point :: p, shape :: GlyphShape }
-
-type FeatureSpot p a =
-  { feature :: a
-  , hitArea :: HitArea p }
-
-
-type RenderOutput a p =
-  { glyphs     :: Array (Glyph p) -- an array of the same or smaller size than the number of features
-  , features   :: Array (FeatureSpot p a)    -- the features contained in the provided "rectangle" of `p`s
-  }
-
-type NormalRenderOutput a =
-  RenderOutput a NPoint
-
-type ScreenRenderOutput a =
-  RenderOutput a Point
-
-type NormalToScreen a = NormalRenderOutput a
-                     -> ViewScale
-                     -> ScreenRenderOutput a
-
-type RendererN a
-  = { segmentSize :: a -> Bp
-    , render      :: Array a -> NormalRenderOutput a }
-
-type RendererS a
-  = { segmentSize :: a -> Bp
-    , render      :: Array a -> ViewScale -> ScreenRenderOutput a }
-
-
-
-gwasRendererN :: forall r a.
-                 { min :: Number, max :: Number, sig :: Number | r }
-              -> CoordSys ChrId BigInt
-              -> RendererN { score :: Number, pos :: GenPos, segmentSize :: Bp }
-gwasRendererN vscale csys = { segmentSize, render }
-  where featurePos  s = s.pos
-        segmentSize s = s.segmentSize
-
-        render :: Array _
-               -> { glyphs   :: Array (Glyph NPoint)
-                  , features :: Array (FeatureSpot NPoint _) }
-        render input =
-          let fps :: Array (Tuple _ NPoint)
-              fps = map (\f -> Tuple f (npoint f)) input
-
-              glyphs = [glyph (snd $ Array.unzip fps)]
-
-              hit (Tuple a p) = { feature: a, hitArea: { point: p, shape: gshape }}
-              features = map hit fps
-
-          in { glyphs, features }
-
-        radius = 2.2
-        color = navy
-
-        gshape :: GlyphShape
-        gshape = GCircle radius
-
-        glyph = Glyph (GDrawing (Drawing.outlineColor color)
-                                (Drawing.fillColor color) gshape)
-
-        npoint :: { score :: Number, pos :: GenPos, segmentSize :: Bp }
-               -> NPoint
-        npoint s =
-          { x: Normalized (unwrap $ (Pair.fst s.pos) / s.segmentSize)
-          , y: Normalized ((s.score - vscale.min) / (vscale.max - vscale.min)) }
-
-
-
--- | Basic normalized-to-screen transformation, that only rescales to fit
-rescaleToScreen :: Number
-                -> NormalRenderOutput _
-                -> ViewScale
-                -> ScreenRenderOutput _
-rescaleToScreen height nro vs = unsafeCoerce unit
-
 
 
 type GenomePosV = Variant ( point :: Bp
@@ -190,18 +105,17 @@ type FeatureR r = ( position :: GenomePosV
                   | r )
 type Feature r = Record (FeatureR r)
 
-
-
-
 type DrawingR  = ( point :: Drawing
-                 , range :: Number -> { drawing :: Unit -> Drawing, width :: Number } )
+                 , range :: Number
+                         -> { drawing :: Unit -> Drawing
+                            , width :: Number } )
 type DrawingV  = Variant DrawingR
 
 type HorPlaceR = ( point :: Normalized Number
                  , range :: Pair (Normalized Number) )
 type HPos = Variant HorPlaceR
 
-
+type HPosN = Pair (Normalized Number)
 
 type BatchRenderer a = { drawing :: Drawing
                        , place :: a -> Normalized Point }
@@ -210,13 +124,8 @@ type SingleRenderer a = { draw  :: a -> DrawingV
                         , horPlace :: a -> HPos
                         , verPlace :: a -> Normalized Number }
 
-_batch = (SProxy :: SProxy "batch")
-_single = (SProxy :: SProxy "single")
-
 type Renderer a = Variant ( batch :: BatchRenderer a
                           , single :: SingleRenderer a )
-
-
 
 
 type NormalizedGlyph = { drawing :: Variant DrawingR
@@ -224,10 +133,10 @@ type NormalizedGlyph = { drawing :: Variant DrawingR
                        , verPos  :: Normalized Number
                        }
 
-type BatchGlyph c = { drawing :: Drawing
-                    , points :: Array c }
 
+type BatchGlyph c = { drawing :: Drawing, points :: Array c }
 type SingleGlyph = { drawing :: Unit -> Drawing, point :: Point, width :: Number }
+
 
 
 horPlace :: forall r.
@@ -243,7 +152,6 @@ horPlace {position, frameSize} =
     $ position
 
 
-
 renderSingle :: forall a.
                 SingleRenderer a
              -> a
@@ -254,6 +162,8 @@ renderSingle render a =
       , verPos:  render.verPlace a
       }
 
+
+
 renderBatch :: forall a.
                BatchRenderer a
             -> Array a
@@ -261,6 +171,7 @@ renderBatch :: forall a.
 renderBatch render as = {drawing, points}
   where drawing = render.drawing
         points  = map render.place as
+
 
 
 render :: forall a.
@@ -544,6 +455,7 @@ scalePoint height seg@(Pair l _) np =
   in { x,y }
 
 
+
 rescaleNormBatchGlyphs :: Number
                        -> Pair Number
                        -> BatchGlyph (Normalized Point)
@@ -571,6 +483,8 @@ withPixelSegments cs cdim bView =
   let scale = { screenWidth: cdim.width
               , viewWidth: pairSize bView }
   in flip foldMapWithIndex (scaledSegments cs scale)
+
+
 
 
 
@@ -665,3 +579,103 @@ browser cs trackDim overlayDim uiSlots ui inputTracks =
      , relativeUI
      , fixedUI
      }
+
+
+
+
+
+
+
+--------------------------
+
+
+
+
+
+type Feature' a = { segmentSize :: Bp
+                  , pos         :: Pair Bp
+                  , feature     :: a }
+
+
+
+type DrawingN = { drawing :: Drawing, points :: Array Point }
+
+type Render a =
+     CoordSys ChrId BigInt   -- probably superfluous w/ Pair BigInt in the later tuple
+  -> Canvas.Dimensions
+  -> Tuple (Pair BigInt) (Array a)
+  -> CoordSysView
+  -> { features :: Array a
+     , drawings :: Array DrawingN
+     , overlaps :: Number -> Point -> Array a }
+
+
+
+type SNPFeature r = Feature' { score :: Number | r }
+
+
+placeSNP :: forall r1 r2.
+            { min :: Number, max :: Number | r1 }
+         -> SNPFeature r2
+         -> NPoint
+placeSNP {min, max} { segmentSize, pos: (Pair l _), feature } = {x, y}
+  where x = Normalized $ unwrap $ l / segmentSize
+        y = Normalized $ (feature.score - min) / (max - min)
+
+
+
+renderSNP :: forall r.
+             CoordSys ChrId BigInt
+          -> { min :: Number, max :: Number | r }
+          -> Canvas.Dimensions
+          -> Tuple (Pair BigInt) (Array (SNPFeature ()))
+          -> CoordSysView
+          -> { features :: Array (SNPFeature ())
+             , drawings :: Array DrawingN
+             , overlaps :: Number -> Point -> Array (SNPFeature ()) }
+renderSNP csys verscale cdim (Tuple seg snps) =
+  let features = snps
+
+      radius = 2.2
+
+      drawing =
+          let color = navy
+              c = circle 0.0 0.0 radius
+              out = outlined (outlineColor color) c
+              fill = filled (fillColor color) c
+          in out <> fill
+
+      drawings :: Array (Tuple (SNPFeature ()) Point) -> Array DrawingN
+      drawings pts = let (Tuple _ points) = Array.unzip pts
+                     in [{ drawing, points }]
+
+      npointed :: Array (Tuple (SNPFeature ()) NPoint)
+      npointed = map (fanout id (placeSNP verscale)) snps
+
+
+      scale :: CoordSysView -> ViewScale
+      scale csv = viewScale cdim csv
+
+
+      -- doesn't translate (esp. horizontally), only scales
+      rescale :: Number -> NPoint -> Point
+      rescale sc npoint =
+        let x = sc * (unwrap npoint.x)
+            y = cdim.height * unwrap npoint.y
+        in {x, y}
+
+      pointed :: CoordSysView -> Array (Tuple (SNPFeature ()) Point)
+      pointed csv = (map <<< map) (rescale s) npointed
+        where s = ?pixelsView_something
+
+      overlaps :: Array (Tuple (SNPFeature ()) Point)
+               -> Number -> Point
+               -> Array (SNPFeature ())
+      overlaps pts radius' pt = unsafeCoerce unit
+
+
+
+  in \csview -> let pts = pointed csview
+                in { features
+                   , drawings: drawings pts
+                   , overlaps: overlaps pts }
