@@ -14,6 +14,7 @@ import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.Either (Either(..))
 import Data.Exists (Exists, runExists)
+import Data.Filterable (filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
 import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.FunctorWithIndex (mapWithIndex)
@@ -39,6 +40,7 @@ import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, FillStyle, OutlineStyle, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
+import Math as Math
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class RowLacks)
 import Unsafe.Coerce (unsafeCoerce)
@@ -600,11 +602,18 @@ type Feature' a = { segmentSize :: Bp
 
 type DrawingN = { drawing :: Drawing, points :: Array Point }
 
+
+
+
+type Rendered a = { features :: Array a
+                  , drawings :: Array DrawingN
+                  , overlaps :: Number -> Point -> Array a }
+
+
 type Render a =
-     CoordSys ChrId BigInt   -- probably superfluous w/ Pair BigInt in the later tuple
-  -> Canvas.Dimensions
-  -> Tuple (Pair BigInt) (Array a)
-  -> CoordSysView
+     Canvas.Dimensions
+  -> Array a
+  -> Pair Number
   -> { features :: Array a
      , drawings :: Array DrawingN
      , overlaps :: Number -> Point -> Array a }
@@ -623,17 +632,21 @@ placeSNP {min, max} { segmentSize, pos: (Pair l _), feature } = {x, y}
         y = Normalized $ (feature.score - min) / (max - min)
 
 
+dist :: Point -> Point -> Number
+dist p1 p2 = Math.sqrt $ x' `Math.pow` 2.0 + y' `Math.pow` 2.0
+  where x' = p1.x - p2.x
+        y' = p1.y - p2.y
 
+
+-- can be used with mapWithIndex'd and scaledSegments',
+-- to produce a `Map ChrId { features, drawings, overlaps }`
 renderSNP :: forall r.
-             CoordSys ChrId BigInt
-          -> { min :: Number, max :: Number | r }
+             { min :: Number, max :: Number | r }
           -> Canvas.Dimensions
-          -> Tuple (Pair BigInt) (Array (SNPFeature ()))
-          -> CoordSysView
-          -> { features :: Array (SNPFeature ())
-             , drawings :: Array DrawingN
-             , overlaps :: Number -> Point -> Array (SNPFeature ()) }
-renderSNP csys verscale cdim (Tuple seg snps) =
+          -> Array (SNPFeature ())
+          -> Pair Number
+          -> Rendered (SNPFeature ())
+renderSNP verscale cdim snps =
   let features = snps
 
       radius = 2.2
@@ -652,30 +665,58 @@ renderSNP csys verscale cdim (Tuple seg snps) =
       npointed :: Array (Tuple (SNPFeature ()) NPoint)
       npointed = map (fanout id (placeSNP verscale)) snps
 
-
       scale :: CoordSysView -> ViewScale
       scale csv = viewScale cdim csv
 
-
-      -- doesn't translate (esp. horizontally), only scales
-      rescale :: Number -> NPoint -> Point
-      rescale sc npoint =
-        let x = sc * (unwrap npoint.x)
+      rescale :: Pair Number -> NPoint -> Point
+      rescale seg npoint =
+        let (Pair offset _) = seg
+            x = offset + (pairSize seg) * (unwrap npoint.x)
             y = cdim.height * unwrap npoint.y
         in {x, y}
 
-      pointed :: CoordSysView -> Array (Tuple (SNPFeature ()) Point)
-      pointed csv = (map <<< map) (rescale s) npointed
-        where s = ?pixelsView_something
+      pointed :: Pair Number -> Array (Tuple (SNPFeature ()) Point)
+      pointed seg = (map <<< map) (rescale seg) npointed
 
       overlaps :: Array (Tuple (SNPFeature ()) Point)
                -> Number -> Point
                -> Array (SNPFeature ())
-      overlaps pts radius' pt = unsafeCoerce unit
+      overlaps pts radius' pt = filterMap covers pts
+        where covers :: Tuple (SNPFeature ()) Point -> Maybe (SNPFeature ())
+              covers (Tuple f fPt) =
+                if dist fPt pt <= radius' then Just f else Nothing
+
+
+  in \seg -> let pts = pointed seg
+             in { features
+                , drawings: drawings pts
+                , overlaps: overlaps pts }
 
 
 
-  in \csview -> let pts = pointed csview
-                in { features
-                   , drawings: drawings pts
-                   , overlaps: overlaps pts }
+renderSNPTrack :: forall r.
+                  CoordSys ChrId BigInt
+               -> { min :: Number, max :: Number | r }
+               -> Canvas.Dimensions
+               -> Map ChrId (Array (SNPFeature ()))
+               -> Pair BigInt
+               -> Map ChrId (Rendered (SNPFeature ()))
+renderSNPTrack cs verscale cdim segSnps =
+  let segs bView = scaledSegments cs { screenWidth: cdim.width, viewWidth: pairSize bView }
+      midStep = map (renderSNP verscale cdim) segSnps
+  in \bView -> zipMapsWith ($) midStep (segs bView)
+
+
+renderTrack :: forall a.
+               CoordSys ChrId BigInt
+            -> Canvas.Dimensions
+            -> Render a
+            -> Map ChrId (Array a)
+            -> Pair BigInt
+            -> Map ChrId (Rendered a)
+renderTrack cs cdim render segFs =
+  let segs bView = scaledSegments cs { screenWidth: cdim.width, viewWidth: pairSize bView }
+
+      midStep = map (render cdim) segFs
+
+  in \bView -> zipMapsWith ($) midStep (segs bView)
