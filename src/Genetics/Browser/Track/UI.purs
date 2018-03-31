@@ -313,7 +313,7 @@ runBrowser config bc = launchAff $ do
       traverse (getAnnotations cSys) config.urls.annotations
 
     let annotations = zipMapsWith
-                       (bumpFeatures (to _.score) (SProxy :: SProxy "score")
+                       (bumpFeatures (to _.feature.score) (SProxy :: SProxy "score")
                          (Bp 1000000.0))
                        <$> gwas <*> rawAnnotations
 

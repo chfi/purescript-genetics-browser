@@ -3,7 +3,7 @@ module Genetics.Browser.Track.Backend where
 import Prelude
 
 import Color (Color, black, white)
-import Color.Scheme.Clrs (navy, red)
+import Color.Scheme.Clrs (red)
 import Control.Monad.Aff (Aff)
 import Control.Monad.Eff.Exception (error)
 import Control.Monad.Error.Class (throwError)
@@ -14,7 +14,6 @@ import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.Either (Either(..))
 import Data.Exists (Exists, runExists)
-import Data.Filterable (filterMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
 import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.FunctorWithIndex (mapWithIndex)
@@ -27,23 +26,19 @@ import Data.Maybe (Maybe(Just, Nothing), fromMaybe, maybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (unwrap)
 import Data.Pair (Pair(..))
-import Data.Pair as Pair
-import Data.Profunctor.Strong (fanout)
 import Data.Record as Record
 import Data.Symbol (class IsSymbol, SProxy(SProxy))
 import Data.Traversable (traverse)
-import Data.Tuple (Tuple(..), snd, uncurry)
+import Data.Tuple (Tuple, snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Genetics.Browser.Types (Bp, ChrId)
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), Normalized(..), ViewScale(..), _Segments, pairSize, pairsOverlap, scaledSegments, viewScale)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize, pairsOverlap, scaledSegments)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, FillStyle, OutlineStyle, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
-import Math as Math
 import Network.HTTP.Affjax as Affjax
 import Type.Prelude (class RowLacks)
-import Unsafe.Coerce (unsafeCoerce)
 
 
 intersection :: forall k a b.
@@ -80,9 +75,10 @@ _range = SProxy :: SProxy "range"
 _batch = (SProxy :: SProxy "batch")
 _single = (SProxy :: SProxy "single")
 
+type Feature a = { position  :: Pair Bp
+                 , frameSize :: Bp
+                 , feature   :: a }
 
--- Simplify & let all feature positions be represented as ranges
-type GenPos = Pair Bp
 
 -- The very basic shapes a glyph can consist of (for now)
 data GlyphShape
@@ -98,15 +94,6 @@ data GlyphDrawing
 type NPoint = { x :: Normalized Number
               , y :: Normalized Number }
 
-
-type GenomePosV = Variant ( point :: Bp
-                          , range :: Pair Bp )
-
-type FeatureR r = ( position :: GenomePosV
-                  , frameSize :: Bp
-                  | r )
-type Feature r = Record (FeatureR r)
-
 type DrawingR  = ( point :: Drawing
                  , range :: Number
                          -> { drawing :: Unit -> Drawing
@@ -117,7 +104,6 @@ type HorPlaceR = ( point :: Normalized Number
                  , range :: Pair (Normalized Number) )
 type HPos = Variant HorPlaceR
 
-type HPosN = Pair (Normalized Number)
 
 type BatchRenderer a = { drawing :: Drawing
                        , place :: a -> Normalized Point }
@@ -140,18 +126,13 @@ type BatchGlyph c = { drawing :: Drawing, points :: Array c }
 type SingleGlyph = { drawing :: Unit -> Drawing, point :: Point, width :: Number }
 
 
-
 horPlace :: forall r.
             Feature r
          -> HPos
 horPlace {position, frameSize} =
   let f p = Normalized (unwrap $ p / frameSize)
-  in case_
-    # onMatch
-      { point: inj _point <<< f
-      , range: inj _range <<< (map f)
-      }
-    $ position
+  in inj _range $ map f position
+
 
 
 renderSingle :: forall a.
@@ -235,47 +216,40 @@ chrLabelTrack cs cdim =
 
 
 
-featureInterval :: forall a. Feature a -> Pair Bp
-featureInterval {position} = case_
-  # onMatch
-     { point: (\x -> Pair x x)
-     , range: (\x -> x)
-     }
-  $ position
-
-
-
 bumpFeatures :: forall f a l i o.
                 Foldable f
              => Functor f
-             => RowCons l Number (FeatureR i) (FeatureR o)
-             => RowLacks l (FeatureR i)
+             => RowCons l Number i o
+             => RowLacks l i
              => IsSymbol l
-             => Getter' (Feature a) Number
+             => Getter' (Feature (Record a)) Number
              -> SProxy l
              -> Bp
-             -> f (Feature a)
-             -> f (Feature i)
-             -> f (Feature o)
+             -> f (Feature (Record a))
+             -> f (Feature (Record i))
+             -> f (Feature (Record o))
 bumpFeatures f l radius other = map bump
   where maxInRadius :: Pair Bp -> Number
         maxInRadius lr = fromMaybe 0.0 $ maximum
-                          $ map (\g -> if pairsOverlap (featureInterval g) lr
+                          $ map (\g -> if pairsOverlap g.position lr
                                           then f `view` g else 0.0) other
 
-        bump :: Record (FeatureR i) -> Record (FeatureR o)
+        bump :: Feature (Record i) -> Feature (Record o)
         bump a =
-          let y = maxInRadius (featureInterval a)
-          in Record.insert l y a
+          let y = maxInRadius a.position
+          in { position: a.position
+             , frameSize: a.frameSize
+             , feature: Record.insert l y a.feature }
 
 
 groupToChrs :: forall a f rData.
-               Monoid (f {chrId :: ChrId | rData})
+               Monoid (f a)
             => Foldable f
             => Applicative f
-            => f { chrId :: ChrId | rData }
-            -> Map ChrId (f { chrId :: ChrId | rData })
-groupToChrs = foldl (\chrs r@{chrId} -> Map.alter (add r) chrId chrs ) mempty
+            => (a -> ChrId)
+            -> f a
+            -> Map ChrId (f a)
+groupToChrs g = foldl (\chrs r -> Map.alter (add r) (g r) chrs ) mempty
   where add x Nothing   = Just $ pure x
         add x (Just xs) = Just $ pure x <> xs
 
@@ -392,14 +366,12 @@ getData cs p url = do
         $ json ^? _Array >>= traverse (p cs)
 
 
-
 getDataGrouped :: forall a i c.
                   CoordSys ChrId c
                -> (CoordSys ChrId c -> Json -> Maybe _)
                -> String
                -> Aff _ (Map ChrId (Array _))
-getDataGrouped cs p url = groupToChrs <$> getData cs p url
-
+getDataGrouped cs p url = groupToChrs _.feature.chrId <$> getData cs p url
 
 
 eqLegend a b = a.text == b.text
@@ -587,16 +559,8 @@ browser cs trackDim overlayDim uiSlots ui inputTracks =
 
 
 
-
 --------------------------
 
-
-
-
-
-type Feature' a = { segmentSize :: Bp
-                  , pos         :: Pair Bp
-                  , feature     :: a }
 
 
 
@@ -619,94 +583,6 @@ type Render a =
      , overlaps :: Number -> Point -> Array a }
 
 
-
-type SNPFeature r = Feature' { score :: Number | r }
-
-
-placeSNP :: forall r1 r2.
-            { min :: Number, max :: Number | r1 }
-         -> SNPFeature r2
-         -> NPoint
-placeSNP {min, max} { segmentSize, pos: (Pair l _), feature } = {x, y}
-  where x = Normalized $ unwrap $ l / segmentSize
-        y = Normalized $ (feature.score - min) / (max - min)
-
-
-dist :: Point -> Point -> Number
-dist p1 p2 = Math.sqrt $ x' `Math.pow` 2.0 + y' `Math.pow` 2.0
-  where x' = p1.x - p2.x
-        y' = p1.y - p2.y
-
-
--- can be used with mapWithIndex'd and scaledSegments',
--- to produce a `Map ChrId { features, drawings, overlaps }`
-renderSNP :: forall r.
-             { min :: Number, max :: Number | r }
-          -> Canvas.Dimensions
-          -> Array (SNPFeature ())
-          -> Pair Number
-          -> Rendered (SNPFeature ())
-renderSNP verscale cdim snps =
-  let features = snps
-
-      radius = 2.2
-
-      drawing =
-          let color = navy
-              c = circle 0.0 0.0 radius
-              out = outlined (outlineColor color) c
-              fill = filled (fillColor color) c
-          in out <> fill
-
-      drawings :: Array (Tuple (SNPFeature ()) Point) -> Array DrawingN
-      drawings pts = let (Tuple _ points) = Array.unzip pts
-                     in [{ drawing, points }]
-
-      npointed :: Array (Tuple (SNPFeature ()) NPoint)
-      npointed = map (fanout id (placeSNP verscale)) snps
-
-      scale :: CoordSysView -> ViewScale
-      scale csv = viewScale cdim csv
-
-      rescale :: Pair Number -> NPoint -> Point
-      rescale seg npoint =
-        let (Pair offset _) = seg
-            x = offset + (pairSize seg) * (unwrap npoint.x)
-            y = cdim.height * unwrap npoint.y
-        in {x, y}
-
-      pointed :: Pair Number -> Array (Tuple (SNPFeature ()) Point)
-      pointed seg = (map <<< map) (rescale seg) npointed
-
-      overlaps :: Array (Tuple (SNPFeature ()) Point)
-               -> Number -> Point
-               -> Array (SNPFeature ())
-      overlaps pts radius' pt = filterMap covers pts
-        where covers :: Tuple (SNPFeature ()) Point -> Maybe (SNPFeature ())
-              covers (Tuple f fPt) =
-                if dist fPt pt <= radius' then Just f else Nothing
-
-
-  in \seg -> let pts = pointed seg
-             in { features
-                , drawings: drawings pts
-                , overlaps: overlaps pts }
-
-
-
-renderSNPTrack :: forall r.
-                  CoordSys ChrId BigInt
-               -> { min :: Number, max :: Number | r }
-               -> Canvas.Dimensions
-               -> Map ChrId (Array (SNPFeature ()))
-               -> Pair BigInt
-               -> Map ChrId (Rendered (SNPFeature ()))
-renderSNPTrack cs verscale cdim segSnps =
-  let segs bView = scaledSegments cs { screenWidth: cdim.width, viewWidth: pairSize bView }
-      midStep = map (renderSNP verscale cdim) segSnps
-  in \bView -> zipMapsWith ($) midStep (segs bView)
-
-
 renderTrack :: forall a.
                CoordSys ChrId BigInt
             -> Canvas.Dimensions
@@ -720,3 +596,69 @@ renderTrack cs cdim render segFs =
       midStep = map (render cdim) segFs
 
   in \bView -> zipMapsWith ($) midStep (segs bView)
+
+
+
+
+browser' :: forall a b c.
+            CoordSys ChrId BigInt
+         -> Canvas.Dimensions
+         -> Canvas.Dimensions
+         -> UISlots
+         -> { legend :: Legend, vscale :: VScale }
+         -> { gwas :: Render a }
+         -> { gwas :: Map ChrId (Array a) }
+         -> { tracks     :: Pair BigInt -> { gwas :: Map ChrId (Rendered a) }
+            , relativeUI :: Pair BigInt -> Drawing
+            , fixedUI    :: Drawing }
+browser' cs trackDim overlayDim uiSlots ui renderers inputTracks =
+  let
+      drawInSlot {offset, size} d =
+          (translate offset.x offset.y
+           $ filled (fillColor white)
+           $ rectangle zero zero size.width size.height)
+        <> translate offset.x offset.y d
+
+      vScale = drawInSlot uiSlots.left (drawVScale ui.vscale uiSlots.left.size.height)
+
+      legend = drawInSlot uiSlots.right (drawLegend ui.legend uiSlots.right.size.height)
+
+      ruler   = Drawing.translate ui.vscale.width zero
+                $ horRulerTrack ui.vscale red trackDim
+
+      fixedUI = ruler <> vScale <> legend
+
+      -- normTracks :: List (Map ChrId
+      --                     (Either (BatchGlyph (Normalized Point))
+      --                             (Array NormalizedGlyph)))
+      -- normTracks = runExists (\(Track r as) -> render r <$> as) <$> inputTracks
+
+      -- tracks :: Pair BigInt -> List (Array (Either (BatchGlyph Point) (Array SingleGlyph)))
+      -- tracks v = (renderNormalizedTrack cs trackDim v) <$> normTracks
+
+      tracks :: Pair BigInt -> { gwas :: Map ChrId (Rendered a) }
+      tracks =
+        let gwasT = renderTrack cs trackDim renderers.gwas inputTracks.gwas
+        in \v -> { gwas: gwasT v }
+
+
+      renderUIElement :: Map ChrId (Array NormalizedGlyph)
+                      -> ChrId -> Pair Number -> Array SingleGlyph
+      renderUIElement m k s
+          = fold $ rescaleNormSingleGlyphs trackDim.height s
+                <$> (Map.lookup k m)
+
+      drawTrackUI :: Pair BigInt -> (ChrId -> Pair Number -> (Array _)) -> Drawing
+      drawTrackUI v = foldMap f <<< withPixelSegments cs trackDim v
+        where f {drawing, point} = Drawing.translate point.x point.y (drawing unit)
+
+      chrLabels :: _
+      chrLabels = renderUIElement $ chrLabelTrack cs trackDim
+
+      relativeUI :: Pair BigInt -> Drawing
+      relativeUI v = drawTrackUI v chrLabels
+
+  in { tracks
+     , relativeUI
+     , fixedUI
+     }
