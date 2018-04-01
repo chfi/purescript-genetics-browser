@@ -353,14 +353,16 @@ demoTracks vs {gwas, annotations, genes} =
 
 
 
-type SNPFeature r = Feature { score :: Number | r }
 
 
-placeSNP :: forall r1 r2.
+------------ new renderers~~~~~~~~~
+
+
+placeGWAS :: forall r1 r2.
             { min :: Number, max :: Number | r1 }
-         -> SNPFeature r2
+         -> GWASFeature r2
          -> NPoint
-placeSNP {min, max} { frameSize, position: (Pair l _), feature } = {x, y}
+placeGWAS {min, max} { frameSize, position: (Pair l _), feature } = {x, y}
   where x = Normalized $ unwrap $ l / frameSize
         y = Normalized $ (feature.score - min) / (max - min)
 
@@ -371,15 +373,13 @@ dist p1 p2 = Math.sqrt $ x' `Math.pow` 2.0 + y' `Math.pow` 2.0
         y' = p1.y - p2.y
 
 
--- can be used with mapWithIndex'd and scaledSegments',
--- to produce a `Map ChrId { features, drawings, overlaps }`
-renderSNP :: forall r.
+renderGWAS :: forall r.
              { min :: Number, max :: Number | r }
           -> Canvas.Dimensions
-          -> Array (SNPFeature ())
+          -> Array (GWASFeature ())
           -> Pair Number
-          -> Rendered (SNPFeature ())
-renderSNP verscale cdim snps =
+          -> Rendered (GWASFeature ())
+renderGWAS verscale cdim snps =
   let features = snps
 
       radius = 2.2
@@ -391,12 +391,12 @@ renderSNP verscale cdim snps =
               fill = filled (fillColor color) c
           in out <> fill
 
-      drawings :: Array (Tuple (SNPFeature ()) Point) -> Array DrawingN
+      drawings :: Array (Tuple (GWASFeature ()) Point) -> Array DrawingN
       drawings pts = let (Tuple _ points) = Array.unzip pts
                      in [{ drawing, points }]
 
-      npointed :: Array (Tuple (SNPFeature ()) NPoint)
-      npointed = map (fanout id (placeSNP verscale)) snps
+      npointed :: Array (Tuple (GWASFeature ()) NPoint)
+      npointed = map (fanout id (placeGWAS verscale)) snps
 
       scale :: CoordSysView -> ViewScale
       scale csv = viewScale cdim csv
@@ -405,17 +405,17 @@ renderSNP verscale cdim snps =
       rescale seg npoint =
         let (Pair offset _) = seg
             x = offset + (pairSize seg) * (unwrap npoint.x)
-            y = cdim.height * unwrap npoint.y
+            y = cdim.height * (one - unwrap npoint.y)
         in {x, y}
 
-      pointed :: Pair Number -> Array (Tuple (SNPFeature ()) Point)
+      pointed :: Pair Number -> Array (Tuple (GWASFeature ()) Point)
       pointed seg = (map <<< map) (rescale seg) npointed
 
-      overlaps :: Array (Tuple (SNPFeature ()) Point)
+      overlaps :: Array (Tuple (GWASFeature ()) Point)
                -> Number -> Point
-               -> Array (SNPFeature ())
+               -> Array (GWASFeature ())
       overlaps pts radius' pt = filterMap covers pts
-        where covers :: Tuple (SNPFeature ()) Point -> Maybe (SNPFeature ())
+        where covers :: Tuple (GWASFeature ()) Point -> Maybe (GWASFeature ())
               covers (Tuple f fPt) =
                 if dist fPt pt <= radius' then Just f else Nothing
 
@@ -424,4 +424,3 @@ renderSNP verscale cdim snps =
              in { features
                 , drawings: drawings pts
                 , overlaps: overlaps pts }
-

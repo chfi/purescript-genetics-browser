@@ -31,7 +31,7 @@ import Data.Lens (Iso', iso, re, to, united, (^.))
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.List (List)
 import Data.Map (Map)
-import Data.Maybe (Maybe(..), fromJust)
+import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (over, unwrap, wrap)
 import Data.Pair (Pair(..))
@@ -39,9 +39,9 @@ import Data.Pair as Pair
 import Data.Symbol (SProxy(..))
 import Data.Traversable (for, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
-import Genetics.Browser.Track.Backend (RenderedTrack, browser, bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser, renderSingleGlyphs, renderTrack, subtractPadding, trackViewScale, transTrack, uiSlots)
+import Genetics.Browser.Track.Backend (RenderedTrack, Rendered, browser, browser', bumpFeatures, zipMapsWith)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes, renderGWAS)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser, renderBrowser', renderSingleGlyphs, renderTrack, subtractPadding, trackViewScale, transTrack, uiSlots)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, showViewScale, translateViewBy)
 import Global.Unsafe (unsafeStringify)
@@ -284,6 +284,70 @@ renderLoop cSys browser canvas state = forever do
 
 
 
+renderLoop' :: CoordSys _ _
+           -> { tracks     :: Pair BigInt -> { gwas :: Map ChrId (Rendered (GWASFeature _)) }
+              , relativeUI :: Pair BigInt -> Drawing
+              , fixedUI :: Drawing }
+           -> BrowserCanvas
+           -> UIState _
+           -> Aff _ Unit
+renderLoop' cSys browser canvas state = forever do
+
+  _ <- takeVar state.viewReady
+
+  csView <- readVar state.view
+  -- if there's a rendering fiber running, we kill it
+  traverse_ (killFiber (error "Resetting renderer"))
+    =<< tryTakeVar state.renderFiber
+
+  let uiScale = trackViewScale canvas csView
+
+  liftEff $ log $ "view scale is: " <> showViewScale uiScale
+
+  {-
+
+  -- if the view scale is unchanged, use the cached glyphs
+  tracks' <- do
+    cache <- AVar.tryTakeVar state.cachedTracks
+    case cache of
+      Just ct
+        | ct.cachedScale == uiScale -> do
+            AVar.putVar ct state.cachedTracks
+            pure ct.glyphs
+      _ -> do
+        let cachedScale = uiScale
+            glyphs = browser.tracks (unwrap csView)
+
+        AVar.putVar {cachedScale, glyphs} state.cachedTracks
+        pure glyphs
+
+  -}
+
+  let tracks' = browser.tracks (unwrap csView)
+
+  -- fork a new renderFiber
+
+  let (Pair offset _) = pixelsView uiScale csView
+
+      relativeUI = browser.relativeUI (unwrap csView)
+      fixedUI = browser.fixedUI
+
+      ui ::  { tracks     :: _
+             , relativeUI :: Drawing
+             , fixedUI :: Drawing }
+      ui = { tracks: tracks'
+           , relativeUI, fixedUI }
+
+  renderFiber <- forkAff
+                 $ renderBrowser' (wrap 2.0) canvas offset ui
+
+  putVar renderFiber state.renderFiber
+
+
+
+
+
+
 
 -- TODO configure UI widths
 runBrowser :: Conf -> BrowserCanvas -> Eff _ _
@@ -358,6 +422,14 @@ runBrowser config bc = launchAff $ do
                     browserDimensions
                     (uiSlots bc) {legend, vscale} tracks
 
+      mainBrowser' :: _
+      mainBrowser' = browser' cSys
+                     trackDimensions browserDimensions
+                     (uiSlots bc) {legend, vscale}
+                     { gwas: renderGWAS vscale  }
+                     { gwas: fromMaybe mempty trackData.gwas }
+
+
       viewTimeout :: Milliseconds
       viewTimeout = wrap 100.0
 
@@ -370,7 +442,8 @@ runBrowser config bc = launchAff $ do
       , overlay: \p -> log ("overlay: " <> show p.x <> ", " <> show p.y) }
 
   _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
-  _ <- forkAff $ renderLoop cSys mainBrowser bc initState
+  -- _ <- forkAff $ renderLoop cSys mainBrowser bc initState
+  _ <- forkAff $ renderLoop' cSys mainBrowser' bc initState
 
 
   pure unit

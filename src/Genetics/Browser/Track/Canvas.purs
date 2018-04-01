@@ -6,30 +6,31 @@ module Genetics.Browser.Track.UI.Canvas where
 
 import Prelude
 
-import Control.Monad.Aff (Aff, Milliseconds(..), delay)
+import Control.Monad.Aff (Aff, delay)
 import Control.Monad.Eff (Eff, foreachE)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
 import DOM.Node.Types (Element)
-import Data.Bitraversable (bitraverse, bitraverse_)
 import Data.Either (Either(..), either)
-import Data.Foldable (for_)
+import Data.Foldable (fold, foldMap, for_)
 import Data.Lens (iso, view, (^.))
 import Data.Lens.Iso (Iso')
 import Data.List (List)
+import Data.Map (Map)
 import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Nullable (Nullable, toMaybe)
-import Data.Time.Duration (Milliseconds(..))
+import Data.Time.Duration (Milliseconds)
 import Data.Traversable (traverse_)
 import Data.Tuple (Tuple(Tuple), uncurry)
-import Genetics.Browser.Track.Backend (BatchGlyph, RenderedTrack, SingleGlyph, UISlots)
-import Genetics.Browser.Types (Point)
-import Genetics.Browser.Types.Coordinates (CoordSysView(..), ViewScale(..), viewScale)
+import Genetics.Browser.Track.Backend (BatchGlyph, RenderedTrack, SingleGlyph, UISlots, Rendered)
+import Genetics.Browser.Track.Demo (GWASFeature)
+import Genetics.Browser.Types (ChrId(..))
+import Genetics.Browser.Types.Coordinates (CoordSysView, ViewScale, viewScale)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing)
+import Graphics.Drawing (Drawing, Point)
 import Graphics.Drawing as Drawing
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -138,8 +139,6 @@ foreign import canvasWheelCBImpl :: forall eff.
                                  -> Eff eff Unit
 
 
-
-
 canvasDrag :: (Either Point Point -> Eff _ Unit)
            -> CanvasElement
            -> Eff _ Unit
@@ -220,9 +219,11 @@ drawToBuffer (BufferedCanvas {back}) f = do
 
 blankBuffer :: BufferedCanvas
             -> Eff _ Unit
-blankBuffer (BufferedCanvas {back}) = do
+blankBuffer bc@(BufferedCanvas {back}) = do
   backCtx <- Canvas.getContext2D back
   {width, height} <- Canvas.getCanvasDimensions back
+  translateBuffer {x: zero, y: zero} bc
+  -- setCanvasTranslation {x: 0.0, y: 0.0 } back
   _ <- Canvas.setFillStyle backgroundColor backCtx
   _ <- Canvas.fillRect backCtx { x: 0.0, y: 0.0, w: width, h: height }
   pure unit
@@ -348,8 +349,6 @@ setBrowserCanvasSize dim (BrowserCanvas bc) = do
             , track = track }
 
 
-
-
 -- | Creates a `BrowserCanvas` and appends it to the provided element.
 -- | Resizes the container element to fit.
 browserCanvas :: Canvas.Dimensions
@@ -453,12 +452,6 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
   let bfr = (unwrap bc.track).canvas
       cnv = (unwrap bfr).front
 
-  -- liftEff $ blankBuffer bfr
-
-  -- backCtx <- Canvas.getContext2D back
-  -- translateBuffer {x: zero, y: zero} bc
-  -- setCanvasTranslation {x: 0.0, y: 0.0 } back
-
   ctx <- liftEff $ Canvas.getContext2D cnv
   liftEff do
     {width, height} <- Canvas.getCanvasDimensions cnv
@@ -473,18 +466,48 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
         (renderBatchGlyphs  bc.track)
         (renderSingleGlyphs bc.track)
 
-      -- liftEff $ flipBuffer bfr
       delay d
 
   liftEff do
-
     overlayCtx <- Canvas.getContext2D bc.overlay
     Drawing.render overlayCtx ui.fixedUI
-
     Drawing.render ctx ui.relativeUI
 
-  -- drawToBuffer bfr \tCtx -> Drawing.render tCtx $ ui.relativeUI
-  -- liftEff $ flipBuffer bfr
+
+
+renderBrowser' :: Milliseconds
+               -> BrowserCanvas
+               -> Number
+               -> { tracks     :: { gwas :: Map ChrId (Rendered (GWASFeature _)) }
+                  , relativeUI :: Drawing
+                  , fixedUI :: Drawing }
+               -> Aff _ _
+renderBrowser' d (BrowserCanvas bc) offset ui = do
+
+  let bfr = (unwrap bc.track).canvas
+      cnv = (unwrap bfr).front
+
+  ctx <- liftEff $ Canvas.getContext2D cnv
+  liftEff do
+    {width, height} <- Canvas.getCanvasDimensions cnv
+    _ <- Canvas.setFillStyle backgroundColor ctx
+    translateBuffer {x: zero, y: zero} bfr
+    void $ Canvas.fillRect ctx { x: 0.0, y: 0.0, w: width, h: height }
+
+  liftEff $ translateBuffer {x: (-offset), y: zero} bfr
+
+  let gwasTrack :: Array { drawing :: _, points :: _ }
+      gwasTrack = foldMap (_.drawings) ui.tracks.gwas
+
+  for_ gwasTrack \t -> do
+      liftEff $ renderBatchGlyphs bc.track t
+      delay d
+
+  liftEff do
+    overlayCtx <- Canvas.getContext2D bc.overlay
+    Drawing.render overlayCtx ui.fixedUI
+    Drawing.render ctx ui.relativeUI
+
 
 flipTrack :: BrowserCanvas
           -> Eff _ Unit
