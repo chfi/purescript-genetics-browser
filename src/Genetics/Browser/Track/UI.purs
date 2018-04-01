@@ -47,7 +47,7 @@ import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView),
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (fillRect, setFillStyle)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing)
+import Graphics.Drawing (Drawing, Point)
 import Partial.Unsafe (unsafePartial)
 import Simple.JSON (read)
 
@@ -325,6 +325,12 @@ renderLoop' cSys browser canvas state = forever do
 
   let tracks' = browser.tracks (unwrap csView)
 
+  let overlaps' :: Number -> Point -> Array _
+      overlaps' r p = foldMap (\s -> s.overlaps r p) tracks'.gwas
+
+
+
+  liftEff $ setWindow "overlaps" overlaps'
   -- fork a new renderFiber
 
   let (Pair offset _) = pixelsView uiScale csView
