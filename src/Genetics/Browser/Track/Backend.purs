@@ -583,6 +583,17 @@ type Render a =
      , overlaps :: Number -> Point -> Array a }
 
 
+
+
+type Render' a =
+     Canvas.Dimensions
+  -> Map ChrId (Array a)
+  -> Map ChrId (Pair Number)
+  -> { features :: Array a
+     , drawings :: Array DrawingN
+     , overlaps :: Number -> Point -> Array a }
+
+
 renderTrack :: forall a.
                CoordSys ChrId BigInt
             -> Canvas.Dimensions
@@ -597,6 +608,20 @@ renderTrack cs cdim render segFs =
 
   in \bView -> zipMapsWith ($) midStep (segs bView)
 
+
+renderTrack' :: forall a.
+               CoordSys ChrId BigInt
+            -> Canvas.Dimensions
+            -> Render' a
+            -> Map ChrId (Array a)
+            -> Pair BigInt
+            -> Rendered a
+renderTrack' cs cdim render segFs =
+  let segs vw = scaledSegments cs { screenWidth: cdim.width, viewWidth: pairSize vw }
+
+      midStep = render cdim segFs
+
+  in \bView -> midStep $ segs bView
 
 
 
@@ -639,6 +664,71 @@ browser' cs trackDim overlayDim uiSlots ui renderers inputTracks =
       tracks :: Pair BigInt -> { gwas :: Map ChrId (Rendered a) }
       tracks =
         let gwasT = renderTrack cs trackDim renderers.gwas inputTracks.gwas
+        in \v -> { gwas: gwasT v }
+
+
+      renderUIElement :: Map ChrId (Array NormalizedGlyph)
+                      -> ChrId -> Pair Number -> Array SingleGlyph
+      renderUIElement m k s
+          = fold $ rescaleNormSingleGlyphs trackDim.height s
+                <$> (Map.lookup k m)
+
+      drawTrackUI :: Pair BigInt -> (ChrId -> Pair Number -> (Array _)) -> Drawing
+      drawTrackUI v = foldMap f <<< withPixelSegments cs trackDim v
+        where f {drawing, point} = Drawing.translate point.x point.y (drawing unit)
+
+      chrLabels :: _
+      chrLabels = renderUIElement $ chrLabelTrack cs trackDim
+
+      relativeUI :: Pair BigInt -> Drawing
+      relativeUI v = drawTrackUI v chrLabels
+
+  in { tracks
+     , relativeUI
+     , fixedUI
+     }
+
+
+
+browser'' :: forall a b c.
+            CoordSys ChrId BigInt
+         -> Canvas.Dimensions
+         -> Canvas.Dimensions
+         -> UISlots
+         -> { legend :: Legend, vscale :: VScale }
+         -> { gwas :: Render' a }
+         -> { gwas :: Map ChrId (Array a) }
+         -> { tracks     :: Pair BigInt -> { gwas :: Rendered a }
+            , relativeUI :: Pair BigInt -> Drawing
+            , fixedUI    :: Drawing }
+browser'' cs trackDim overlayDim uiSlots ui renderers inputTracks =
+  let
+      drawInSlot {offset, size} d =
+          (translate offset.x offset.y
+           $ filled (fillColor white)
+           $ rectangle zero zero size.width size.height)
+        <> translate offset.x offset.y d
+
+      vScale = drawInSlot uiSlots.left (drawVScale ui.vscale uiSlots.left.size.height)
+
+      legend = drawInSlot uiSlots.right (drawLegend ui.legend uiSlots.right.size.height)
+
+      ruler   = Drawing.translate ui.vscale.width zero
+                $ horRulerTrack ui.vscale red trackDim
+
+      fixedUI = ruler <> vScale <> legend
+
+      -- normTracks :: List (Map ChrId
+      --                     (Either (BatchGlyph (Normalized Point))
+      --                             (Array NormalizedGlyph)))
+      -- normTracks = runExists (\(Track r as) -> render r <$> as) <$> inputTracks
+
+      -- tracks :: Pair BigInt -> List (Array (Either (BatchGlyph Point) (Array SingleGlyph)))
+      -- tracks v = (renderNormalizedTrack cs trackDim v) <$> normTracks
+
+      tracks :: Pair BigInt -> { gwas :: Rendered a }
+      tracks =
+        let gwasT = renderTrack' cs trackDim renderers.gwas inputTracks.gwas
         in \v -> { gwas: gwasT v }
 
 

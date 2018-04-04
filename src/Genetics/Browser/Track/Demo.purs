@@ -14,7 +14,7 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Exists (Exists, mkExists)
 import Data.Filterable (filterMap, filtered)
-import Data.Foldable (class Foldable, foldMap)
+import Data.Foldable (class Foldable, fold, foldMap)
 import Data.Lens (view, (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
@@ -30,7 +30,7 @@ import Data.String as String
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
 import Data.Variant (case_, inj, onMatch)
-import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, Rendered, Renderer, SingleGlyph, Track(Track), VScale, _batch, _point, _range, _single, groupToChrs, horPlace, mkIcon, trackLegend)
+import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, Rendered, Renderer, SingleGlyph, Track(Track), VScale, _batch, _point, _range, _single, groupToChrs, horPlace, mkIcon, trackLegend, zipMapsWith)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), ViewScale, _Segments, pairSize, viewScale)
@@ -40,6 +40,7 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
+import Unsafe.Coerce (unsafeCoerce)
 
 
 type BedFeature = Feature { thickRange :: Pair Bp
@@ -418,6 +419,80 @@ renderGWAS verscale cdim snps =
         where covers :: Tuple (GWASFeature ()) Point -> Maybe (GWASFeature ())
               covers (Tuple f fPt) =
                 if dist fPt pt <= radius' then Just f else Nothing
+
+
+  in \seg -> let pts = pointed seg
+             in { features
+                , drawings: drawings pts
+                , overlaps: overlaps pts }
+
+
+
+renderGWAS' :: forall r.
+             { min :: Number, max :: Number | r }
+          -> Canvas.Dimensions
+          -> Map ChrId (Array (GWASFeature ()))
+          -> Map ChrId (Pair Number)
+          -> Rendered (GWASFeature ())
+renderGWAS' verscale cdim snps =
+  let features :: Array (GWASFeature ())
+      features = fold snps
+
+      radius = 2.2
+
+      drawing =
+          let color = navy
+              c = circle 0.0 0.0 radius
+              out = outlined (outlineColor color) c
+              fill = filled (fillColor color) c
+          in out <> fill
+
+      drawings :: Array (Tuple (GWASFeature ()) Point) -> Array DrawingN
+      drawings pts = let (Tuple _ points) = Array.unzip pts
+                     in [{ drawing, points }]
+
+      -- drawings :: _ -> Array DrawingN
+      -- drawings = unsafeCoerce unit
+
+      -- npointed :: Array (Tuple (GWASFeature ()) NPoint)
+      -- npointed = map (fanout id (placeGWAS verscale)) features
+
+      npointed :: Map ChrId (Array (Tuple (GWASFeature ()) NPoint))
+      npointed = (map <<< map) (fanout id (placeGWAS verscale)) snps
+
+      {-
+      scale :: CoordSysView -> ViewScale
+      scale csv = viewScale cdim csv
+      -}
+
+      rescale :: Pair Number -> NPoint -> Point
+      rescale seg npoint =
+        let (Pair offset _) = seg
+            x = offset + (pairSize seg) * (unwrap npoint.x)
+            y = cdim.height * (one - unwrap npoint.y)
+        in {x, y}
+
+      -- pointed :: Pair Number -> Array (Tuple (GWASFeature ()) Point)
+      -- pointed seg = (map <<< map) (rescale seg) npointed
+      pointed :: Map ChrId (Pair Number) -> Array (Tuple (GWASFeature ()) Point)
+      pointed seg = unsafeCoerce unit
+
+      test :: Map ChrId (Pair Number)
+           -> Map ChrId (Array (Tuple (GWASFeature ()) NPoint))
+           -> (Array (Tuple (GWASFeature ())  Point))
+      test segs pts = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs pts
+
+
+      overlaps :: Array (Tuple (GWASFeature ()) Point)
+               -> Number -> Point
+               -> Array (GWASFeature ())
+      overlaps pts radius' pt = filterMap covers pts
+        where covers :: Tuple (GWASFeature ()) Point -> Maybe (GWASFeature ())
+              covers (Tuple f fPt) =
+                if dist fPt pt <= radius' then Just f else Nothing
+
+      -- overlaps :: _
+      -- overlaps = unsafeCoerce unit
 
 
   in \seg -> let pts = pointed seg
