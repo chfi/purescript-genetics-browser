@@ -231,7 +231,7 @@ uiViewUpdate cs timeout { view, viewCmd, viewReady } = do
   loop' (pure unit)
 
 
-
+{-
 renderLoop :: CoordSys _ _
            -> { tracks     :: Pair BigInt -> List (Array RenderedTrack)
               , relativeUI :: Pair BigInt -> Drawing
@@ -372,10 +372,26 @@ printSNPInfo fs = do
   log $ "showing " <> show n <> " clicked glyphs"
   for_ (Array.take m fs) showSnp
 
+
+
+
+foreign import initDebugDiv :: forall e. Number -> Eff e Unit
+
+
+foreign import setDebugDivVisibility :: forall e.
+                                        String -> Eff e Unit
+
+foreign import setDebugDivPoint :: forall e.
+                                   Point -> Eff e Unit
+
+
 -- TODO configure UI widths
 runBrowser :: Conf -> BrowserCanvas -> Eff _ _
 runBrowser config bc = launchAff $ do
 
+  let clickRadius = 4.0
+
+  liftEff $ initDebugDiv clickRadius
 
   let browserDimensions = (unwrap bc).dimensions
       trackDimensions = subtractPadding browserDimensions (unwrap bc).trackPadding
@@ -387,8 +403,6 @@ runBrowser config bc = launchAff $ do
       vScaleWidth = 60.0
       legendWidth = 120.0
       trackWidth = width - (vScaleWidth + legendWidth)
-
-
 
   let cSys :: CoordSys ChrId BigInt
       cSys = coordSys mouseChrSizes
@@ -467,6 +481,18 @@ runBrowser config bc = launchAff $ do
              Nothing -> liftEff $ log "clicked no glyphs"
              Just gs -> liftEff $ (printSNPInfo (gs clickRadius p).gwas)
 
+
+    ovCtx <- Canvas.getContext2D (unwrap bc).overlay
+
+    let overlayDebug :: _
+        overlayDebug p = do
+          let pad = (unwrap bc).trackPadding
+              dim = (unwrap bc).dimensions
+
+          setDebugDivVisibility "visible"
+          setDebugDivPoint p
+
+
     browserOnClick bc
       { overlay: \_ -> pure unit
       , track:   glyphClick }
@@ -515,20 +541,8 @@ initBrowser rawConfig = do
 
           debugBrowserCanvas "debugBC" bc
 
-          let drawR :: Number -> Number -> Eff _ Unit
-              drawR x y = drawOnTrack bc \ctx -> do
-                _ <- setFillStyle "red" ctx
-                _ <- fillRect ctx { x, y, w: 20.0, h: 20.0 }
-                pure unit
-
-
-          setWindow "drawRect" drawR
-          setWindow "flipTrack" (flipTrack bc)
-          setWindow "blankTrack" (blankTrack bc)
-
           log $ unsafeStringify c
           void $ runBrowser c bc
-
 
 
 
