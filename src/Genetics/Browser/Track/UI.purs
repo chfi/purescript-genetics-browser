@@ -25,7 +25,7 @@ import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
-import Data.Foldable (class Foldable, foldMap, null)
+import Data.Foldable (class Foldable, foldMap, length, null, oneOf)
 import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
 import Data.Lens (Iso', iso, re, to, united, (^.))
 import Data.Lens.Iso.Newtype (_Newtype)
@@ -37,17 +37,18 @@ import Data.Newtype (over, unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Symbol (SProxy(..))
-import Data.Traversable (for, traverse, traverse_)
+import Data.Traversable (for, for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
-import Genetics.Browser.Track.Backend (RenderedTrack, Rendered, browser, browser', bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes, renderGWAS)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser, renderBrowser', renderSingleGlyphs, renderTrack, subtractPadding, trackViewScale, transTrack, uiSlots)
+import Genetics.Browser.Track.Backend (Rendered, RenderedTrack, browser, browser', browser'', bumpFeatures, zipMapsWith)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes, renderGWAS, renderGWAS')
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser', renderBrowser'', renderTrack, subtractPadding, trackViewScale, uiSlots)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, showViewScale, translateViewBy)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (fillRect, setFillStyle)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
+import Graphics.Drawing as Drawing
 import Partial.Unsafe (unsafePartial)
 import Simple.JSON (read)
 
@@ -146,6 +147,7 @@ type UIState e = { view :: AVar CoordSysView
                  , renderFiber :: AVar (Fiber e Unit)
                  , cachedTracks :: AVar { cachedScale :: ViewScale
                                         , glyphs :: List (Array RenderedTrack) }
+                 , lastOverlaps :: AVar (Number -> Point -> { gwas :: Array (GWASFeature ()) } )
                  }
 
 
@@ -339,8 +341,14 @@ renderLoop' cSys browser canvas state = forever do
       ui = { tracks: tracks'
            , relativeUI, fixedUI }
 
+
+  _ <- AVar.tryTakeVar state.lastOverlaps
+                    -- offset the click by the current canvas translation
+  AVar.putVar (\n r -> let r' = {x: r.x + offset, y: r.y }
+                       in { gwas: tracks'.gwas.overlaps n r' }) state.lastOverlaps
+
   renderFiber <- forkAff
-                 $ renderBrowser' (wrap 2.0) canvas offset ui
+                 $ renderBrowser'' (wrap 2.0) canvas offset ui
 
   putVar renderFiber state.renderFiber
 
@@ -349,6 +357,20 @@ renderLoop' cSys browser canvas state = forever do
 
 
 
+
+
+printSNPInfo :: forall r. Array (GWASFeature r) -> Eff _ Unit
+printSNPInfo fs = do
+  let n = length fs :: Int
+      m = 5
+
+      showSnp f = do
+        log $ f.feature.name <> " - "
+           <> unwrap f.feature.chrId <> " @ "
+           <> show (map show f.position)
+
+  log $ "showing " <> show n <> " clicked glyphs"
+  for_ (Array.take m fs) showSnp
 
 -- TODO configure UI widths
 runBrowser :: Conf -> BrowserCanvas -> Eff _ _
@@ -398,9 +420,10 @@ runBrowser config bc = launchAff $ do
   viewReady <- makeVar unit
   renderFiber <- makeEmptyVar
   cachedTracks <- AVar.makeEmptyVar
+  lastOverlaps <- AVar.makeEmptyVar
 
   let initState :: UIState _
-      initState = { view, viewCmd, viewReady, renderFiber, cachedTracks }
+      initState = { view, viewCmd, viewReady, renderFiber, cachedTracks, lastOverlaps }
 
   let
       entries = foldMap annotLegendTest trackData.annotations
@@ -424,10 +447,10 @@ runBrowser config bc = launchAff $ do
                     (uiSlots bc) {legend, vscale} tracks
 
       mainBrowser' :: _
-      mainBrowser' = browser' cSys
+      mainBrowser' = browser'' cSys
                      trackDimensions browserDimensions
                      (uiSlots bc) {legend, vscale}
-                     { gwas: renderGWAS vscale  }
+                     { gwas: renderGWAS' vscale  }
                      { gwas: fromMaybe mempty trackData.gwas }
 
 
@@ -438,23 +461,29 @@ runBrowser config bc = launchAff $ do
     setWindow "mainBrowser" mainBrowser
     setWindow "debugView" (debugView initState)
 
+    let glyphClick :: _
+        glyphClick p = launchAff_ do
+          AVar.tryReadVar lastOverlaps >>= case _ of
+             Nothing -> liftEff $ log "clicked no glyphs"
+             Just gs -> liftEff $ (printSNPInfo (gs clickRadius p).gwas)
+
     browserOnClick bc
-      { track:   \p -> log ("track: "   <> show p.x <> ", " <> show p.y)
-      , overlay: \p -> log ("overlay: " <> show p.x <> ", " <> show p.y) }
+      { overlay: \_ -> pure unit
+      , track:   glyphClick }
 
   _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
+
   -- _ <- forkAff $ renderLoop cSys mainBrowser bc initState
   _ <- forkAff $ renderLoop' cSys mainBrowser' bc initState
 
 
   pure unit
 
-
-
 type DataURLs = { gwas        :: Maybe String
                 , annotations :: Maybe String
                 , genes       :: Maybe String
                 }
+
 
 type Conf = { browserHeight :: Number
             , trackPadding :: TrackPadding
