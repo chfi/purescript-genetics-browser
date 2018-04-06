@@ -280,12 +280,13 @@ renderLoop cSys browser canvas state = forever do
                  $ renderBrowser (wrap 3.0) canvas offset ui
 
   putVar renderFiber state.renderFiber
+-}
 
 
 
 
 renderLoop' :: CoordSys _ _
-           -> { tracks     :: Pair BigInt -> { gwas :: Map ChrId (Rendered (GWASFeature _)) }
+           -> { tracks     :: Pair BigInt -> { gwas :: Rendered (GWASFeature ()) }
               , relativeUI :: Pair BigInt -> Drawing
               , fixedUI :: Drawing }
            -> BrowserCanvas
@@ -325,12 +326,6 @@ renderLoop' cSys browser canvas state = forever do
 
   let tracks' = browser.tracks (unwrap csView)
 
-  let overlaps' :: Number -> Point -> Array _
-      overlaps' r p = foldMap (\s -> s.overlaps r p) tracks'.gwas
-
-
-
-  liftEff $ setWindow "overlaps" overlaps'
   -- fork a new renderFiber
 
   let (Pair offset _) = pixelsView uiScale csView

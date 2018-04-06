@@ -509,6 +509,44 @@ renderBrowser' d (BrowserCanvas bc) offset ui = do
     Drawing.render ctx ui.relativeUI
 
 
+
+renderBrowser'' :: Milliseconds
+               -> BrowserCanvas
+               -> Number
+               -> { tracks     :: { gwas :: (Rendered (GWASFeature _)) }
+                  , relativeUI :: Drawing
+                  , fixedUI :: Drawing }
+               -> Aff _ _
+renderBrowser'' d (BrowserCanvas bc) offset ui = do
+
+  let bfr = (unwrap bc.track).canvas
+      cnv = (unwrap bfr).front
+
+  ctx <- liftEff $ Canvas.getContext2D cnv
+  liftEff do
+    {width, height} <- Canvas.getCanvasDimensions cnv
+    _ <- Canvas.setFillStyle backgroundColor ctx
+    translateBuffer {x: zero, y: zero} bfr
+    void $ Canvas.fillRect ctx { x: 0.0, y: 0.0, w: width, h: height }
+
+  liftEff $ translateBuffer {x: (-offset), y: zero} bfr
+
+  let gwasTrack :: Array { drawing :: _, points :: _ }
+      gwasTrack = ui.tracks.gwas.drawings
+
+  for_ gwasTrack \t -> do
+      liftEff $ renderBatchGlyphs bc.track t
+      delay d
+
+  liftEff do
+    overlayCtx <- Canvas.getContext2D bc.overlay
+    Drawing.render overlayCtx ui.fixedUI
+    Drawing.render ctx ui.relativeUI
+
+
+{-
+    debug helper functions
+-}
 flipTrack :: BrowserCanvas
           -> Eff _ Unit
 flipTrack (BrowserCanvas bc) = do

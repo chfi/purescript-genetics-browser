@@ -28,7 +28,7 @@ import Data.Pair (Pair(..))
 import Data.Profunctor.Strong (fanout)
 import Data.String as String
 import Data.Traversable (traverse)
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), fst, snd)
 import Data.Variant (case_, inj, onMatch)
 import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, Rendered, Renderer, SingleGlyph, Track(Track), VScale, _batch, _point, _range, _single, groupToChrs, horPlace, mkIcon, trackLegend, zipMapsWith)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
@@ -221,7 +221,8 @@ scoreVerPlace s x = Normalized $ (x.feature.score - s.min) / (s.max - s.min)
 
 
 type GWASFeature r = Feature { score :: Number
-                             , chrId :: ChrId | r }
+                             , chrId :: ChrId
+                             , name  :: String | r }
 
 gemmaJSONParse :: CoordSys ChrId BigInt
                -> Json
@@ -231,13 +232,13 @@ gemmaJSONParse cs j = do
   chrId <- ChrId <$> obj ^? ix "chr" <<< _String
   pos   <- Bp    <$> obj ^? ix "ps"  <<< _Number
   score <-           obj ^? ix "af"  <<< _Number
+  name  <-           obj ^? ix "rs"  <<< _String
 
   chrSize <- (Bp <<< BigInt.toNumber <<< pairSize) <$> Map.lookup chrId (view _Segments cs)
 
   pure { position: Pair pos pos
        , frameSize: chrSize
-       , feature: { score
-                  , chrId }
+       , feature: { score, chrId, name }
        }
 
 
@@ -451,9 +452,6 @@ renderGWAS' verscale cdim snps =
       drawings pts = let (Tuple _ points) = Array.unzip pts
                      in [{ drawing, points }]
 
-      -- drawings :: _ -> Array DrawingN
-      -- drawings = unsafeCoerce unit
-
       -- npointed :: Array (Tuple (GWASFeature ()) NPoint)
       -- npointed = map (fanout id (placeGWAS verscale)) features
 
@@ -474,15 +472,16 @@ renderGWAS' verscale cdim snps =
 
       -- pointed :: Pair Number -> Array (Tuple (GWASFeature ()) Point)
       -- pointed seg = (map <<< map) (rescale seg) npointed
-      pointed :: Map ChrId (Pair Number) -> Array (Tuple (GWASFeature ()) Point)
-      pointed seg = unsafeCoerce unit
+      pointed :: Map ChrId (Pair Number)
+              -> Array (Tuple (GWASFeature ()) Point)
+      pointed segs = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs npointed
 
-      test :: Map ChrId (Pair Number)
-           -> Map ChrId (Array (Tuple (GWASFeature ()) NPoint))
-           -> (Array (Tuple (GWASFeature ())  Point))
-      test segs pts = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs pts
+      -- test :: Map ChrId (Pair Number)
+      --      -> Map ChrId (Array (Tuple (GWASFeature ()) NPoint))
+      --      -> (Array (Tuple (GWASFeature ())  Point))
+      -- test segs pts = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs pts
 
-
+{-
       overlaps :: Array (Tuple (GWASFeature ()) Point)
                -> Number -> Point
                -> Array (GWASFeature ())
@@ -490,9 +489,22 @@ renderGWAS' verscale cdim snps =
         where covers :: Tuple (GWASFeature ()) Point -> Maybe (GWASFeature ())
               covers (Tuple f fPt) =
                 if dist fPt pt <= radius' then Just f else Nothing
+      -}
 
-      -- overlaps :: _
-      -- overlaps = unsafeCoerce unit
+
+      overlaps :: Array (Tuple (GWASFeature ()) Point)
+               -> Number -> Point
+               -> Array (GWASFeature ())
+      overlaps pts radius' pt =
+        fst
+          $ Array.unzip
+          $ Array.sortBy (\(Tuple _ p1) (Tuple _ p2) ->
+                         (dist pt p1) `compare` (dist pt p2))
+                           $ filterMap covers pts
+
+          where covers :: Tuple (GWASFeature ()) Point -> Maybe (Tuple (GWASFeature ()) Point)
+                covers t@(Tuple f fPt) =
+                  if dist fPt pt <= radius' then Just t else Nothing
 
 
   in \seg -> let pts = pointed seg
