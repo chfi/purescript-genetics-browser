@@ -40,7 +40,7 @@ import Data.Symbol (SProxy(..))
 import Data.Traversable (for, for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Track.Backend (Rendered, RenderedTrack, browser, browser', browser'', bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes, renderGWAS, renderGWAS')
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes, renderGWAS)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser', renderBrowser'', renderTrack, subtractPadding, trackViewScale, uiSlots)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, showViewScale, translateViewBy)
@@ -389,7 +389,7 @@ foreign import setDebugDivPoint :: forall e.
 runBrowser :: Conf -> BrowserCanvas -> Eff _ _
 runBrowser config bc = launchAff $ do
 
-  let clickRadius = 4.0
+  let clickRadius = 1.0
 
   liftEff $ initDebugDiv clickRadius
 
@@ -464,7 +464,7 @@ runBrowser config bc = launchAff $ do
       mainBrowser' = browser'' cSys
                      trackDimensions browserDimensions
                      (uiSlots bc) {legend, vscale}
-                     { gwas: renderGWAS' vscale  }
+                     { gwas: renderGWAS vscale  }
                      { gwas: fromMaybe mempty trackData.gwas }
 
 

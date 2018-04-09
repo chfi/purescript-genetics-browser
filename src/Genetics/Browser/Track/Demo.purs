@@ -375,67 +375,15 @@ dist p1 p2 = Math.sqrt $ x' `Math.pow` 2.0 + y' `Math.pow` 2.0
         y' = p1.y - p2.y
 
 
+
+
 renderGWAS :: forall r.
-             { min :: Number, max :: Number | r }
-          -> Canvas.Dimensions
-          -> Array (GWASFeature ())
-          -> Pair Number
-          -> Rendered (GWASFeature ())
-renderGWAS verscale cdim snps =
-  let features = snps
-
-      radius = 2.2
-
-      drawing =
-          let color = navy
-              c = circle 0.0 0.0 radius
-              out = outlined (outlineColor color) c
-              fill = filled (fillColor color) c
-          in out <> fill
-
-      drawings :: Array (Tuple (GWASFeature ()) Point) -> Array DrawingN
-      drawings pts = let (Tuple _ points) = Array.unzip pts
-                     in [{ drawing, points }]
-
-      npointed :: Array (Tuple (GWASFeature ()) NPoint)
-      npointed = map (fanout id (placeGWAS verscale)) snps
-
-      scale :: CoordSysView -> ViewScale
-      scale csv = viewScale cdim csv
-
-      rescale :: Pair Number -> NPoint -> Point
-      rescale seg npoint =
-        let (Pair offset _) = seg
-            x = offset + (pairSize seg) * (unwrap npoint.x)
-            y = cdim.height * (one - unwrap npoint.y)
-        in {x, y}
-
-      pointed :: Pair Number -> Array (Tuple (GWASFeature ()) Point)
-      pointed seg = (map <<< map) (rescale seg) npointed
-
-      overlaps :: Array (Tuple (GWASFeature ()) Point)
-               -> Number -> Point
-               -> Array (GWASFeature ())
-      overlaps pts radius' pt = filterMap covers pts
-        where covers :: Tuple (GWASFeature ()) Point -> Maybe (GWASFeature ())
-              covers (Tuple f fPt) =
-                if dist fPt pt <= radius' then Just f else Nothing
-
-
-  in \seg -> let pts = pointed seg
-             in { features
-                , drawings: drawings pts
-                , overlaps: overlaps pts }
-
-
-
-renderGWAS' :: forall r.
              { min :: Number, max :: Number | r }
           -> Canvas.Dimensions
           -> Map ChrId (Array (GWASFeature ()))
           -> Map ChrId (Pair Number)
           -> Rendered (GWASFeature ())
-renderGWAS' verscale cdim snps =
+renderGWAS verscale cdim snps =
   let features :: Array (GWASFeature ())
       features = fold snps
 
@@ -452,16 +400,8 @@ renderGWAS' verscale cdim snps =
       drawings pts = let (Tuple _ points) = Array.unzip pts
                      in [{ drawing, points }]
 
-      -- npointed :: Array (Tuple (GWASFeature ()) NPoint)
-      -- npointed = map (fanout id (placeGWAS verscale)) features
-
       npointed :: Map ChrId (Array (Tuple (GWASFeature ()) NPoint))
       npointed = (map <<< map) (fanout id (placeGWAS verscale)) snps
-
-      {-
-      scale :: CoordSysView -> ViewScale
-      scale csv = viewScale cdim csv
-      -}
 
       rescale :: Pair Number -> NPoint -> Point
       rescale seg npoint =
@@ -470,41 +410,18 @@ renderGWAS' verscale cdim snps =
             y = cdim.height * (one - unwrap npoint.y)
         in {x, y}
 
-      -- pointed :: Pair Number -> Array (Tuple (GWASFeature ()) Point)
-      -- pointed seg = (map <<< map) (rescale seg) npointed
       pointed :: Map ChrId (Pair Number)
               -> Array (Tuple (GWASFeature ()) Point)
       pointed segs = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs npointed
 
-      -- test :: Map ChrId (Pair Number)
-      --      -> Map ChrId (Array (Tuple (GWASFeature ()) NPoint))
-      --      -> (Array (Tuple (GWASFeature ())  Point))
-      -- test segs pts = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs pts
 
-{-
       overlaps :: Array (Tuple (GWASFeature ()) Point)
                -> Number -> Point
                -> Array (GWASFeature ())
       overlaps pts radius' pt = filterMap covers pts
         where covers :: Tuple (GWASFeature ()) Point -> Maybe (GWASFeature ())
               covers (Tuple f fPt) =
-                if dist fPt pt <= radius' then Just f else Nothing
-      -}
-
-
-      overlaps :: Array (Tuple (GWASFeature ()) Point)
-               -> Number -> Point
-               -> Array (GWASFeature ())
-      overlaps pts radius' pt =
-        fst
-          $ Array.unzip
-          $ Array.sortBy (\(Tuple _ p1) (Tuple _ p2) ->
-                         (dist pt p1) `compare` (dist pt p2))
-                           $ filterMap covers pts
-
-          where covers :: Tuple (GWASFeature ()) Point -> Maybe (Tuple (GWASFeature ()) Point)
-                covers t@(Tuple f fPt) =
-                  if dist fPt pt <= radius' then Just t else Nothing
+                if dist fPt pt <= radius + radius' then Just f else Nothing
 
 
   in \seg -> let pts = pointed seg

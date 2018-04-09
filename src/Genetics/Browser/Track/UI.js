@@ -93,7 +93,8 @@ exports.setDebugDivPoint = function(p) {
         var div = getDebugDiv();
         var r = div.dataset.radius | 1.0;
         var x = p.x - r;
-        var y = p.y - r;
+        var y = p.y - r * 2.0;
+        // var y = p.y;
         div.style['left'] = x + "px";
         div.style['top']  = y + "px";
     };
