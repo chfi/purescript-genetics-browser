@@ -62,8 +62,9 @@ exports.setCanvasTranslation = function(p) {
 exports.canvasClickImpl = function(canvas, cb) {
     var rect = canvas.getBoundingClientRect();
     canvas.addEventListener('mousedown', function(e) {
-        cb({x: e.clientX - rect.x,
-            y: e.clientY - rect.y})();
+        var x = e.clientX - rect.left + window.scrollX;
+        var y = e.clientY - rect.top  + window.scrollY;
+        cb({x: x, y: y})();
     });
 };
 
