@@ -373,7 +373,16 @@ printSNPInfo fs = do
   for_ (Array.take m fs) showSnp
 
 
+snpInfoHTML :: forall r. GWASFeature r -> String
+snpInfoHTML { position, feature } =
+    "<p>SNP: "   <> feature.name <> "</p>"
+ <> "<p>Chr: "   <> show feature.chrId <> "</p>"
+ <> "<p>Pos: "   <> show (Pair.fst position) <> "</p>"
+ <> "<p>Score: " <> show feature.score <> "</p>"
 
+
+foreign import setInfoBoxVisibility :: forall e. String -> Eff e Unit
+foreign import setInfoBoxContents :: forall e. String -> Eff e Unit
 
 foreign import initDebugDiv :: forall e. Number -> Eff e Unit
 
@@ -478,8 +487,18 @@ runBrowser config bc = launchAff $ do
     let glyphClick :: _
         glyphClick p = launchAff_ do
           AVar.tryReadVar lastOverlaps >>= case _ of
-             Nothing -> liftEff $ log "clicked no glyphs"
-             Just gs -> liftEff $ (printSNPInfo (gs clickRadius p).gwas)
+             Nothing -> liftEff do
+               log "clicked no glyphs"
+               setInfoBoxVisibility "hidden"
+
+             Just gs -> liftEff do
+               let clicked = (gs clickRadius p).gwas
+               printSNPInfo clicked
+               case Array.head clicked of
+                 Nothing -> setInfoBoxVisibility "hidden"
+                 Just g  -> do
+                   setInfoBoxContents $ snpInfoHTML g
+                   setInfoBoxVisibility "visible"
 
 
     ovCtx <- Canvas.getContext2D (unwrap bc).overlay
