@@ -31,6 +31,7 @@ import Data.Lens (Iso', iso, re, to, united, (^.))
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.List (List)
 import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (over, unwrap, wrap)
@@ -43,7 +44,7 @@ import Genetics.Browser.Track.Backend (Rendered, RenderedTrack, browser, bumpFea
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser', renderBrowser'', renderTrack, subtractPadding, trackDimensions, trackViewScale, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, showViewScale, translateViewBy)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (fillRect, setFillStyle)
 import Graphics.Canvas as Canvas
@@ -383,6 +384,25 @@ snpInfoHTML { position, feature } =
  <> "<p>Score: " <> show feature.score <> "</p>"
 
 
+snpInfoHTML' :: forall rA rS.
+                (GWASFeature rS -> Maybe (Annot rA))
+             -> GWASFeature rS
+             -> String
+snpInfoHTML' assocAnnot snp =
+   snpInfoHTML snp <> case assocAnnot snp of
+     Nothing -> "<p>No annotation found</p>"
+     Just a  -> "<p>Annotation: " <> show a.feature.name <> "</p>"
+
+annotForSnp :: forall rA rS.
+               Map ChrId (Array (Annot rA))
+            -> GWASFeature rS
+            -> Maybe (Annot rA)
+annotForSnp annotations {position, feature} = do
+  let radius = Bp 10000000.0
+  chr <- Map.lookup feature.chrId annotations
+  Array.find (\a -> ((radius `aroundPair` a.position) `pairsOverlap` position)) chr
+
+
 foreign import setInfoBoxVisibility :: forall e. String -> Eff e Unit
 foreign import setInfoBoxContents :: forall e. String -> Eff e Unit
 
@@ -490,6 +510,8 @@ runBrowser config bc = launchAff $ do
     setWindow "mainBrowser" mainBrowser
     setWindow "debugView" (debugView initState)
 
+    let findAnnot = annotForSnp $ fromMaybe mempty trackData.annotations
+
     let glyphClick :: _
         glyphClick p = launchAff_ do
           AVar.tryReadVar lastOverlaps >>= case _ of
@@ -503,7 +525,7 @@ runBrowser config bc = launchAff $ do
                case Array.head clicked of
                  Nothing -> setInfoBoxVisibility "hidden"
                  Just g  -> do
-                   setInfoBoxContents $ snpInfoHTML g
+                   setInfoBoxContents $ snpInfoHTML' findAnnot g
                    setInfoBoxVisibility "visible"
 
 
