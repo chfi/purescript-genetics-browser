@@ -360,11 +360,11 @@ demoTracks vs {gwas, annotations, genes} =
 ------------ new renderers~~~~~~~~~
 
 
-placeGWAS :: forall r1 r2.
+placeScored :: forall r1 r2.
             { min :: Number, max :: Number | r1 }
-         -> GWASFeature r2
+         -> Feature { score :: Number | r2 }
          -> NPoint
-placeGWAS {min, max} { frameSize, position: (Pair l _), feature } = {x, y}
+placeScored {min, max} { frameSize, position: (Pair l _), feature } = {x, y}
   where x = Normalized $ unwrap $ l / frameSize
         y = Normalized $ (feature.score - min) / (max - min)
 
@@ -401,7 +401,7 @@ renderGWAS verscale cdim snps =
                      in [{ drawing, points }]
 
       npointed :: Map ChrId (Array (Tuple (GWASFeature ()) NPoint))
-      npointed = (map <<< map) (fanout id (placeGWAS verscale)) snps
+      npointed = (map <<< map) (fanout id (placeScored verscale)) snps
 
       rescale :: Pair Number -> NPoint -> Point
       rescale seg npoint =
@@ -428,3 +428,51 @@ renderGWAS verscale cdim snps =
              in { features
                 , drawings: drawings pts
                 , overlaps: overlaps pts }
+
+
+
+renderAnnot :: forall r.
+             { min :: Number, max :: Number | r }
+          -> Canvas.Dimensions
+          -> Map ChrId (Array (Annot (score :: Number)))
+          -> Map ChrId (Pair Number)
+          -> Rendered (Annot (score :: Number))
+renderAnnot verscale cdim annots =
+  let features :: Array (Annot (score :: Number))
+      features = fold annots
+
+      drawing :: Tuple (Annot (score :: Number)) Point -> DrawingN
+      drawing (Tuple an pt) = { drawing: lg.icon <> text', points: [pt] }
+        where lg = annotLegendEntry an
+              text' = Drawing.text
+                          (font sansSerif 12 mempty)
+                          (7.5) (2.5)
+                          (fillColor black) an.feature.name
+
+      drawings :: Array (Tuple (Annot (score :: Number)) Point) -> Array DrawingN
+      drawings = map drawing
+
+      npointed :: Map ChrId (Array (Tuple (Annot (score :: Number)) NPoint))
+      npointed = (map <<< map) (fanout id (placeScored verscale)) annots
+
+      rescale :: Pair Number -> NPoint -> Point
+      rescale seg npoint =
+        let (Pair offset _) = seg
+            x = offset + (pairSize seg) * (unwrap npoint.x)
+            y = cdim.height * (one - unwrap npoint.y)
+        in {x, y}
+
+      pointed :: Map ChrId (Pair Number)
+              -> Array (Tuple (Annot (score :: Number)) Point)
+      pointed segs = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs npointed
+
+
+      overlaps :: Number -> Point -> Array (Annot (score :: Number))
+      overlaps r p = mempty
+
+
+
+  in \seg -> let pts = pointed seg
+             in { features
+                , drawings: drawings pts
+                , overlaps: overlaps  }

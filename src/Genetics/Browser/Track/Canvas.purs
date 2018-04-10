@@ -26,7 +26,7 @@ import Data.Symbol (SProxy(..))
 import Data.Time.Duration (Milliseconds)
 import Data.Traversable (traverse_)
 import Data.Tuple (Tuple(Tuple), uncurry)
-import Genetics.Browser.Track.Backend (BatchGlyph, Rendered, UISlots)
+import Genetics.Browser.Track.Backend (BatchGlyph, Rendered, UISlots, DrawingN)
 import Genetics.Browser.Track.Demo (GWASFeature)
 import Genetics.Browser.Types (ChrId(..))
 import Genetics.Browser.Types.Coordinates (CoordSysView, ViewScale, viewScale)
@@ -406,25 +406,14 @@ browserOnClick (BrowserCanvas bc) {track, overlay} =
     track t
 
 
+
+
+
+
 trackViewScale :: BrowserCanvas
                -> CoordSysView
                -> ViewScale
 trackViewScale (BrowserCanvas bc) = viewScale (unwrap $ bc.track)
-
-
-renderSingleGlyphs :: TrackCanvas
-                   -> Array SingleGlyph
-                   -> Eff _ Unit
-renderSingleGlyphs (TrackCanvas tc) glyphs = do
-  let draw ctx = foreachE glyphs \s -> do
-        Drawing.render ctx
-          $ Drawing.translate s.point.x s.point.y
-          $ s.drawing unit
-
-  -- drawToBuffer tc.canvas draw
-
-  ctx <- Canvas.getContext2D (unwrap tc.canvas).front
-  draw ctx
 
 
 renderBatchGlyphs :: TrackCanvas
@@ -433,17 +422,23 @@ renderBatchGlyphs :: TrackCanvas
 renderBatchGlyphs (TrackCanvas tc) {drawing, points} = do
   glyphBfr <- Canvas.getContext2D tc.glyphBuffer
 
+
+  _ <- Canvas.clearRect glyphBfr { x: zero, y: zero
+                                 , w: glyphBufferSize.width
+                                 , h: glyphBufferSize.height }
+
   let x0 = glyphBufferSize.width  / 2.0
       y0 = glyphBufferSize.height / 2.0
 
   Drawing.render glyphBfr
     $ Drawing.translate x0 y0 drawing
 
+
   ctx <- Canvas.getContext2D (unwrap tc.canvas).front
 
   runEffFn4 drawCopies tc.glyphBuffer glyphBufferSize ctx points
 
-
+{-
 renderGlyphs :: TrackCanvas
              -> Number
              -> Array RenderedTrack
@@ -488,7 +483,7 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
     Drawing.render overlayCtx ui.fixedUI
     Drawing.render ctx ui.relativeUI
 
-
+-}
 
 renderBrowser' :: Milliseconds
                -> BrowserCanvas
@@ -525,10 +520,12 @@ renderBrowser' d (BrowserCanvas bc) offset ui = do
 
 
 
-renderBrowser'' :: Milliseconds
-               -> BrowserCanvas
-               -> Number
-               -> { tracks     :: { gwas :: (Rendered (GWASFeature _)) }
+renderBrowser'' :: forall a b c.
+                   Milliseconds
+                -> BrowserCanvas
+                -> Number
+                -> { tracks     :: { gwas :: { drawings :: Array DrawingN | a }
+                                   , annotations :: { drawings :: Array DrawingN | b } }
                   , relativeUI :: Drawing
                   , fixedUI :: Drawing }
                -> Aff _ _
@@ -549,7 +546,13 @@ renderBrowser'' d (BrowserCanvas bc) offset ui = do
   let gwasTrack :: Array { drawing :: _, points :: _ }
       gwasTrack = ui.tracks.gwas.drawings
 
+      annotTrack = ui.tracks.annotations.drawings
+
   for_ gwasTrack \t -> do
+      liftEff $ renderBatchGlyphs bc.track t
+      delay d
+
+  for_ annotTrack \t -> do
       liftEff $ renderBatchGlyphs bc.track t
       delay d
 

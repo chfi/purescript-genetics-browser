@@ -39,8 +39,8 @@ import Data.Pair as Pair
 import Data.Symbol (SProxy(..))
 import Data.Traversable (for, for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
-import Genetics.Browser.Track.Backend (Rendered, RenderedTrack, browser, browser', browser'', bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes, renderGWAS)
+import Genetics.Browser.Track.Backend (Rendered, RenderedTrack, browser, bumpFeatures, zipMapsWith)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser', renderBrowser'', renderTrack, subtractPadding, trackDimensions, trackViewScale, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, showViewScale, translateViewBy)
@@ -49,6 +49,7 @@ import Graphics.Canvas (fillRect, setFillStyle)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
 import Graphics.Drawing as Drawing
+import Math as Math
 import Partial.Unsafe (unsafePartial)
 import Simple.JSON (read)
 
@@ -288,7 +289,8 @@ renderLoop cSys browser canvas state = forever do
 
 
 renderLoop' :: CoordSys _ _
-           -> { tracks     :: Pair BigInt -> { gwas :: Rendered (GWASFeature ()) }
+           -> { tracks     :: Pair BigInt -> { gwas :: Rendered (GWASFeature ())
+                                             , annotations :: Rendered (Annot (score :: Number)) }
               , relativeUI :: Pair BigInt -> Drawing
               , fixedUI :: Drawing }
            -> BrowserCanvas
@@ -422,7 +424,7 @@ runBrowser config bc = launchAff $ do
       traverse (getAnnotations cSys) config.urls.annotations
 
     let annotations = zipMapsWith
-                       (bumpFeatures (to _.feature.score) (SProxy :: SProxy "score")
+                       (bumpFeatures (to (\s -> s.feature.score + 0.02)) (SProxy :: SProxy "score")
                          (Bp 1000000.0))
                        <$> gwas <*> rawAnnotations
 
@@ -437,7 +439,8 @@ runBrowser config bc = launchAff $ do
     btnZoom   0.10 viewCmd
 
     let dragCB {x,y} =
-          queueCmd viewCmd $ ScrollView $ (-x) / (trackDimensions bc).width
+          when (Math.abs x >= one)
+          $ queueCmd viewCmd $ ScrollView $ (-x) / (trackDimensions bc).width
     dragScroll bc dragCB
 
 
@@ -470,18 +473,14 @@ runBrowser config bc = launchAff $ do
                 , vertical: config.trackPadding.top }
 
 
-      mainBrowser = browser
-                    cSys
-                    (trackDimensions bc)
-                    browserDimensions
-                    (uiSlots bc) {legend, vscale} tracks
-
-      mainBrowser' :: _
-      mainBrowser' = browser'' cSys
+      mainBrowser :: _
+      mainBrowser = browser cSys
                      (trackDimensions bc) browserDimensions
                      (uiSlots bc) {legend, vscale}
-                     { gwas: renderGWAS vscale  }
-                     { gwas: fromMaybe mempty trackData.gwas }
+                     { gwas: renderGWAS vscale
+                     , annotations: renderAnnot vscale }
+                     { gwas: fromMaybe mempty trackData.gwas
+                     , annotations: fromMaybe mempty trackData.annotations }
 
 
       viewTimeout :: Milliseconds
@@ -525,8 +524,7 @@ runBrowser config bc = launchAff $ do
 
   _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
 
-  -- _ <- forkAff $ renderLoop cSys mainBrowser bc initState
-  _ <- forkAff $ renderLoop' cSys mainBrowser' bc initState
+  _ <- forkAff $ renderLoop' cSys mainBrowser bc initState
 
 
   pure unit

@@ -498,6 +498,8 @@ type UISlots = { left   :: UISlot
 
 type RenderedTrack = Either (BatchGlyph Point) (Array SingleGlyph)
 
+
+{-
 browser :: CoordSys ChrId BigInt
         -> Canvas.Dimensions
         -> Canvas.Dimensions
@@ -554,7 +556,7 @@ browser cs trackDim overlayDim uiSlots ui inputTracks =
      , fixedUI
      }
 
-
+-}
 
 
 
@@ -625,18 +627,22 @@ renderTrack' cs cdim render segFs =
 
 
 
-browser' :: forall a b c.
+browser :: forall a b c.
             CoordSys ChrId BigInt
          -> Canvas.Dimensions
          -> Canvas.Dimensions
          -> UISlots
          -> { legend :: Legend, vscale :: VScale }
-         -> { gwas :: Render a }
-         -> { gwas :: Map ChrId (Array a) }
-         -> { tracks     :: Pair BigInt -> { gwas :: Map ChrId (Rendered a) }
+         -> { gwas        :: Render' a
+            , annotations :: Render' b }
+         -> { gwas        :: Map ChrId (Array a)
+            , annotations :: Map ChrId (Array b) }
+         -> { tracks     :: Pair BigInt
+                         -> { gwas :: Rendered a
+                            , annotations :: Rendered b }
             , relativeUI :: Pair BigInt -> Drawing
             , fixedUI    :: Drawing }
-browser' cs trackDim overlayDim uiSlots ui renderers inputTracks =
+browser cs trackDim overlayDim uiSlots ui renderers inputTracks =
   let
       drawInSlot {offset, size} d =
           (translate offset.x offset.y
@@ -653,83 +659,11 @@ browser' cs trackDim overlayDim uiSlots ui renderers inputTracks =
 
       fixedUI = ruler <> vScale <> legend
 
-      -- normTracks :: List (Map ChrId
-      --                     (Either (BatchGlyph (Normalized Point))
-      --                             (Array NormalizedGlyph)))
-      -- normTracks = runExists (\(Track r as) -> render r <$> as) <$> inputTracks
-
-      -- tracks :: Pair BigInt -> List (Array (Either (BatchGlyph Point) (Array SingleGlyph)))
-      -- tracks v = (renderNormalizedTrack cs trackDim v) <$> normTracks
-
-      tracks :: Pair BigInt -> { gwas :: Map ChrId (Rendered a) }
       tracks =
-        let gwasT = renderTrack cs trackDim renderers.gwas inputTracks.gwas
-        in \v -> { gwas: gwasT v }
-
-
-      renderUIElement :: Map ChrId (Array NormalizedGlyph)
-                      -> ChrId -> Pair Number -> Array SingleGlyph
-      renderUIElement m k s
-          = fold $ rescaleNormSingleGlyphs trackDim.height s
-                <$> (Map.lookup k m)
-
-      drawTrackUI :: Pair BigInt -> (ChrId -> Pair Number -> (Array _)) -> Drawing
-      drawTrackUI v = foldMap f <<< withPixelSegments cs trackDim v
-        where f {drawing, point} = Drawing.translate point.x point.y (drawing unit)
-
-      chrLabels :: _
-      chrLabels = renderUIElement $ chrLabelTrack cs trackDim
-
-      relativeUI :: Pair BigInt -> Drawing
-      relativeUI v = drawTrackUI v chrLabels
-
-  in { tracks
-     , relativeUI
-     , fixedUI
-     }
-
-
-
-browser'' :: forall a b c.
-            CoordSys ChrId BigInt
-         -> Canvas.Dimensions
-         -> Canvas.Dimensions
-         -> UISlots
-         -> { legend :: Legend, vscale :: VScale }
-         -> { gwas :: Render' a }
-         -> { gwas :: Map ChrId (Array a) }
-         -> { tracks     :: Pair BigInt -> { gwas :: Rendered a }
-            , relativeUI :: Pair BigInt -> Drawing
-            , fixedUI    :: Drawing }
-browser'' cs trackDim overlayDim uiSlots ui renderers inputTracks =
-  let
-      drawInSlot {offset, size} d =
-          (translate offset.x offset.y
-           $ filled (fillColor white)
-           $ rectangle zero zero size.width size.height)
-        <> translate offset.x offset.y d
-
-      vScale = drawInSlot uiSlots.left (drawVScale ui.vscale uiSlots.left.size.height)
-
-      legend = drawInSlot uiSlots.right (drawLegend ui.legend uiSlots.right.size.height)
-
-      ruler   = Drawing.translate ui.vscale.width zero
-                $ horRulerTrack ui.vscale red trackDim
-
-      fixedUI = ruler <> vScale <> legend
-
-      -- normTracks :: List (Map ChrId
-      --                     (Either (BatchGlyph (Normalized Point))
-      --                             (Array NormalizedGlyph)))
-      -- normTracks = runExists (\(Track r as) -> render r <$> as) <$> inputTracks
-
-      -- tracks :: Pair BigInt -> List (Array (Either (BatchGlyph Point) (Array SingleGlyph)))
-      -- tracks v = (renderNormalizedTrack cs trackDim v) <$> normTracks
-
-      tracks :: Pair BigInt -> { gwas :: Rendered a }
-      tracks =
-        let gwasT = renderTrack' cs trackDim renderers.gwas inputTracks.gwas
-        in \v -> { gwas: gwasT v }
+        let gwasT  = renderTrack' cs trackDim renderers.gwas inputTracks.gwas
+            annotT = renderTrack' cs trackDim renderers.annotations inputTracks.annotations
+        in \v -> { gwas: gwasT v
+                 , annotations: annotT v }
 
 
       renderUIElement :: Map ChrId (Array NormalizedGlyph)
