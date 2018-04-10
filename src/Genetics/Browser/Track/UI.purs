@@ -41,7 +41,7 @@ import Data.Traversable (for, for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Track.Backend (Rendered, RenderedTrack, browser, browser', browser'', bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes, renderGWAS)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser', renderBrowser'', renderTrack, subtractPadding, trackViewScale, uiSlots)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser', renderBrowser'', renderTrack, subtractPadding, trackDimensions, trackViewScale, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, showViewScale, translateViewBy)
 import Global.Unsafe (unsafeStringify)
@@ -403,7 +403,6 @@ runBrowser config bc = launchAff $ do
   liftEff $ initDebugDiv clickRadius
 
   let browserDimensions = (unwrap bc).dimensions
-      trackDimensions = subtractPadding browserDimensions (unwrap bc).trackPadding
 
   {width} <- liftEff $ windowInnerSize
 
@@ -436,8 +435,16 @@ runBrowser config bc = launchAff $ do
   liftEff $ do
     btnScroll 0.05 viewCmd
     btnZoom   0.10 viewCmd
-    -- dragScroll trackWidth bCanvas viewCmd
-    -- wheelZoom 0.02 viewCmd bCanvas.overlay
+
+    let dragCB {x,y} =
+          queueCmd viewCmd $ ScrollView $ (-x) / (trackDimensions bc).width
+    dragScroll bc dragCB
+
+
+    let scrollZoomScale = 0.06
+        wheelCB dY =
+          queueCmd viewCmd $ ZoomView $ 1.0 + scrollZoomScale * dY
+    wheelZoom bc wheelCB
 
   view <- makeVar initialView
   viewReady <- makeVar unit
@@ -465,13 +472,13 @@ runBrowser config bc = launchAff $ do
 
       mainBrowser = browser
                     cSys
-                    trackDimensions
+                    (trackDimensions bc)
                     browserDimensions
                     (uiSlots bc) {legend, vscale} tracks
 
       mainBrowser' :: _
       mainBrowser' = browser'' cSys
-                     trackDimensions browserDimensions
+                     (trackDimensions bc) browserDimensions
                      (uiSlots bc) {legend, vscale}
                      { gwas: renderGWAS vscale  }
                      { gwas: fromMaybe mempty trackData.gwas }

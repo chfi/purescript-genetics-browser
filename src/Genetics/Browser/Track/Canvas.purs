@@ -12,19 +12,21 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
 import DOM.Node.Types (Element)
-import Data.Either (Either(..), either)
-import Data.Foldable (fold, foldMap, for_)
-import Data.Lens (iso, view, (^.))
+import Data.Either (Either(..))
+import Data.Foldable (foldMap, for_)
+import Data.Lens (Lens', iso, view, (^.))
 import Data.Lens.Iso (Iso')
-import Data.List (List)
+import Data.Lens.Iso.Newtype (_Newtype)
+import Data.Lens.Record as Lens
 import Data.Map (Map)
 import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Nullable (Nullable, toMaybe)
+import Data.Symbol (SProxy(..))
 import Data.Time.Duration (Milliseconds)
 import Data.Traversable (traverse_)
 import Data.Tuple (Tuple(Tuple), uncurry)
-import Genetics.Browser.Track.Backend (BatchGlyph, RenderedTrack, SingleGlyph, UISlots, Rendered)
+import Genetics.Browser.Track.Backend (BatchGlyph, Rendered, UISlots)
 import Genetics.Browser.Track.Demo (GWASFeature)
 import Genetics.Browser.Types (ChrId(..))
 import Genetics.Browser.Types.Coordinates (CoordSysView, ViewScale, viewScale)
@@ -148,24 +150,29 @@ canvasDrag f el =
         Nothing -> g $ Left $ fromMaybe {x:zero, y:zero} $ toMaybe total
   in canvasDragImpl el (toEither f)
 
-{-
-dragScroll :: Number
-           -> BrowserCanvas
-           -> AVar UpdateView
-           -> Eff _ Unit
-dragScroll width cnv av = canvasDrag f cnv.overlay
-  where f = case _ of
-              Left  {x,y} -> queueCmd av $ ScrollView $ (-x) / width
-              Right {x,y} -> scrollCanvas cnv.buffer cnv.track {x: -x, y: zero}
 
-wheelZoom :: Number
-          -> AVar UpdateView
-          -> CanvasElement
+-- | Takes a BrowserCanvas and a callback function that is called with the
+-- | total dragged distance when a click & drag action is completed.
+dragScroll :: BrowserCanvas
+           -> (Point -> Eff _ Unit)
+           -> Eff _ Unit
+dragScroll (BrowserCanvas bc) cb = canvasDrag f bc.overlay
+  where f = case _ of
+              Left  p     -> cb p
+              Right {x,y} -> scrollCanvas bufCanv.back bufCanv.front {x: -x, y: zero}
+        bufCanv = unwrap $ _.canvas $ unwrap bc.track
+
+
+-- | Takes a BrowserCanvas and a callback function that is called with each
+-- | wheel scroll `deltaY`. Callback is provided with only the sign of `deltaY`
+-- | as to be `deltaMode` agnostic.
+wheelZoom :: BrowserCanvas
+          -> (Number -> Eff _ Unit)
           -> Eff _ Unit
-wheelZoom scale av cv =
-  canvasWheelCBImpl cv \dY ->
-    queueCmd av $ ZoomView $ 1.0 + (scale * dY)
--}
+wheelZoom (BrowserCanvas bc) cb =
+  canvasWheelCBImpl bc.overlay cb
+
+
 
 -- TODO browser background color shouldn't be hardcoded
 backgroundColor :: String
@@ -301,6 +308,14 @@ newtype BrowserCanvas =
 
 
 derive instance newtypeBrowserCanvas :: Newtype BrowserCanvas _
+
+_Track :: Lens' BrowserCanvas TrackCanvas
+_Track = _Newtype <<< Lens.prop (SProxy :: SProxy "track")
+
+trackDimensions :: BrowserCanvas -> Canvas.Dimensions
+trackDimensions bc =
+  let t = bc ^. _Track <<< _Newtype
+  in {width: t.width, height: t.height}
 
 
 foreign import debugBrowserCanvas :: forall e.
