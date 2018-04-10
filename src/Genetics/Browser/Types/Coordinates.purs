@@ -55,6 +55,20 @@ pairsOverlap (Pair l1 r1) (Pair l2 r2) =
       (Pair l2' r2') = Pair (max l1 l2) (max r1 r2)
   in r1' >= l2'
 
+around :: forall c.
+          Ring c
+       => c
+       -> c
+       -> Pair c
+around radius point = Pair (point - radius) (point + radius)
+
+aroundPair :: forall c.
+              Ring c
+           => c
+           -> Pair c
+           -> Pair c
+aroundPair radius (Pair l r) = Pair (l - radius) (r + radius)
+
 
 -- | Newtype for representing values normalized to fit in some range
 newtype Normalized a = Normalized a

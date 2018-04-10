@@ -32,7 +32,7 @@ import Data.Traversable (traverse)
 import Data.Tuple (Tuple, snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Genetics.Browser.Types (Bp, ChrId)
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize, pairsOverlap, scaledSegments)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap, scaledSegments)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, FillStyle, OutlineStyle, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
@@ -236,7 +236,7 @@ bumpFeatures f l radius other = map bump
 
         bump :: Feature (Record i) -> Feature (Record o)
         bump a =
-          let y = maxInRadius a.position
+          let y = maxInRadius (aroundPair radius a.position)
           in { position: a.position
              , frameSize: a.frameSize
              , feature: Record.insert l y a.feature }
