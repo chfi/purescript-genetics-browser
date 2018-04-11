@@ -3,7 +3,6 @@ module Genetics.Browser.Track.UI where
 import Prelude
 
 import Color (black)
-import Color.Scheme.Clrs (blue)
 import Control.Coroutine (Consumer, Producer, connect, runProcess)
 import Control.Coroutine as Co
 import Control.Monad.Aff (Aff, Fiber, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_)
@@ -13,7 +12,6 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error)
-import Control.Monad.Eff.Random (randomRange)
 import Control.Monad.Rec.Class (forever)
 import DOM.Classy.ParentNode (toParentNode)
 import DOM.HTML (window) as DOM
@@ -25,11 +23,9 @@ import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
-import Data.Foldable (class Foldable, foldMap, length, null, oneOf)
+import Data.Foldable (class Foldable, foldMap, length, null)
 import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
-import Data.Lens (Iso', iso, re, to, united, (^.))
-import Data.Lens.Iso.Newtype (_Newtype)
-import Data.List (List)
+import Data.Lens (Iso', iso, re, to, (^.))
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
@@ -38,18 +34,16 @@ import Data.Newtype (over, unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Symbol (SProxy(..))
-import Data.Traversable (for, for_, traverse, traverse_)
+import Data.Traversable (for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
-import Genetics.Browser.Track.Backend (Rendered, RenderedTrack, browser, bumpFeatures, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser, renderTrack, subtractPadding, trackDimensions, trackViewScale, uiSlots, wheelZoom)
+import Genetics.Browser.Track.Backend (RenderedTrack, browser, bumpFeatures, zipMapsWith)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, trackDimensions, trackViewScale, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, aroundPair, coordSys, normalizeView, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy)
 import Global.Unsafe (unsafeStringify)
-import Graphics.Canvas (fillRect, setFillStyle)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
-import Graphics.Drawing as Drawing
 import Math as Math
 import Partial.Unsafe (unsafePartial)
 import Simple.JSON (read)
@@ -147,8 +141,8 @@ type UIState e = { view :: AVar CoordSysView
                  , viewCmd :: AVar UpdateView
                  , viewReady :: AVar Unit
                  , renderFiber :: AVar (Fiber e Unit)
-                 , cachedTracks :: AVar { cachedScale :: ViewScale
-                                        , glyphs :: List (Array RenderedTrack) }
+                 -- , cachedTracks :: AVar { cachedScale :: ViewScale
+                 --                        , glyphs :: List (Array RenderedTrack) }
                  , lastOverlaps :: AVar (Number -> Point -> { gwas :: Array (GWASFeature ()) } )
                  }
 
@@ -233,9 +227,9 @@ uiViewUpdate cs timeout { view, viewCmd, viewReady } = do
   loop' (pure unit)
 
 
-{-
 renderLoop :: CoordSys _ _
-           -> { tracks     :: Pair BigInt -> List (Array RenderedTrack)
+           -> { tracks     :: Pair BigInt -> { gwas :: RenderedTrack (GWASFeature ())
+                                             , annotations :: RenderedTrack (Annot (score :: Number)) }
               , relativeUI :: Pair BigInt -> Drawing
               , fixedUI :: Drawing }
            -> BrowserCanvas
@@ -252,66 +246,9 @@ renderLoop cSys browser canvas state = forever do
 
   let uiScale = trackViewScale canvas csView
 
-  -- if the view scale is unchanged, use the cached glyphs
-  tracks' <- do
-    cache <- AVar.tryTakeVar state.cachedTracks
-    case cache of
-      Just ct
-        | ct.cachedScale == uiScale -> do
-            AVar.putVar ct state.cachedTracks
-            pure ct.glyphs
-      _ -> do
-        let cachedScale = uiScale
-            glyphs = browser.tracks (unwrap csView)
-
-        AVar.putVar {cachedScale, glyphs} state.cachedTracks
-        pure glyphs
-
-  -- fork a new renderFiber
-
-  let (Pair offset _) = pixelsView uiScale csView
-
-      relativeUI = browser.relativeUI (unwrap csView)
-      fixedUI = browser.fixedUI
-
-      ui ::  { tracks     :: List (Array RenderedTrack)
-             , relativeUI :: Drawing
-             , fixedUI :: Drawing }
-      ui = { tracks: tracks'
-           , relativeUI, fixedUI }
-
-  renderFiber <- forkAff
-                 $ renderBrowser (wrap 3.0) canvas offset ui
-
-  putVar renderFiber state.renderFiber
--}
-
-
-
-
-renderLoop' :: CoordSys _ _
-           -> { tracks     :: Pair BigInt -> { gwas :: Rendered (GWASFeature ())
-                                             , annotations :: Rendered (Annot (score :: Number)) }
-              , relativeUI :: Pair BigInt -> Drawing
-              , fixedUI :: Drawing }
-           -> BrowserCanvas
-           -> UIState _
-           -> Aff _ Unit
-renderLoop' cSys browser canvas state = forever do
-
-  _ <- takeVar state.viewReady
-
-  csView <- readVar state.view
-  -- if there's a rendering fiber running, we kill it
-  traverse_ (killFiber (error "Resetting renderer"))
-    =<< tryTakeVar state.renderFiber
-
-  let uiScale = trackViewScale canvas csView
-
   liftEff $ log $ "view scale is: " <> showViewScale uiScale
 
   {-
-
   -- if the view scale is unchanged, use the cached glyphs
   tracks' <- do
     cache <- AVar.tryTakeVar state.cachedTracks
@@ -326,7 +263,6 @@ renderLoop' cSys browser canvas state = forever do
 
         AVar.putVar {cachedScale, glyphs} state.cachedTracks
         pure glyphs
-
   -}
 
   let tracks' = browser.tracks (unwrap csView)
@@ -354,9 +290,6 @@ renderLoop' cSys browser canvas state = forever do
                  $ renderBrowser (wrap 2.0) canvas offset ui
 
   putVar renderFiber state.renderFiber
-
-
-
 
 
 
@@ -472,11 +405,11 @@ runBrowser config bc = launchAff $ do
   view <- makeVar initialView
   viewReady <- makeVar unit
   renderFiber <- makeEmptyVar
-  cachedTracks <- AVar.makeEmptyVar
+  -- cachedTracks <- AVar.makeEmptyVar
   lastOverlaps <- AVar.makeEmptyVar
 
   let initState :: UIState _
-      initState = { view, viewCmd, viewReady, renderFiber, cachedTracks, lastOverlaps }
+      initState = { view, viewCmd, viewReady, renderFiber, lastOverlaps }
 
   let
       entries = foldMap annotLegendTest trackData.annotations
@@ -486,8 +419,6 @@ runBrowser config bc = launchAff $ do
 
       vscale = { width: vScaleWidth, color: black
                , min: s.min, max: s.max, sig: s.sig }
-
-      tracks = demoTracks vscale trackData
 
       padding = { horizontal: config.trackPadding.left
                 , vertical: config.trackPadding.top }
@@ -546,7 +477,7 @@ runBrowser config bc = launchAff $ do
 
   _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
 
-  _ <- forkAff $ renderLoop' cSys mainBrowser bc initState
+  _ <- forkAff $ renderLoop cSys mainBrowser bc initState
 
 
   pure unit

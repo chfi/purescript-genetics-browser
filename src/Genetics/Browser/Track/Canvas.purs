@@ -7,18 +7,17 @@ module Genetics.Browser.Track.UI.Canvas where
 import Prelude
 
 import Control.Monad.Aff (Aff, delay)
-import Control.Monad.Eff (Eff, foreachE)
+import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
 import DOM.Node.Types (Element)
 import Data.Either (Either(..))
-import Data.Foldable (foldMap, for_)
+import Data.Foldable (for_)
 import Data.Lens (Lens', iso, view, (^.))
 import Data.Lens.Iso (Iso')
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Record as Lens
-import Data.Map (Map)
 import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Nullable (Nullable, toMaybe)
@@ -26,9 +25,7 @@ import Data.Symbol (SProxy(..))
 import Data.Time.Duration (Milliseconds)
 import Data.Traversable (traverse_)
 import Data.Tuple (Tuple(Tuple), uncurry)
-import Genetics.Browser.Track.Backend (BatchGlyph, Rendered, UISlots, DrawingN)
-import Genetics.Browser.Track.Demo (GWASFeature)
-import Genetics.Browser.Types (ChrId(..))
+import Genetics.Browser.Track.Backend (UISlots, DrawingN)
 import Genetics.Browser.Types.Coordinates (CoordSysView, ViewScale, viewScale)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
@@ -416,10 +413,10 @@ trackViewScale :: BrowserCanvas
 trackViewScale (BrowserCanvas bc) = viewScale (unwrap $ bc.track)
 
 
-renderBatchGlyphs :: TrackCanvas
-                  -> BatchGlyph Point
-                  -> Eff _ Unit
-renderBatchGlyphs (TrackCanvas tc) {drawing, points} = do
+renderGlyphs :: TrackCanvas
+             -> DrawingN
+             -> Eff _ Unit
+renderGlyphs (TrackCanvas tc) {drawing, points} = do
   glyphBfr <- Canvas.getContext2D tc.glyphBuffer
 
 
@@ -469,7 +466,7 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
 
   for_ [gwasTrack, annotTrack] \t ->
     for_ t \s -> do
-      liftEff $ renderBatchGlyphs bc.track s
+      liftEff $ renderGlyphs bc.track s
       delay d
 
 

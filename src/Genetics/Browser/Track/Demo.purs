@@ -12,13 +12,10 @@ import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Exists (Exists, mkExists)
-import Data.Filterable (filterMap, filtered)
+import Data.Filterable (filterMap)
 import Data.Foldable (class Foldable, fold, foldMap)
 import Data.Lens (view, (^?))
 import Data.Lens.Index (ix)
-import Data.List (List)
-import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing))
@@ -28,19 +25,19 @@ import Data.Pair (Pair(..))
 import Data.Profunctor.Strong (fanout)
 import Data.String as String
 import Data.Traversable (traverse)
-import Data.Tuple (Tuple(..), fst, snd)
-import Data.Variant (case_, inj, onMatch)
-import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, Rendered, Renderer, SingleGlyph, Track(Track), VScale, _batch, _point, _range, _single, groupToChrs, horPlace, mkIcon, trackLegend, zipMapsWith)
+import Data.Tuple (Tuple(Tuple))
+import Data.Variant (inj)
+import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, _range, _single, groupToMap, mkIcon, trackLegend, zipMapsWith)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), ViewScale, _Segments, pairSize, viewScale)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
-import Unsafe.Coerce (unsafeCoerce)
+
 
 
 type BedFeature = Feature { thickRange :: Pair Bp
@@ -86,7 +83,7 @@ getGenes cs url = do
 
   let fs = filterMap (bedToFeature cs) ls
 
-  pure $ groupToChrs _.feature.chrId $ fs
+  pure $ groupToMap _.feature.chrId $ fs
 
 produceGenes :: CoordSys ChrId BigInt -> String
              -> Aff _
@@ -100,7 +97,7 @@ produceGenes cs url = do
     $ prod
     $~ parsedLineTransformer
     ~~ transform
-       (groupToChrs _.feature.chrId <<< filterMap (bedToFeature cs))
+       (groupToMap _.feature.chrId <<< filterMap (bedToFeature cs))
 
 
 bedDraw :: BedFeature
@@ -137,13 +134,11 @@ bedDraw gene = inj _range \w ->
 
   in { drawing, width }
 
-
-geneRenderer :: Renderer BedFeature
-geneRenderer =
-  inj _single
-      { draw: bedDraw
-      , horPlace
-      , verPlace: const (Normalized 0.10) }
+geneRenderer :: OldRenderer BedFeature
+geneRenderer = inj _single { draw: bedDraw, horPlace, verPlace: const (Normalized 0.10) }
+  where horPlace {position, frameSize} =
+          let f p = Normalized (unwrap $ p / frameSize)
+          in inj _range $ map f position
 
 
 
@@ -166,7 +161,7 @@ featureProd :: forall r1 r2.
                  (Aff _) Unit)
 featureProd url parse = do
   prod <- fetchJsonChunks url
-  pure $ prod $~ (transform $ groupToChrs _.feature.chrId <<< filterMap parse)
+  pure $ prod $~ (transform $ groupToMap _.feature.chrId <<< filterMap parse)
 
 
 -- TODO bundle up all the producers into one function on a record of URLs
@@ -202,22 +197,6 @@ fetchJSON p url = do
     Just as -> case traverse p as of
       Nothing -> throwError $ error "Failed to parse JSON features"
       Just fs -> pure $ fs
-
-
-gwasDraw :: Color
-         -> Drawing
-gwasDraw color =
-  let r = 2.2
-      c = circle 0.0 0.0 r
-      out = outlined (outlineColor color) c
-      fill = filled (fillColor color) c
-  in out <> fill
-
-scoreVerPlace :: forall r1 r2.
-                  { min :: Number, max :: Number | r1 }
-               -> Feature {score :: Number | r2}
-               -> Normalized Number
-scoreVerPlace s x = Normalized $ (x.feature.score - s.min) / (s.max - s.min)
 
 
 type GWASFeature r = Feature { score :: Number
@@ -276,36 +255,14 @@ fetchAnnotJSON cs str = fetchJSON (annotJSONParse cs) str
 
 getGWAS :: CoordSys ChrId BigInt -> String
         -> Aff _ (Map ChrId (Array (GWASFeature ())))
-getGWAS cs url = groupToChrs _.feature.chrId
+getGWAS cs url = groupToMap _.feature.chrId
                   <$> fetchJSON (gemmaJSONParse cs) url
 
 
 getAnnotations :: CoordSys ChrId BigInt -> String
                -> Aff _ (Map ChrId (Array (Annot ())))
-getAnnotations cs url = groupToChrs _.feature.chrId
+getAnnotations cs url = groupToMap _.feature.chrId
                         <$> fetchAnnotJSON cs url
-
-
-
-pointRenderer :: forall r1 r2.
-                 { min :: Number, max :: Number, sig :: Number | r2 }
-              -> (Feature {score :: Number | r1} -> DrawingV)
-              -> Renderer (Feature {score :: Number | r1})
-pointRenderer s draw = inj _single { horPlace, verPlace: scoreVerPlace s, draw }
-
-
-batchPointRenderer :: forall r1 r2.
-                      { min :: Number, max :: Number, sig :: Number | r2 }
-                   -> Drawing
-                   -> Renderer (Feature {score :: Number | r1})
-batchPointRenderer s drawing = inj _batch { drawing, place  }
-  where place :: _
-        place f = let (Normalized y) = scoreVerPlace s f
-                      (Normalized x) = lhs $ horPlace f
-                  in Normalized {x,y}
-        lhs = case_ # onMatch
-                      { point: (\x -> x)
-                      , range: (\(Pair l _) -> l) }
 
 
 -- TODO Configgable Annotation -> LegendEntry function (somehow?!)
@@ -325,33 +282,6 @@ annotLegendTest fs = trackLegend annotLegendEntry as
   where as = Array.concat
              $ Array.fromFoldable
              $ Array.fromFoldable <$> Map.values fs
-
-
-annotDraw :: forall r.
-             Annot r
-          -> DrawingV
-annotDraw an = inj _point $ (lg.icon) <> text'
-  where lg = annotLegendEntry an
-        text' = Drawing.text
-                  (font sansSerif 12 mempty)
-                  (7.5) (2.5)
-                  (fillColor black) an.feature.name
-
-
-demoTracks :: VScale
-           -> { gwas        :: Maybe (Map ChrId (Array (GWASFeature ()         )))
-              , annotations :: Maybe (Map ChrId (Array (Annot (score :: Number))))
-              , genes       :: Maybe (Map ChrId (Array BedFeature)) }
-           -> List (Exists Track)
-demoTracks vs {gwas, annotations, genes} =
-  let mkGwas   = Track $ batchPointRenderer vs (gwasDraw navy)
-      mkAnnots = Track $ pointRenderer vs annotDraw
-      mkGenes  = Track $ geneRenderer
-  in List.fromFoldable $ filtered
-     [ mkExists <$> mkGwas   <$> gwas
-     , mkExists <$> mkAnnots <$> annotations
-     , mkExists <$> mkGenes  <$> genes
-     ]
 
 
 
@@ -378,11 +308,11 @@ dist p1 p2 = Math.sqrt $ x' `Math.pow` 2.0 + y' `Math.pow` 2.0
 
 
 renderGWAS :: forall r.
-             { min :: Number, max :: Number | r }
-          -> Canvas.Dimensions
-          -> Map ChrId (Array (GWASFeature ()))
-          -> Map ChrId (Pair Number)
-          -> Rendered (GWASFeature ())
+              { min :: Number, max :: Number | r }
+           -> Canvas.Dimensions
+           -> Map ChrId (Array (GWASFeature ()))
+           -> Map ChrId (Pair Number)
+           -> RenderedTrack (GWASFeature ())
 renderGWAS verscale cdim snps =
   let features :: Array (GWASFeature ())
       features = fold snps
@@ -414,7 +344,6 @@ renderGWAS verscale cdim snps =
               -> Array (Tuple (GWASFeature ()) Point)
       pointed segs = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs npointed
 
-
       overlaps :: Array (Tuple (GWASFeature ()) Point)
                -> Number -> Point
                -> Array (GWASFeature ())
@@ -422,7 +351,6 @@ renderGWAS verscale cdim snps =
         where covers :: Tuple (GWASFeature ()) Point -> Maybe (GWASFeature ())
               covers (Tuple f fPt) =
                 if dist fPt pt <= radius + radius' then Just f else Nothing
-
 
   in \seg -> let pts = pointed seg
              in { features
@@ -432,11 +360,11 @@ renderGWAS verscale cdim snps =
 
 
 renderAnnot :: forall r.
-             { min :: Number, max :: Number | r }
-          -> Canvas.Dimensions
-          -> Map ChrId (Array (Annot (score :: Number)))
-          -> Map ChrId (Pair Number)
-          -> Rendered (Annot (score :: Number))
+               { min :: Number, max :: Number | r }
+            -> Canvas.Dimensions
+            -> Map ChrId (Array (Annot (score :: Number)))
+            -> Map ChrId (Pair Number)
+            -> RenderedTrack (Annot (score :: Number))
 renderAnnot verscale cdim annots =
   let features :: Array (Annot (score :: Number))
       features = fold annots
@@ -466,11 +394,8 @@ renderAnnot verscale cdim annots =
               -> Array (Tuple (Annot (score :: Number)) Point)
       pointed segs = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs npointed
 
-
       overlaps :: Number -> Point -> Array (Annot (score :: Number))
       overlaps r p = mempty
-
-
 
   in \seg -> let pts = pointed seg
              in { features
