@@ -29,7 +29,7 @@ import Data.Pair (Pair(..))
 import Data.Record as Record
 import Data.Symbol (class IsSymbol, SProxy(SProxy))
 import Data.Traversable (traverse)
-import Data.Tuple (Tuple, snd, uncurry)
+import Data.Tuple (Tuple(..), snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Genetics.Browser.Types (Bp, ChrId)
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap, scaledSegments)
@@ -198,6 +198,29 @@ chrLabelTrack cs cdim =
                     , verPos: Normalized (0.05) }
 
   in mapWithIndex (\i _ -> [mkLabel i]) $ cs ^. _Segments
+
+
+chrLabelTrack' :: UISlot
+               -> Map ChrId (Pair Number)
+               -> Tuple UISlot (Array DrawingN)
+chrLabelTrack' slot segs =
+  let font' = font sansSerif 12 mempty
+
+      chrText :: ChrId -> Drawing
+      chrText chr =
+        Drawing.text font' zero zero (fillColor black) (unwrap chr)
+
+
+      y = slot.offset.y - (0.5 * slot.size.height)
+
+      label :: ChrId -> Pair Number -> Array DrawingN
+      label chr seg@(Pair l _) =
+        let drawing = chrText chr
+            point = { x: slot.offset.x + l + (pairSize seg) * 0.5, y }
+        in [{ drawing, points: [point] }]
+
+  in Tuple slot (foldMapWithIndex label segs)
+
 
 
 -- boxesTrack :: Number

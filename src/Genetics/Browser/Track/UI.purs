@@ -42,7 +42,7 @@ import Data.Traversable (for, for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Track.Backend (Rendered, RenderedTrack, browser, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, demoTracks, getAnnotations, getGWAS, getGenes, gwasDraw, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser', renderBrowser'', renderTrack, subtractPadding, trackDimensions, trackViewScale, uiSlots, wheelZoom)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, blankTrack, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, drawOnTrack, flipTrack, renderBatchGlyphs, renderBrowser, renderTrack, subtractPadding, trackDimensions, trackViewScale, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy)
 import Global.Unsafe (unsafeStringify)
@@ -351,7 +351,7 @@ renderLoop' cSys browser canvas state = forever do
                        in { gwas: tracks'.gwas.overlaps n r' }) state.lastOverlaps
 
   renderFiber <- forkAff
-                 $ renderBrowser'' (wrap 2.0) canvas offset ui
+                 $ renderBrowser (wrap 2.0) canvas offset ui
 
   putVar renderFiber state.renderFiber
 

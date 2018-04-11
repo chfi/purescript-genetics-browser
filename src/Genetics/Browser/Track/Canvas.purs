@@ -438,25 +438,18 @@ renderBatchGlyphs (TrackCanvas tc) {drawing, points} = do
 
   runEffFn4 drawCopies tc.glyphBuffer glyphBufferSize ctx points
 
-{-
-renderGlyphs :: TrackCanvas
-             -> Number
-             -> Array RenderedTrack
-             -> Eff _ Unit
-renderGlyphs track offset rts = do
-  translateBuffer {x: offset, y: zero} (unwrap track).canvas
-  for_ rts $ either
-    (renderBatchGlyphs track)
-    (renderSingleGlyphs track)
 
 
-renderBrowser :: Milliseconds
+
+renderBrowser :: forall a b c.
+                 Milliseconds
               -> BrowserCanvas
               -> Number
-              -> { tracks     :: List (Array RenderedTrack)
-                 , relativeUI :: Drawing
-                 , fixedUI :: Drawing }
-              -> Aff _ _
+              -> { tracks     :: { gwas :: { drawings :: Array DrawingN | a }
+                                 , annotations :: { drawings :: Array DrawingN | b } }
+                , relativeUI :: Drawing
+                , fixedUI :: Drawing }
+             -> Aff _ _
 renderBrowser d (BrowserCanvas bc) offset ui = do
 
   let bfr = (unwrap bc.track).canvas
@@ -464,97 +457,22 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
 
   ctx <- liftEff $ Canvas.getContext2D cnv
   liftEff do
-    {width, height} <- Canvas.getCanvasDimensions cnv
+    dim <- Canvas.getCanvasDimensions cnv
     _ <- Canvas.setFillStyle backgroundColor ctx
     translateBuffer {x: zero, y: zero} bfr
-    void $ Canvas.fillRect ctx { x: 0.0, y: 0.0, w: width, h: height }
+    void $ Canvas.fillRect ctx { x: 0.0, y: 0.0, w: dim.width, h: dim.height }
 
   liftEff $ translateBuffer {x: (-offset), y: zero} bfr
 
-  for_ ui.tracks \t -> do
-      liftEff $ for_ t $ either
-        (renderBatchGlyphs  bc.track)
-        (renderSingleGlyphs bc.track)
-
-      delay d
-
-  liftEff do
-    overlayCtx <- Canvas.getContext2D bc.overlay
-    Drawing.render overlayCtx ui.fixedUI
-    Drawing.render ctx ui.relativeUI
-
--}
-
-renderBrowser' :: Milliseconds
-               -> BrowserCanvas
-               -> Number
-               -> { tracks     :: { gwas :: Map ChrId (Rendered (GWASFeature _)) }
-                  , relativeUI :: Drawing
-                  , fixedUI :: Drawing }
-               -> Aff _ _
-renderBrowser' d (BrowserCanvas bc) offset ui = do
-
-  let bfr = (unwrap bc.track).canvas
-      cnv = (unwrap bfr).front
-
-  ctx <- liftEff $ Canvas.getContext2D cnv
-  liftEff do
-    {width, height} <- Canvas.getCanvasDimensions cnv
-    _ <- Canvas.setFillStyle backgroundColor ctx
-    translateBuffer {x: zero, y: zero} bfr
-    void $ Canvas.fillRect ctx { x: 0.0, y: 0.0, w: width, h: height }
-
-  liftEff $ translateBuffer {x: (-offset), y: zero} bfr
-
-  let gwasTrack :: Array { drawing :: _, points :: _ }
-      gwasTrack = foldMap (_.drawings) ui.tracks.gwas
-
-  for_ gwasTrack \t -> do
-      liftEff $ renderBatchGlyphs bc.track t
-      delay d
-
-  liftEff do
-    overlayCtx <- Canvas.getContext2D bc.overlay
-    Drawing.render overlayCtx ui.fixedUI
-    Drawing.render ctx ui.relativeUI
-
-
-
-renderBrowser'' :: forall a b c.
-                   Milliseconds
-                -> BrowserCanvas
-                -> Number
-                -> { tracks     :: { gwas :: { drawings :: Array DrawingN | a }
-                                   , annotations :: { drawings :: Array DrawingN | b } }
-                  , relativeUI :: Drawing
-                  , fixedUI :: Drawing }
-               -> Aff _ _
-renderBrowser'' d (BrowserCanvas bc) offset ui = do
-
-  let bfr = (unwrap bc.track).canvas
-      cnv = (unwrap bfr).front
-
-  ctx <- liftEff $ Canvas.getContext2D cnv
-  liftEff do
-    {width, height} <- Canvas.getCanvasDimensions cnv
-    _ <- Canvas.setFillStyle backgroundColor ctx
-    translateBuffer {x: zero, y: zero} bfr
-    void $ Canvas.fillRect ctx { x: 0.0, y: 0.0, w: width, h: height }
-
-  liftEff $ translateBuffer {x: (-offset), y: zero} bfr
-
-  let gwasTrack :: Array { drawing :: _, points :: _ }
-      gwasTrack = ui.tracks.gwas.drawings
-
+  let gwasTrack  = ui.tracks.gwas.drawings
       annotTrack = ui.tracks.annotations.drawings
 
-  for_ gwasTrack \t -> do
-      liftEff $ renderBatchGlyphs bc.track t
+  for_ [gwasTrack, annotTrack] \t ->
+    for_ t \s -> do
+      liftEff $ renderBatchGlyphs bc.track s
       delay d
 
-  for_ annotTrack \t -> do
-      liftEff $ renderBatchGlyphs bc.track t
-      delay d
+
 
   liftEff do
     overlayCtx <- Canvas.getContext2D bc.overlay
