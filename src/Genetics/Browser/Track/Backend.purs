@@ -622,49 +622,48 @@ type Render' a =
 renderTrack :: forall a.
                CoordSys ChrId BigInt
             -> Canvas.Dimensions
-            -> Render a
-            -> Map ChrId (Array a)
-            -> Pair BigInt
-            -> Map ChrId (Rendered a)
-renderTrack cs cdim render segFs =
-  let segs bView = scaledSegments cs { screenWidth: cdim.width, viewWidth: pairSize bView }
-
-      midStep = map (render cdim) segFs
-
-  in \bView -> zipMapsWith ($) midStep (segs bView)
-
-
-renderTrack' :: forall a.
-               CoordSys ChrId BigInt
-            -> Canvas.Dimensions
             -> Render' a
             -> Map ChrId (Array a)
             -> Pair BigInt
             -> Rendered a
-renderTrack' cs cdim render segFs =
-  let segs vw = scaledSegments cs { screenWidth: cdim.width, viewWidth: pairSize vw }
+renderTrack cs cdim render segFs =
+  let
+      segs :: _
+      segs vw = scaledSegments cs { screenWidth: cdim.width, viewWidth: pairSize vw }
+
+      padding = 15.0
+
+      paddedSegs :: _
+      paddedSegs = map (aroundPair (-padding)) <<< segs
 
       midStep = render cdim segFs
 
-  in \bView -> midStep $ segs bView
+  in \bView -> midStep $ paddedSegs bView
 
+renderTrack' :: forall a.
+                Canvas.Dimensions
+             -> Render' a
+             -> Map ChrId (Array a)
+             -> Map ChrId (Pair Number)
+             -> Rendered a
+renderTrack' cdim render segFs = render cdim segFs
 
 
 browser :: forall a b c.
-            CoordSys ChrId BigInt
-         -> Canvas.Dimensions
-         -> Canvas.Dimensions
-         -> UISlots
-         -> { legend :: Legend, vscale :: VScale }
-         -> { gwas        :: Render' a
-            , annotations :: Render' b }
-         -> { gwas        :: Map ChrId (Array a)
-            , annotations :: Map ChrId (Array b) }
-         -> { tracks     :: Pair BigInt
-                         -> { gwas :: Rendered a
-                            , annotations :: Rendered b }
-            , relativeUI :: Pair BigInt -> Drawing
-            , fixedUI    :: Drawing }
+           CoordSys ChrId BigInt
+        -> Canvas.Dimensions
+        -> Canvas.Dimensions
+        -> UISlots
+        -> { legend :: Legend, vscale :: VScale }
+        -> { gwas        :: Render' a
+           , annotations :: Render' b }
+        -> { gwas        :: Map ChrId (Array a)
+           , annotations :: Map ChrId (Array b) }
+        -> { tracks     :: Pair BigInt
+                        -> { gwas :: Rendered a
+                           , annotations :: Rendered b }
+           , relativeUI :: Pair BigInt -> Drawing
+           , fixedUI    :: Drawing }
 browser cs trackDim overlayDim uiSlots ui renderers inputTracks =
   let
       drawInSlot {offset, size} d =
@@ -682,12 +681,19 @@ browser cs trackDim overlayDim uiSlots ui renderers inputTracks =
 
       fixedUI = ruler <> vScale <> legend
 
-      tracks =
-        let gwasT  = renderTrack' cs trackDim renderers.gwas inputTracks.gwas
-            annotT = renderTrack' cs trackDim renderers.annotations inputTracks.annotations
-        in \v -> { gwas: gwasT v
-                 , annotations: annotT v }
+      segmentPadding = 15.0
 
+      segmentPixels vw =
+        aroundPair (-segmentPadding)
+        <$> scaledSegments cs
+            { screenWidth: trackDim.width, viewWidth: pairSize vw }
+
+      tracks =
+        let gwasT  = renderers.gwas trackDim inputTracks.gwas
+            annotT = renderers.annotations trackDim inputTracks.annotations
+        in \v -> let segs = segmentPixels v
+                 in { gwas: gwasT segs
+                    , annotations: annotT segs }
 
       renderUIElement :: Map ChrId (Array NormalizedGlyph)
                       -> ChrId -> Pair Number -> Array SingleGlyph
