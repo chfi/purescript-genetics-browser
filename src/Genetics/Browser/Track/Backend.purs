@@ -18,6 +18,7 @@ import Data.Map as Map
 import Data.Maybe (Maybe, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (unwrap)
+import Data.Number.Format as Num
 import Data.Pair (Pair(..))
 import Data.Record as Record
 import Data.Symbol (class IsSymbol, SProxy(SProxy))
@@ -123,8 +124,9 @@ horRulerTrack :: forall r.
               -> Drawing
 horRulerTrack {min, max, sig} color f = outlined outline rulerDrawing
   where normY = (sig - min) / (max - min)
-        y = f.height - (normY * f.height)
-        outline = outlineColor color
+        thickness = 2.0
+        outline = outlineColor color <> lineWidth thickness
+        y = thickness + f.height - (normY * f.height)
         rulerDrawing = Drawing.path [{x: 0.0, y}, {x: f.width, y}]
 
 
@@ -225,32 +227,34 @@ drawVScale :: forall r.
            -> Number
            -> Drawing
 drawVScale vscale height =
-  -- should have some padding here too; hardcode for now
-  let hPad = vscale.width  / 8.0
-      vPad = height / 10.0
+  let
+      hPad = vscale.width  / 8.0
       x = 7.0 * hPad
 
-      y1 = 0.0
-      y2 = height
+      numSteps = 3
+      spokes = (_ / (Int.toNumber numSteps))
+               <<< Int.toNumber <$> (0 .. numSteps)
 
-      n = (_ * 0.1) <<< Int.toNumber <$> (0 .. 10)
+      barOutline = outlineColor vscale.color <> lineWidth 2.0
 
-      p = Drawing.path [{x, y:y1}, {x, y:y2}]
+      vBar = Drawing.path [{x, y: 0.0}, {x, y: height}]
 
-      bar w y = Drawing.path [{x:x-w, y}, {x, y}]
+      hBar w y = Drawing.path [{x:x-w, y}, {x, y}]
+      bars = vBar
+          <> foldMap (\i -> hBar 8.0 (i * height)) spokes
 
-      ps = foldMap (\i -> bar
-                          (if i == 0.0 || i == 1.0 then 8.0 else 3.0)
-                          (y1 + i*(y2-y1))) n
 
-      ft = font sansSerif 10 mempty
-      mkT y = Drawing.text ft hPad y (fillColor black)
+      font' = font sansSerif 14 mempty
+      mkT y = Drawing.text font' hPad y (fillColor black)
 
-      topLabel = mkT (y1+5.0) $ show vscale.max
-      btmLabel = mkT (y2+5.0)       $ show vscale.min
+      label yN = Drawing.text font' hPad
+                    (yN * height + 5.0) (fillColor black)
+                 $ Num.toStringWith (Num.fixed 2)
+                 $ vscale.min + (1.0 - yN) * (vscale.max - vscale.min)
 
-  in outlined (outlineColor vscale.color <> lineWidth 2.0) (p <> ps)
-     <> topLabel <> btmLabel
+      labels = foldMap label spokes
+
+  in outlined barOutline bars <> labels
 
 
 type LegendEntry = { text :: String, icon :: Drawing }
@@ -432,14 +436,15 @@ browser cs trackDim overlayDim uiSlots ui renderers inputTracks =
            $ rectangle zero zero size.width size.height)
         <> translate offset.x offset.y d
 
-      vScale = drawInSlot uiSlots.left (drawVScale ui.vscale uiSlots.left.size.height)
-      legend = drawInSlot uiSlots.right (drawLegend ui.legend uiSlots.right.size.height)
+      vScale = drawInSlot uiSlots.left
+                 $ drawVScale ui.vscale uiSlots.left.size.height
+      legend = drawInSlot uiSlots.right
+                 $ drawLegend ui.legend uiSlots.right.size.height
 
-      ruler   = Drawing.translate ui.vscale.width zero
+      ruler   = Drawing.translate ui.vscale.width uiSlots.top.size.height
                 $ horRulerTrack ui.vscale red trackDim
 
       fixedUI = ruler <> vScale <> legend
-
 
 
       segmentPadding = 12.0
@@ -455,8 +460,6 @@ browser cs trackDim overlayDim uiSlots ui renderers inputTracks =
         in \v -> let segs = segmentPixels v
                  in { gwas: gwasT segs
                     , annotations: annotT segs }
-
-
 
 
       renderUIElement :: Map ChrId (Array NormalizedGlyph)

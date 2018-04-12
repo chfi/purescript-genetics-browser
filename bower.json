@@ -54,7 +54,8 @@
     "purescript-validation": "^3.2.0",
     "purescript-maps": "^3.6.0",
     "purescript-simple-json": "^2.0.1",
-    "purescript-aff-coroutines": "^6.0.0"
+    "purescript-aff-coroutines": "^6.0.0",
+    "purescript-numbers": "^5.0.0"
   },
   "devDependencies": {
     "purescript-psci-support": "^3.0.0",
