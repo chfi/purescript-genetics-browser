@@ -70,29 +70,21 @@ exports.canvasClickImpl = function(canvas, cb) {
 
 
 // scrolls a canvas, given a "back buffer" canvas to copy the current context to
-exports.scrollCanvas = function(backCanvas) {
-    return function(canvas) {
-        return function(p) {
-            return function() {
-                // for some reason, doing this in newCanvas() below doesn't stick
-                backCanvas.width = canvas.width;
-                backCanvas.height = canvas.height;
+exports.scrollCanvasImpl = function(backCanvas, canvas, p) {
+    // for some reason, doing this in newCanvas() below doesn't stick
+    backCanvas.width = canvas.width;
+    backCanvas.height = canvas.height;
 
-                var bCtx = backCanvas.getContext('2d');
-                var ctx = canvas.getContext('2d');
+    var bCtx = backCanvas.getContext('2d');
+    var ctx = canvas.getContext('2d');
 
-                bCtx.drawImage(canvas, 0, 0);
+    bCtx.drawImage(canvas, 0, 0);
 
-                ctx.save();
-                ctx.setTransform(1,0,0,1,0,0);
-                ctx.fillStyle = 'white';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(backCanvas, p.x, p.y);
-                ctx.restore();
-
-            };
-        };
-    };
+    ctx.save();
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(backCanvas, p.x, p.y);
+    ctx.restore();
 };
 
 

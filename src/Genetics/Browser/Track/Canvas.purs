@@ -46,7 +46,8 @@ foreign import createCanvas :: forall eff.
 
 foreign import setElementStyleImpl :: forall e.
                                       EffFn3 e
-                                      Element String String Unit
+                                      Element String String
+                                      Unit
 
 setElementStyle :: Element
                 -> String
@@ -94,10 +95,7 @@ foreign import setContainerStyle :: forall e. Element -> Canvas.Dimensions -> Ef
 
 foreign import drawCopies :: forall eff a.
                              EffFn4 eff
-                             CanvasElement
-                             { width :: Number, height :: Number }
-                             Context2D
-                             (Array Point)
+                             CanvasElement Canvas.Dimensions Context2D (Array Point)
                              Unit
 
 
@@ -109,8 +107,7 @@ foreign import setCanvasTranslation :: forall e.
 
 foreign import canvasClickImpl :: forall e.
                                   EffFn2 e
-                                  CanvasElement
-                                  (Point -> Eff e Unit)
+                                  CanvasElement (Point -> Eff e Unit)
                                   Unit
 
 
@@ -118,11 +115,15 @@ canvasClick :: CanvasElement -> (Point -> Eff _ Unit) -> Eff _ Unit
 canvasClick = runEffFn2 canvasClickImpl
 
 
-foreign import scrollCanvas :: forall eff.
-                               CanvasElement
-                            -> CanvasElement
-                            -> Point
-                            -> Eff eff Unit
+foreign import scrollCanvasImpl :: forall e.
+                                   EffFn3 e
+                                   CanvasElement CanvasElement Point
+                                   Unit
+
+scrollCanvas :: BufferedCanvas
+             -> Point
+             -> Eff _ Unit
+scrollCanvas (BufferedCanvas bc) = runEffFn3 scrollCanvasImpl bc.back bc.front
 
 
 foreign import canvasDragImpl :: forall eff.
@@ -156,8 +157,10 @@ dragScroll :: BrowserCanvas
 dragScroll (BrowserCanvas bc) cb = canvasDrag f bc.staticOverlay
   where f = case _ of
               Left  p     -> cb p
-              Right {x,y} -> scrollCanvas bufCanv.back bufCanv.front {x: -x, y: zero}
-        bufCanv = unwrap $ _.canvas $ unwrap bc.track
+              Right {x} -> do
+                let p' = {x: -x, y: 0.0}
+                scrollCanvas (_.canvas $ unwrap bc.track) p'
+                scrollCanvas bc.trackOverlay p'
 
 
 -- | Takes a BrowserCanvas and a callback function that is called with each
@@ -186,15 +189,18 @@ newtype BufferedCanvas =
 
 derive instance newtypeBufferedCanvas :: Newtype BufferedCanvas _
 
-bufferedCanvas :: Canvas.Dimensions
-               -> Eff _ BufferedCanvas
-bufferedCanvas dim = do
+createBufferedCanvas :: Canvas.Dimensions
+                     -> Eff _ BufferedCanvas
+createBufferedCanvas dim = do
   back  <- createCanvas dim "buffer"
   front <- createCanvas dim "front"
   let bc = BufferedCanvas { back, front }
   blankBuffer bc
   pure bc
 
+getBufferedContext :: BufferedCanvas
+                   -> Eff _ Context2D
+getBufferedContext = Canvas.getContext2D <$> _.front <<< unwrap
 
 setBufferedCanvasSize :: Canvas.Dimensions
                       -> BufferedCanvas
@@ -223,14 +229,15 @@ drawToBuffer (BufferedCanvas {back}) f = do
 
 blankBuffer :: BufferedCanvas
             -> Eff _ Unit
-blankBuffer bc@(BufferedCanvas {back}) = do
-  backCtx <- Canvas.getContext2D back
-  {width, height} <- Canvas.getCanvasDimensions back
+blankBuffer bc@(BufferedCanvas {back, front}) = do
   translateBuffer {x: zero, y: zero} bc
-  -- setCanvasTranslation {x: 0.0, y: 0.0 } back
-  _ <- Canvas.setFillStyle backgroundColor backCtx
-  _ <- Canvas.fillRect backCtx { x: 0.0, y: 0.0, w: width, h: height }
-  pure unit
+
+  dim <- Canvas.getCanvasDimensions back
+  let r = { x: 0.0, y: 0.0, w: dim.width, h: dim.height }
+
+  for_ [back, front] \el -> do
+    ctx <- Canvas.getContext2D el
+    Canvas.clearRect ctx r
 
 
 flipBuffer :: BufferedCanvas
@@ -242,7 +249,7 @@ flipBuffer (BufferedCanvas {back, front}) = do
 
   {width, height} <- Canvas.getCanvasDimensions front
 
-  _ <- Canvas.fillRect frontCtx { x: 0.0, y: 0.0, w: width, h: height }
+  _ <- Canvas.clearRect frontCtx { x: 0.0, y: 0.0, w: width, h: height }
   _ <- Canvas.drawImage frontCtx imgSrc 0.0 0.0
   pure unit
 
@@ -254,24 +261,28 @@ flipBuffer (BufferedCanvas {back, front}) = do
 -- | `glyphBuffer` is what individual glyphs can be rendered to and copied from, for speed.
 newtype TrackCanvas =
   TrackCanvas { canvas :: BufferedCanvas
-              , width :: Number
-              , height :: Number
+              , dimensions :: Canvas.Dimensions
               , glyphBuffer  :: CanvasElement
               }
 
 derive instance newtypeTrackCanvas :: Newtype TrackCanvas _
 
+_Dimensions :: forall n r1 r2.
+               Newtype n { dimensions :: Canvas.Dimensions | r1 }
+            => Lens' n Canvas.Dimensions
+_Dimensions = _Newtype <<< Lens.prop (SProxy :: SProxy "dimensions")
+
+-- TODO calculate based on glyph bounding boxes
 glyphBufferSize :: Canvas.Dimensions
 glyphBufferSize = { width: 100.0, height: 100.0 }
 
 trackCanvas :: Canvas.Dimensions
             -> Eff _ TrackCanvas
 trackCanvas dim = do
-  canvas <- bufferedCanvas dim
+  canvas <- createBufferedCanvas dim
   glyphBuffer <- createCanvas glyphBufferSize "glyphBuffer"
 
-  pure $ TrackCanvas { width: dim.width
-                     , height: dim.height
+  pure $ TrackCanvas { dimensions: dim
                      , canvas, glyphBuffer }
 
 setTrackCanvasSize :: Canvas.Dimensions
@@ -280,7 +291,7 @@ setTrackCanvasSize :: Canvas.Dimensions
 setTrackCanvasSize dim (TrackCanvas tc) = do
   setBufferedCanvasSize dim tc.canvas
   pure $ TrackCanvas
-    $ tc { width = dim.width, height = dim.height }
+    $ tc { dimensions = dim }
 
 
 
@@ -302,6 +313,7 @@ newtype BrowserCanvas =
                 , trackPadding  :: TrackPadding
                 , dimensions    :: Canvas.Dimensions
                 , staticOverlay :: CanvasElement
+                , trackOverlay  :: BufferedCanvas
                 }
 
 
@@ -309,11 +321,6 @@ derive instance newtypeBrowserCanvas :: Newtype BrowserCanvas _
 
 _Track :: Lens' BrowserCanvas TrackCanvas
 _Track = _Newtype <<< Lens.prop (SProxy :: SProxy "track")
-
-trackDimensions :: BrowserCanvas -> Canvas.Dimensions
-trackDimensions bc =
-  let t = bc ^. _Track <<< _Newtype
-  in {width: t.width, height: t.height}
 
 
 foreign import debugBrowserCanvas :: forall e.
@@ -355,6 +362,8 @@ setBrowserCanvasSize dim (BrowserCanvas bc) = do
   let trackDim = subtractPadding dim bc.trackPadding
 
   track <- setTrackCanvasSize trackDim bc.track
+
+  setBufferedCanvasSize dim bc.trackOverlay
   _ <- Canvas.setCanvasDimensions dim bc.staticOverlay
 
   pure $ BrowserCanvas
@@ -372,24 +381,35 @@ browserCanvas dimensions trackPadding el = do
 
   setContainerStyle el dimensions
 
+
   let trackDim = subtractPadding dimensions trackPadding
   track   <- trackCanvas trackDim
+
+  trackOverlay  <- createBufferedCanvas { width: trackDim.width
+                                        , height: dimensions.height }
+
   staticOverlay <- createCanvas dimensions "staticOverlay"
 
   let trackEl = _.front  $ unwrap
                 $ _.canvas $ unwrap $ track
 
+      trackOverlayEl = _.front $ unwrap $ trackOverlay
+
   setCanvasZIndex trackEl 10
+  setCanvasZIndex trackOverlayEl 20
   setCanvasZIndex staticOverlay 30
 
   setCanvasPosition trackPadding trackEl
-  setCanvasPosition {left: 0.0, top: 0.0} staticOverlay
+  setCanvasPosition { left: trackPadding.left, top: 0.0 } trackOverlayEl
+  setCanvasPosition { left: 0.0, top: 0.0} staticOverlay
 
   appendCanvasElem el trackEl
+  appendCanvasElem el trackOverlayEl
   appendCanvasElem el staticOverlay
 
-  pure $ BrowserCanvas { track, trackPadding
-                       , staticOverlay, dimensions }
+  pure $ BrowserCanvas { dimensions
+                       , track, trackPadding
+                       , trackOverlay, staticOverlay }
 
 
 browserOnClick :: BrowserCanvas
@@ -404,14 +424,10 @@ browserOnClick (BrowserCanvas bc) {track, overlay} =
     track t
 
 
-
-
-
-
 trackViewScale :: BrowserCanvas
                -> CoordSysView
                -> ViewScale
-trackViewScale (BrowserCanvas bc) = viewScale (unwrap $ bc.track)
+trackViewScale bc = viewScale $ bc ^. _Track <<< _Dimensions
 
 
 renderGlyphs :: TrackCanvas
@@ -419,20 +435,18 @@ renderGlyphs :: TrackCanvas
              -> Eff _ Unit
 renderGlyphs (TrackCanvas tc) {drawing, points} = do
   glyphBfr <- Canvas.getContext2D tc.glyphBuffer
+  ctx <- getBufferedContext tc.canvas
 
 
-  _ <- Canvas.clearRect glyphBfr { x: zero, y: zero
-                                 , w: glyphBufferSize.width
-                                 , h: glyphBufferSize.height }
+  let w = glyphBufferSize.width
+      h = glyphBufferSize.height
+      x0 = w / 2.0
+      y0 = h / 2.0
 
-  let x0 = glyphBufferSize.width  / 2.0
-      y0 = glyphBufferSize.height / 2.0
+  _ <- Canvas.clearRect glyphBfr { x: zero, y: zero, w, h }
 
   Drawing.render glyphBfr
     $ Drawing.translate x0 y0 drawing
-
-
-  ctx <- Canvas.getContext2D (unwrap tc.canvas).front
 
   runEffFn4 drawCopies tc.glyphBuffer glyphBufferSize ctx points
 
@@ -450,15 +464,26 @@ renderBrowser :: forall a b c.
              -> Aff _ _
 renderBrowser d (BrowserCanvas bc) offset ui = do
 
+  -- Render the UI
+  liftEff do
+    staticOverlayCtx <- Canvas.getContext2D bc.staticOverlay
+    Drawing.render staticOverlayCtx ui.fixedUI
+
+    translateBuffer {x: zero, y: zero} bc.trackOverlay
+    blankBuffer bc.trackOverlay
+
+    trackOverlayCtx <- getBufferedContext bc.trackOverlay
+    Drawing.render trackOverlayCtx ui.relativeUI
+
+  -- Render the tracks
   let bfr = (unwrap bc.track).canvas
       cnv = (unwrap bfr).front
 
   ctx <- liftEff $ Canvas.getContext2D cnv
   liftEff do
     dim <- Canvas.getCanvasDimensions cnv
-    _ <- Canvas.setFillStyle backgroundColor ctx
     translateBuffer {x: zero, y: zero} bfr
-    void $ Canvas.fillRect ctx { x: 0.0, y: 0.0, w: dim.width, h: dim.height }
+    void $ Canvas.clearRect ctx { x: 0.0, y: 0.0, w: dim.width, h: dim.height }
 
   liftEff $ translateBuffer {x: (-offset), y: zero} bfr
 
@@ -469,43 +494,3 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
     for_ t \s -> do
       liftEff $ renderGlyphs bc.track s
       delay d
-
-
-
-  liftEff do
-    staticOverlayCtx <- Canvas.getContext2D bc.staticOverlay
-    Drawing.render staticOverlayCtx ui.fixedUI
-    Drawing.render ctx ui.relativeUI
-
-
-{-
-    debug helper functions
--}
-flipTrack :: BrowserCanvas
-          -> Eff _ Unit
-flipTrack (BrowserCanvas bc) = do
-  let (TrackCanvas tc) = bc.track
-      buffered = tc.canvas
-
-  flipBuffer buffered
-
-blankTrack :: BrowserCanvas
-           -> Eff _ Unit
-blankTrack (BrowserCanvas bc) = do
-  let (TrackCanvas tc) = bc.track
-      buffered = tc.canvas
-
-  blankBuffer buffered
-
-renderTrack :: BrowserCanvas
-            -> (TrackCanvas -> Eff _ Unit)
-            -> Eff _ Unit
-renderTrack (BrowserCanvas bc) f = f bc.track
-drawOnTrack :: BrowserCanvas
-            -> (Context2D -> Eff _ Unit)
-            -> Eff _ Unit
-drawOnTrack (BrowserCanvas bc) f = do
-  let (TrackCanvas tc) = bc.track
-      buffered = tc.canvas
-
-  drawToBuffer buffered f
