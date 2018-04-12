@@ -38,7 +38,7 @@ import Data.Traversable (for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Track.Backend (RenderedTrack, browser, bumpFeatures, zipMapsWith)
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, trackDimensions, trackViewScale, uiSlots, wheelZoom)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, trackViewScale, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, aroundPair, coordSys, normalizeView, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy)
 import Global.Unsafe (unsafeStringify)
@@ -357,16 +357,6 @@ runBrowser config bc = launchAff $ do
 
   liftEff $ initDebugDiv clickRadius
 
-  let browserDimensions = (unwrap bc).dimensions
-
-  {width} <- liftEff $ windowInnerSize
-
-  let height = config.browserHeight
-      browserDimensions = {width, height}
-      vScaleWidth = 60.0
-      legendWidth = 120.0
-      trackWidth = width - (vScaleWidth + legendWidth)
-
   let cSys :: CoordSys ChrId BigInt
       cSys = coordSys mouseChrSizes
 
@@ -385,6 +375,7 @@ runBrowser config bc = launchAff $ do
 
   let initialView :: CoordSysView
       initialView = wrap $ Pair zero (cSys^._TotalSize)
+      trackDims = bc ^. _Track <<< _Dimensions
 
   viewCmd <- makeEmptyVar
   liftEff $ do
@@ -393,7 +384,7 @@ runBrowser config bc = launchAff $ do
 
     let dragCB {x,y} =
           when (Math.abs x >= one)
-          $ queueCmd viewCmd $ ScrollView $ (-x) / (trackDimensions bc).width
+          $ queueCmd viewCmd $ ScrollView $ (-x) / trackDims.width
     dragScroll bc dragCB
 
 
@@ -412,12 +403,17 @@ runBrowser config bc = launchAff $ do
       initState = { view, viewCmd, viewReady, renderFiber, lastOverlaps }
 
   let
+      slots = uiSlots bc
+
       entries = foldMap annotLegendTest trackData.annotations
-      legend = { width: legendWidth, entries }
+      legend = { width: slots.right.size.width
+               , entries }
 
       s = config.score
 
-      vscale = { width: vScaleWidth, color: black
+
+      vscale = { width: slots.left.size.width
+               , color: black
                , min: s.min, max: s.max, sig: s.sig }
 
       padding = { horizontal: config.trackPadding.left
@@ -426,7 +422,7 @@ runBrowser config bc = launchAff $ do
 
       mainBrowser :: _
       mainBrowser = browser cSys
-                     (trackDimensions bc) browserDimensions
+                     trackDims (bc ^. _Dimensions)
                      (uiSlots bc) {legend, vscale}
                      { gwas: renderGWAS vscale
                      , annotations: renderAnnot vscale }
@@ -462,8 +458,6 @@ runBrowser config bc = launchAff $ do
 
     let overlayDebug :: _
         overlayDebug p = do
-          let pad = (unwrap bc).trackPadding
-              dim = (unwrap bc).dimensions
 
           setDebugDivVisibility "visible"
           setDebugDivPoint p

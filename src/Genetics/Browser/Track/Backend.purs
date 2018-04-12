@@ -141,7 +141,7 @@ chrLabelTrack cs cdim =
       mkLabel :: ChrId -> NormalizedGlyph
       mkLabel chr = { drawing: inj _point $ chrText chr
                     , horPos:  inj _point $ Normalized (0.5)
-                    , verPos: Normalized (0.05) }
+                    , verPos: Normalized (0.03) }
 
   in mapWithIndex (\i _ -> [mkLabel i]) $ cs ^. _Segments
 
@@ -462,7 +462,7 @@ browser cs trackDim overlayDim uiSlots ui renderers inputTracks =
       renderUIElement :: Map ChrId (Array NormalizedGlyph)
                       -> ChrId -> Pair Number -> Array SingleGlyph
       renderUIElement m k s
-          = fold $ rescaleNormSingleGlyphs trackDim.height s
+          = fold $ rescaleNormSingleGlyphs overlayDim.height s
                 <$> (Map.lookup k m)
 
       drawTrackUI :: Pair BigInt -> (ChrId -> Pair Number -> (Array _)) -> Drawing
