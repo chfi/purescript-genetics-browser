@@ -460,8 +460,6 @@ runBrowser config bc = launchAff $ do
                    setInfoBoxVisibility "visible"
 
 
-    ovCtx <- Canvas.getContext2D (unwrap bc).overlay
-
     let overlayDebug :: _
         overlayDebug p = do
           let pad = (unwrap bc).trackPadding

@@ -153,7 +153,7 @@ canvasDrag f el =
 dragScroll :: BrowserCanvas
            -> (Point -> Eff _ Unit)
            -> Eff _ Unit
-dragScroll (BrowserCanvas bc) cb = canvasDrag f bc.overlay
+dragScroll (BrowserCanvas bc) cb = canvasDrag f bc.staticOverlay
   where f = case _ of
               Left  p     -> cb p
               Right {x,y} -> scrollCanvas bufCanv.back bufCanv.front {x: -x, y: zero}
@@ -167,7 +167,7 @@ wheelZoom :: BrowserCanvas
           -> (Number -> Eff _ Unit)
           -> Eff _ Unit
 wheelZoom (BrowserCanvas bc) cb =
-  canvasWheelCBImpl bc.overlay cb
+  canvasWheelCBImpl bc.staticOverlay cb
 
 
 
@@ -290,17 +290,18 @@ type TrackPadding =
 
 -- | A `BrowserCanvas` consists of a double-buffered `track`
 -- | which is what the genetics browser view is rendered onto,
--- | and a transparent `overlay` canvas the UI is rendered onto.
+-- | and a transparent `staticOverlay` canvas the UI is rendered onto,
+-- | with a (also transparent) `trackOverlay` that scrolls with the track view.
 
 -- | The `dimensions`, `trackPadding`, and track.width/height are
 -- | related such that
 -- | track.width + horizontal.left + horizontal.right = dimensions.width
 -- | track.height + vertical.top + vertical.bottom = dimensions.height
 newtype BrowserCanvas =
-  BrowserCanvas { track        :: TrackCanvas
-                , trackPadding :: TrackPadding
-                , dimensions   :: Canvas.Dimensions
-                , overlay      :: CanvasElement
+  BrowserCanvas { track         :: TrackCanvas
+                , trackPadding  :: TrackPadding
+                , dimensions    :: Canvas.Dimensions
+                , staticOverlay :: CanvasElement
                 }
 
 
@@ -332,16 +333,16 @@ uiSlots :: BrowserCanvas
         -> UISlots
 uiSlots (BrowserCanvas bc) =
   let track   = subtractPadding bc.dimensions bc.trackPadding
-      overlay = bc.dimensions
+      browser = bc.dimensions
       pad     = bc.trackPadding
   in { left:   { offset: { x: 0.0, y: pad.top }
                , size:   { height: track.height, width: pad.left }}
-     , right:  { offset: { x: overlay.width - pad.right, y: pad.top }
+     , right:  { offset: { x: browser.width - pad.right, y: pad.top }
                , size:   { height: track.height, width: pad.right }}
      , top:    { offset: { x: pad.left, y: 0.0 }
                , size:   { height: pad.top, width: track.width }}
-     , bottom: { offset: { x: overlay.width  - pad.right
-                         , y: overlay.height - pad.bottom }
+     , bottom: { offset: { x: browser.width  - pad.right
+                         , y: browser.height - pad.bottom }
                , size:   { height: pad.bottom, width: track.width }}
     }
 
@@ -354,7 +355,7 @@ setBrowserCanvasSize dim (BrowserCanvas bc) = do
   let trackDim = subtractPadding dim bc.trackPadding
 
   track <- setTrackCanvasSize trackDim bc.track
-  _ <- Canvas.setCanvasDimensions dim bc.overlay
+  _ <- Canvas.setCanvasDimensions dim bc.staticOverlay
 
   pure $ BrowserCanvas
        $ bc { dimensions = dim
@@ -373,22 +374,22 @@ browserCanvas dimensions trackPadding el = do
 
   let trackDim = subtractPadding dimensions trackPadding
   track   <- trackCanvas trackDim
-  overlay <- createCanvas dimensions "overlay"
+  staticOverlay <- createCanvas dimensions "staticOverlay"
 
   let trackEl = _.front  $ unwrap
                 $ _.canvas $ unwrap $ track
 
-  setCanvasZIndex trackEl 1
-  setCanvasZIndex overlay 2
+  setCanvasZIndex trackEl 10
+  setCanvasZIndex staticOverlay 30
 
   setCanvasPosition trackPadding trackEl
-  setCanvasPosition {left: 0.0, top: 0.0} overlay
+  setCanvasPosition {left: 0.0, top: 0.0} staticOverlay
 
   appendCanvasElem el trackEl
-  appendCanvasElem el overlay
+  appendCanvasElem el staticOverlay
 
   pure $ BrowserCanvas { track, trackPadding
-                       , overlay, dimensions }
+                       , staticOverlay, dimensions }
 
 
 browserOnClick :: BrowserCanvas
@@ -396,7 +397,7 @@ browserOnClick :: BrowserCanvas
                   , overlay :: Point -> Eff _ Unit }
                -> Eff _ Unit
 browserOnClick (BrowserCanvas bc) {track, overlay} =
-  canvasClick bc.overlay \o -> do
+  canvasClick bc.staticOverlay \o -> do
     let t = { x: o.x - bc.trackPadding.left
             , y: o.y - bc.trackPadding.top }
     overlay o
@@ -472,8 +473,8 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
 
 
   liftEff do
-    overlayCtx <- Canvas.getContext2D bc.overlay
-    Drawing.render overlayCtx ui.fixedUI
+    staticOverlayCtx <- Canvas.getContext2D bc.staticOverlay
+    Drawing.render staticOverlayCtx ui.fixedUI
     Drawing.render ctx ui.relativeUI
 
 
