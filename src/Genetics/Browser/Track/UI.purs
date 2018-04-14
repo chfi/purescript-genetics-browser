@@ -319,20 +319,22 @@ snpInfoHTML { position, feature } =
 
 
 snpInfoHTML' :: forall rA rS.
-                (GWASFeature rS -> Maybe (Annot rA))
+                (GWASFeature rS -> Maybe (Annot (score :: Number | rA)))
              -> GWASFeature rS
              -> String
 snpInfoHTML' assocAnnot snp =
    snpInfoHTML snp <> case assocAnnot snp of
      Nothing -> "<p>No annotation found</p>"
      Just a  -> "<p>Annotation: " <> show a.feature.name <> "</p>"
+             <> "<p>Annot. score: " <> show a.feature.score <> "</p>"
+             <> "<p>Annot. -log10: " <> show (negLog10 a.feature.score) <> "</p>"
 
 annotForSnp :: forall rA rS.
                Map ChrId (Array (Annot rA))
             -> GWASFeature rS
             -> Maybe (Annot rA)
 annotForSnp annotations {position, feature} = do
-  let radius = Bp 10000000.0
+  let radius = Bp 100000000.0
   chr <- Map.lookup feature.chrId annotations
   Array.find (\a -> ((radius `aroundPair` a.position) `pairsOverlap` position)) chr
 
@@ -368,8 +370,9 @@ runBrowser config bc = launchAff $ do
       traverse (getAnnotations cSys) config.urls.annotations
 
     let annotations = zipMapsWith
-                       (bumpFeatures (to (\s -> s.feature.score + 0.02)) (SProxy :: SProxy "score")
-                         (Bp 1000000.0))
+                       (bumpFeatures (to _.feature.score)
+                                      (SProxy :: SProxy "score")
+                                      (Bp 100000000.0))
                        <$> gwas <*> rawAnnotations
 
     pure { genes, gwas, annotations }

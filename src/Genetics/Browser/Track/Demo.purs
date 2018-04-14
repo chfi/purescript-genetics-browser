@@ -381,7 +381,10 @@ renderAnnot verscale cdim annots =
       drawings = map drawing
 
       npointed :: Map ChrId (Array (Tuple (Annot (score :: Number)) NPoint))
-      npointed = (map <<< map) (fanout id (placeScored verscale)) annots
+      npointed = (map <<< map) (fanout id place) annots
+        where place p = let p' = placeScored verscale p
+                        in { x: p'.x
+                           , y: Normalized $ min 1.0 (unwrap p'.y + 0.1) }
 
       rescale :: Pair Number -> NPoint -> Point
       rescale seg npoint =

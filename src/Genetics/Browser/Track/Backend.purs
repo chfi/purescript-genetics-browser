@@ -7,7 +7,7 @@ import Color.Scheme.Clrs (red)
 import Data.Array ((..))
 import Data.Array as Array
 import Data.BigInt (BigInt)
-import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum)
+import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum, minimum)
 import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
@@ -201,14 +201,15 @@ bumpFeatures :: forall f a l i o.
              -> f (Feature (Record i))
              -> f (Feature (Record o))
 bumpFeatures f l radius other = map bump
-  where maxInRadius :: Pair Bp -> Number
-        maxInRadius lr = fromMaybe 0.0 $ maximum
+  where minInRadius :: Pair Bp -> Number
+        minInRadius lr = fromMaybe 1.0
+                         $ minimum
                           $ map (\g -> if pairsOverlap g.position lr
-                                          then f `view` g else 0.0) other
+                                          then f `view` g else 1.0) other
 
         bump :: Feature (Record i) -> Feature (Record o)
         bump a =
-          let y = maxInRadius (aroundPair radius a.position)
+          let y = minInRadius (aroundPair radius a.position)
           in { position: a.position
              , frameSize: a.frameSize
              , feature: Record.insert l y a.feature }
