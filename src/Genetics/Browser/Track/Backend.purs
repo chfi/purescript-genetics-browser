@@ -250,18 +250,24 @@ drawVScale vscale height =
           <> foldMap (\i -> hBar 8.0 (i * height)) spokes
 
 
-      font' = font sansSerif 14 mempty
-      mkT y = Drawing.text font' hPad y (fillColor black)
+      unitLabel =
+        Drawing.translate (vscale.width * 0.5 - hPad) (height * 0.72)
+        $ Drawing.rotate (- Math.pi / 2.0)
+        $ Drawing.text (font sansSerif 18 mempty)
+            0.0 0.0 (fillColor black) "-log10 (P value)"
 
-      label yN = Drawing.text font' hPad
-                    (yN * height + 5.0) (fillColor black)
+      label yN = Drawing.text
+                    (font sansSerif 14 mempty)
+                    (vscale.width * 0.6 - hPad)
+                    (yN * height + 5.0)
+                    (fillColor black)
                  $ Num.toStringWith (Num.fixed 0)
                  $ (\p -> min vscale.max p)
                  $ vscale.min + (1.0 - yN) * (vscale.max - vscale.min)
 
       labels = foldMap label spokes
 
-  in outlined barOutline bars <> labels
+  in outlined barOutline bars <> labels <> unitLabel
 
 
 type LegendEntry = { text :: String, icon :: Drawing }
