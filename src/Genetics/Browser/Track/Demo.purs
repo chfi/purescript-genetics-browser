@@ -27,7 +27,7 @@ import Data.String as String
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (inj)
-import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, _range, _single, groupToMap, mkIcon, negLog10, trackLegend, zipMapsWith)
+import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, Label, _range, _single, groupToMap, mkIcon, negLog10, trackLegend, zipMapsWith)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize)
@@ -355,6 +355,7 @@ renderGWAS verscale cdim snps =
   in \seg -> let pts = pointed seg
              in { features
                 , drawings: drawings pts
+                , labels: mempty
                 , overlaps: overlaps pts }
 
 
@@ -370,15 +371,17 @@ renderAnnot verscale cdim annots =
       features = fold annots
 
       drawing :: Tuple (Annot (score :: Number)) Point -> DrawingN
-      drawing (Tuple an pt) = { drawing: lg.icon <> text', points: [pt] }
+      drawing (Tuple an pt) = { drawing: lg.icon, points: [pt] }
         where lg = annotLegendEntry an
-              text' = Drawing.text
-                          (font sansSerif 12 mempty)
-                          (7.5) (2.5)
-                          (fillColor black) an.feature.name
 
       drawings :: Array (Tuple (Annot (score :: Number)) Point) -> Array DrawingN
       drawings = map drawing
+
+      label :: Tuple (Annot (score :: Number)) Point -> Label
+      label (Tuple an {x,y}) = { text: an.feature.name, point: {x: x+0.0, y: y+0.0}  }
+
+      labels :: Array (Tuple (Annot (score :: Number)) Point) -> Array Label
+      labels = map label
 
       npointed :: Map ChrId (Array (Tuple (Annot (score :: Number)) NPoint))
       npointed = (map <<< map) (fanout id place) annots
@@ -403,4 +406,5 @@ renderAnnot verscale cdim annots =
   in \seg -> let pts = pointed seg
              in { features
                 , drawings: drawings pts
+                , labels: labels pts
                 , overlaps: overlaps  }

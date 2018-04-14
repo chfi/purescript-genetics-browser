@@ -279,7 +279,7 @@ type Legend = { width :: Number
 
 mkIcon :: Color -> String -> LegendEntry
 mkIcon c text =
-  let sh = circle (-2.5) (-2.5) 5.0
+  let sh = circle 0.0 0.0 5.0
       icon = outlined (outlineColor c <> lineWidth 2.0) sh <>
              filled (fillColor c) sh
   in {text, icon}
@@ -408,12 +408,14 @@ type UISlots = { left   :: UISlot
 
 
 type DrawingN = { drawing :: Drawing, points :: Array Point }
+type Label = { text :: String, point :: Point }
 
 
 
 
 type RenderedTrack a = { features :: Array a
                        , drawings :: Array DrawingN
+                       , labels   :: Array Label
                        , overlaps :: Number -> Point -> Array a }
 
 
@@ -423,6 +425,7 @@ type Renderer a =
   -> Map ChrId (Pair Number)
   -> { features :: Array a
      , drawings :: Array DrawingN
+     , labels   :: Array Label
      , overlaps :: Number -> Point -> Array a }
 
 
