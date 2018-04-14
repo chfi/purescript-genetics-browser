@@ -475,6 +475,7 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
     translateBuffer {x: zero, y: zero} bc.trackOverlay
     blankBuffer bc.trackOverlay
 
+    translateBuffer {x: (-offset), y: zero} bc.trackOverlay
     trackOverlayCtx <- getBufferedContext bc.trackOverlay
     Drawing.render trackOverlayCtx ui.relativeUI
 

@@ -27,7 +27,7 @@ import Data.String as String
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (inj)
-import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, _range, _single, groupToMap, mkIcon, trackLegend, zipMapsWith)
+import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, _range, _single, groupToMap, mkIcon, negLog10, trackLegend, zipMapsWith)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize)
@@ -210,7 +210,7 @@ gemmaJSONParse cs j = do
   obj <- j ^? _Object
   chrId <- ChrId <$> obj ^? ix "chr" <<< _String
   pos   <- Bp    <$> obj ^? ix "ps"  <<< _Number
-  score <-           obj ^? ix "af"  <<< _Number
+  score <-           obj ^? ix "p_wald"  <<< _Number
   name  <-           obj ^? ix "rs"  <<< _String
 
   chrSize <- (Bp <<< BigInt.toNumber <<< pairSize) <$> Map.lookup chrId (view _Segments cs)
@@ -296,7 +296,7 @@ placeScored :: forall r1 r2.
          -> NPoint
 placeScored {min, max} { frameSize, position: (Pair l _), feature } = {x, y}
   where x = Normalized $ unwrap $ l / frameSize
-        y = Normalized $ (feature.score - min) / (max - min)
+        y = Normalized $ ((negLog10 feature.score) - min) / (max - min)
 
 
 dist :: Point -> Point -> Number

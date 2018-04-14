@@ -36,7 +36,7 @@ import Data.Pair as Pair
 import Data.Symbol (SProxy(..))
 import Data.Traversable (for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
-import Genetics.Browser.Track.Backend (RenderedTrack, browser, bumpFeatures, zipMapsWith)
+import Genetics.Browser.Track.Backend (RenderedTrack, browser, bumpFeatures, negLog10, zipMapsWith)
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, trackViewScale, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
@@ -315,6 +315,7 @@ snpInfoHTML { position, feature } =
  <> "<p>Chr: "   <> show feature.chrId <> "</p>"
  <> "<p>Pos: "   <> show (Pair.fst position) <> "</p>"
  <> "<p>Score: " <> show feature.score <> "</p>"
+ <> "<p>-log10: " <> show (negLog10 feature.score) <> "</p>"
 
 
 snpInfoHTML' :: forall rA rS.

@@ -30,6 +30,7 @@ import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, FillStyle, OutlineStyle, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
+import Math as Math
 import Type.Prelude (class RowLacks)
 
 
@@ -222,6 +223,10 @@ type VScale = { width :: Number
               , color :: Color
               | VScaleRow () }
 
+
+negLog10 :: Number -> Number
+negLog10 p = - ((Math.log p) / Math.ln10)
+
 drawVScale :: forall r.
               VScale
            -> Number
@@ -249,7 +254,8 @@ drawVScale vscale height =
 
       label yN = Drawing.text font' hPad
                     (yN * height + 5.0) (fillColor black)
-                 $ Num.toStringWith (Num.fixed 2)
+                 $ Num.toStringWith (Num.fixed 0)
+                 $ (\p -> min vscale.max p)
                  $ vscale.min + (1.0 - yN) * (vscale.max - vscale.min)
 
       labels = foldMap label spokes
