@@ -370,9 +370,16 @@ renderAnnot verscale cdim annots =
   let features :: Array (Annot (score :: Number))
       features = fold annots
 
+      tailHeight = 0.15
+
       drawing :: Tuple (Annot (score :: Number)) Point -> DrawingN
-      drawing (Tuple an pt) = { drawing: lg.icon, points: [pt] }
+      drawing (Tuple an pt) = { drawing: tail <> lg.icon , points: [pt] }
         where lg = annotLegendEntry an
+              tail = Drawing.outlined (lineWidth 1.3 <> outlineColor black)
+                     $ Drawing.path
+                       [ {x: 0.0, y: 0.0}
+                       , {x: 0.0, y: (tailHeight * cdim.height)}]
+
 
       drawings :: Array (Tuple (Annot (score :: Number)) Point) -> Array DrawingN
       drawings = map drawing
@@ -387,7 +394,7 @@ renderAnnot verscale cdim annots =
       npointed = (map <<< map) (fanout id place) annots
         where place p = let p' = placeScored verscale p
                         in { x: p'.x
-                           , y: Normalized $ min 1.0 (unwrap p'.y + 0.1) }
+                           , y: Normalized $ min 1.0 (unwrap p'.y + tailHeight) }
 
       rescale :: Pair Number -> NPoint -> Point
       rescale seg npoint =

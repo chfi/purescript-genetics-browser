@@ -330,11 +330,11 @@ snpInfoHTML' assocAnnot snp =
              <> "<p>Annot. -log10: " <> show (negLog10 a.feature.score) <> "</p>"
 
 annotForSnp :: forall rA rS.
-               Map ChrId (Array (Annot rA))
+               Bp
+            -> Map ChrId (Array (Annot rA))
             -> GWASFeature rS
             -> Maybe (Annot rA)
-annotForSnp annotations {position, feature} = do
-  let radius = Bp 100000000.0
+annotForSnp radius annotations {position, feature} = do
   chr <- Map.lookup feature.chrId annotations
   Array.find (\a -> ((radius `aroundPair` a.position) `pairsOverlap` position)) chr
 
@@ -363,6 +363,8 @@ runBrowser config bc = launchAff $ do
   let cSys :: CoordSys ChrId BigInt
       cSys = coordSys mouseChrSizes
 
+      bumpRadius = Bp 50000000.0
+
   trackData <- do
     genes <- traverse (getGenes cSys) config.urls.genes
     gwas  <- traverse (getGWAS  cSys) config.urls.gwas
@@ -372,7 +374,7 @@ runBrowser config bc = launchAff $ do
     let annotations = zipMapsWith
                        (bumpFeatures (to _.feature.score)
                                       (SProxy :: SProxy "score")
-                                      (Bp 100000000.0))
+                                      bumpRadius)
                        <$> gwas <*> rawAnnotations
 
     pure { genes, gwas, annotations }
@@ -441,7 +443,7 @@ runBrowser config bc = launchAff $ do
     setWindow "mainBrowser" mainBrowser
     setWindow "debugView" (debugView initState)
 
-    let findAnnot = annotForSnp $ fromMaybe mempty trackData.annotations
+    let findAnnot = annotForSnp bumpRadius $ fromMaybe mempty trackData.annotations
 
     let glyphClick :: _
         glyphClick p = launchAff_ do

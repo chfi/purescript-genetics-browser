@@ -280,7 +280,7 @@ type Legend = { width :: Number
 mkIcon :: Color -> String -> LegendEntry
 mkIcon c text =
   let sh = circle 0.0 0.0 5.0
-      icon = outlined (outlineColor c <> lineWidth 2.0) sh <>
+      icon = outlined (outlineColor black <> lineWidth 2.0) sh <>
              filled (fillColor c) sh
   in {text, icon}
 

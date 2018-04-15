@@ -9,11 +9,10 @@ import Prelude
 import Control.Monad.Aff (Aff, delay)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
 import DOM.Node.Types (Element)
 import Data.Either (Either(..))
-import Data.Foldable (any, foldr, for_, or)
+import Data.Foldable (any, foldl, for_)
 import Data.Int as Int
 import Data.Lens (Lens', iso, view, (^.))
 import Data.Lens.Iso (Iso')
@@ -29,7 +28,6 @@ import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Genetics.Browser.Track.Backend (DrawingN, UISlots, Label)
 import Genetics.Browser.Types.Coordinates (CoordSysView, ViewScale, viewScale)
-import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -485,21 +483,6 @@ labelBox ctx {text, point} = do
          , w: width, h: height }
 
 
-renderLabel :: Label -> Context2D -> Eff _ Unit
-renderLabel l@{text, point} ctx = Canvas.withContext ctx do
-  box <- labelBox ctx l
-
-  _ <- Canvas.setFillStyle "red" ctx
-  _ <- Canvas.fillRect ctx box
-
-  _ <- Canvas.setFont labelFont ctx
-  _ <- Canvas.setFillStyle "black" ctx
-
-  -- TODO *should* change the contexts' textbaseline to hanging,
-  -- but too lazy to add FFI right now
-  void $ Canvas.fillText ctx text point.x (point.y + box.h)
-
-
 -- | Returns `true` if the input rectangles overlap
 isOverlapping :: Canvas.Rectangle
               -> Canvas.Rectangle
@@ -517,13 +500,17 @@ eqRectangle {x,y,w,h} r =
      x == r.x && y == r.y
   && w == r.w && h == r.h
 
--- | Checks to see if two rectangles are overlapping,
--- | returning a vector that, when added to the second rectangle's
--- | position, will move it to not overlap
--- collideRects :: Canvas.Rectangle
---              -> Canvas.Rectangle
---              -> Point
--- collideRects o r2 =
+
+appendBoxed :: forall r.
+               Array {rect :: Canvas.Rectangle | r}
+            -> {rect :: Canvas.Rectangle | r}
+            -> Array {rect :: Canvas.Rectangle | r}
+appendBoxed sofar next =
+  let overlapsAny :: Boolean
+      overlapsAny = any overlaps sofar
+        where overlaps r' = (not $ eqRectangle next.rect r'.rect)
+                            && next.rect `isOverlapping` r'.rect
+  in if overlapsAny then sofar else sofar <> [next]
 
 
 renderLabels :: Array Label -> Context2D -> Eff _ Unit
@@ -531,22 +518,17 @@ renderLabels ls ctx = do
 
   boxed <- traverse (\l -> {text: l.text, rect: _} <$> labelBox ctx l) ls
 
-  -- TODO run this on the boxes that *have been* rendered already; i.e. statefully
-  let overlapsAny :: _ -> Boolean
-      overlapsAny b1 = any overlaps boxed
-        where overlaps b2 = (not $ eqRectangle b1.rect b2.rect)
-                            && b1.rect `isOverlapping` b2.rect
+  let toRender = foldl appendBoxed [] boxed
 
   Canvas.withContext ctx do
     _ <- Canvas.setFont labelFont ctx
 
-    for_ boxed \box -> do
-      _ <- Canvas.setFillStyle (if overlapsAny box then "red" else "green") ctx
-      _ <- Canvas.fillRect ctx box.rect
-      _ <- Canvas.setFillStyle "black" ctx
-
-      void $ Canvas.fillText ctx box.text box.rect.x (box.rect.y + box.rect.h)
-
+    for_ toRender \box ->
+      -- TODO *should* change the contexts' textbaseline to hanging,
+      -- but too lazy to add FFI right now, hence `rect.h * 1.6`
+      Canvas.fillText ctx box.text
+        (box.rect.x - (box.rect.w / 2.0))
+        (box.rect.y + (box.rect.h * 1.6))
 
 
 type Renderable r = { drawings :: Array DrawingN, labels :: Array Label | r }
@@ -580,12 +562,8 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
 
     Drawing.render trackOverlayCtx ui.relativeUI
 
-    -- void $ labelBox trackOverlayCtx { text: "hello world", point: {x:0.0, y: 0.0}}
-
     -- NB: trackOverlayCtx is already translated to the track viewport
     renderLabels labels trackOverlayCtx
-
-
 
 
   -- Render the tracks
