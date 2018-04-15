@@ -30,6 +30,7 @@ import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, FillStyle, OutlineStyle, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
+import Math (pow)
 import Math as Math
 import Type.Prelude (class RowLacks)
 
@@ -123,12 +124,18 @@ horRulerTrack :: forall r.
               -> Color
               -> Canvas.Dimensions
               -> Drawing
-horRulerTrack {min, max, sig} color f = outlined outline rulerDrawing
+horRulerTrack {min, max, sig} color f = outlined outline rulerDrawing <> label
   where normY = (sig - min) / (max - min)
         thickness = 2.0
         outline = outlineColor color <> lineWidth thickness
         y = thickness + f.height - (normY * f.height)
         rulerDrawing = Drawing.path [{x: 0.0, y}, {x: f.width, y}]
+
+        expSig = 10.0 `pow` (-sig)
+        text  = "P = " <> (Num.toStringWith (Num.exponential 1) expSig)
+
+        font' = font sansSerif 16 mempty
+        label = Drawing.text font' (f.width+4.0) (y-6.0) (fillColor red) text
 
 
 chrLabelTrack :: CoordSys ChrId BigInt
@@ -460,7 +467,7 @@ browser cs trackDim overlayDim uiSlots ui renderers inputTracks =
       ruler   = Drawing.translate ui.vscale.width uiSlots.top.size.height
                 $ horRulerTrack ui.vscale red trackDim
 
-      fixedUI = ruler <> vScale <> legend
+      fixedUI = vScale <> legend <> ruler
 
 
       segmentPadding = 12.0
