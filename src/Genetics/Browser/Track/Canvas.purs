@@ -280,10 +280,14 @@ flipBuffer (BufferedCanvas {back, front}) = do
 -- | the browser shows a `width` pixels slice of the whole coordinate system.
 -- | `glyphBuffer` is what individual glyphs can be rendered to and copied from, for speed.
 newtype TrackCanvas =
-  TrackCanvas { canvas :: BufferedCanvas
-              , dimensions :: Canvas.Dimensions
-              , glyphBuffer  :: CanvasElement
+  TrackCanvas { canvas      :: BufferedCanvas
+              , dimensions  :: Canvas.Dimensions
+              , glyphBuffer :: CanvasElement
               }
+
+-- | using hardcoded inner padding for now; makes it look a bit better
+trackInnerPad :: Number
+trackInnerPad = 5.0
 
 derive instance newtypeTrackCanvas :: Newtype TrackCanvas _
 
@@ -292,6 +296,11 @@ _Dimensions :: forall n r1 r2.
             => Lens' n Canvas.Dimensions
 _Dimensions = _Newtype <<< Lens.prop (SProxy :: SProxy "dimensions")
 
+trackTotalDimensions :: Canvas.Dimensions -> Canvas.Dimensions
+trackTotalDimensions d = { width:  d.width  + extra
+                         , height: d.height + extra }
+  where extra = 2.0 * trackInnerPad
+
 -- TODO calculate based on glyph bounding boxes
 glyphBufferSize :: Canvas.Dimensions
 glyphBufferSize = { width: 100.0, height: 100.0 }
@@ -299,7 +308,7 @@ glyphBufferSize = { width: 100.0, height: 100.0 }
 trackCanvas :: Canvas.Dimensions
             -> Eff _ TrackCanvas
 trackCanvas dim = do
-  canvas <- createBufferedCanvas dim
+  canvas <- createBufferedCanvas $ trackTotalDimensions dim
   glyphBuffer <- createCanvas glyphBufferSize "glyphBuffer"
 
   pure $ TrackCanvas { dimensions: dim
@@ -309,12 +318,12 @@ setTrackCanvasSize :: Canvas.Dimensions
                    -> TrackCanvas
                    -> Eff _ TrackCanvas
 setTrackCanvasSize dim (TrackCanvas tc) = do
-  setBufferedCanvasSize dim tc.canvas
+  setBufferedCanvasSize (trackTotalDimensions dim) tc.canvas
   pure $ TrackCanvas
     $ tc { dimensions = dim }
 
 
-
+-- TODO change name to BrowserPadding
 type TrackPadding =
   { left :: Number, right :: Number
   , top :: Number, bottom :: Number }
@@ -418,7 +427,11 @@ browserCanvas dimensions trackPadding el = do
   setCanvasZIndex trackOverlayEl 20
   setCanvasZIndex staticOverlay 30
 
-  setCanvasPosition trackPadding trackEl
+  -- TODO handle this nicer maybe idk
+  let trackElPosition = { left: trackPadding.left - trackInnerPad
+                        , top:  trackPadding.top  - trackInnerPad }
+
+  setCanvasPosition trackElPosition trackEl
   setCanvasPosition { left: trackPadding.left, top: 0.0 } trackOverlayEl
   setCanvasPosition { left: 0.0, top: 0.0} staticOverlay
 
@@ -565,18 +578,20 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
     -- NB: trackOverlayCtx is already translated to the track viewport
     renderLabels labels trackOverlayCtx
 
-
   -- Render the tracks
   let bfr = (unwrap bc.track).canvas
       cnv = (unwrap bfr).front
 
+  -- TODO extract functions `clearTrack` and `translateTrack` that bake in padding
   ctx <- liftEff $ Canvas.getContext2D cnv
   liftEff do
     dim <- Canvas.getCanvasDimensions cnv
-    translateBuffer {x: zero, y: zero} bfr
-    clearCanvas ctx dim
 
-  liftEff $ translateBuffer {x: (-offset), y: zero} bfr
+    translateBuffer {x: zero, y: zero} bfr
+    clearCanvas ctx $ trackTotalDimensions dim
+
+  liftEff $ translateBuffer { x: trackInnerPad - offset
+                            , y: trackInnerPad } bfr
 
   let gwasTrack  = ui.tracks.gwas.drawings
       annotTrack = ui.tracks.annotations.drawings
