@@ -41,13 +41,13 @@ _Element :: Iso' CanvasElement Element
 _Element = iso unsafeCoerce unsafeCoerce
 
 -- | Create a new CanvasElement, not attached to the DOM, with the provided String as its CSS class
-foreign import createCanvas :: forall eff.
+foreign import createCanvas :: ∀ eff.
                                { width :: Number, height :: Number }
                             -> String
                             -> Eff eff CanvasElement
 
 
-foreign import setElementStyleImpl :: forall e.
+foreign import setElementStyleImpl :: ∀ e.
                                       EffFn3 e
                                       Element String String
                                       Unit
@@ -75,7 +75,7 @@ setCanvasStyle ce = setElementStyle (ce ^. _Element)
 setCanvasZIndex :: CanvasElement -> Int -> Eff _ Unit
 setCanvasZIndex ce i = setCanvasStyle ce "z-index" (show i)
 
-setCanvasPosition :: forall r.
+setCanvasPosition :: ∀ r.
                      { left :: Number, top :: Number | r }
                   -> CanvasElement
                   -> Eff _ Unit
@@ -86,29 +86,29 @@ setCanvasPosition {left, top} ce =
     , Tuple "left" (show left <> "px") ]
 
 
-foreign import appendCanvasElem :: forall e.
+foreign import appendCanvasElem :: ∀ e.
                                    Element
                                 -> CanvasElement
                                 -> Eff e Unit
 
 
 -- | Sets some of the browser container's CSS to reasonable defaults
-foreign import setContainerStyle :: forall e. Element -> Canvas.Dimensions -> Eff e Unit
+foreign import setContainerStyle :: ∀ e. Element -> Canvas.Dimensions -> Eff e Unit
 
 
-foreign import drawCopies :: forall eff a.
+foreign import drawCopies :: ∀ eff a.
                              EffFn4 eff
                              CanvasElement Canvas.Dimensions Context2D (Array Point)
                              Unit
 
 
-foreign import setCanvasTranslation :: forall e.
+foreign import setCanvasTranslation :: ∀ e.
                                        Point
                                     -> CanvasElement
                                     -> Eff e Unit
 
 
-foreign import canvasClickImpl :: forall e.
+foreign import canvasClickImpl :: ∀ e.
                                   EffFn2 e
                                   CanvasElement (Point -> Eff e Unit)
                                   Unit
@@ -133,7 +133,7 @@ browserOnClick (BrowserCanvas bc) {track, overlay} =
     track t
 
 
-foreign import scrollCanvasImpl :: forall e.
+foreign import scrollCanvasImpl :: ∀ e.
                                    EffFn3 e
                                    CanvasElement CanvasElement Point
                                    Unit
@@ -144,14 +144,14 @@ scrollCanvas :: BufferedCanvas
 scrollCanvas (BufferedCanvas bc) = runEffFn3 scrollCanvasImpl bc.back bc.front
 
 
-foreign import canvasDragImpl :: forall eff.
+foreign import canvasDragImpl :: ∀ eff.
                                  CanvasElement
                               -> ( { during :: Nullable Point
                                    , total :: Nullable Point } -> Eff eff Unit )
                               -> Eff eff Unit
 
 
-foreign import canvasWheelCBImpl :: forall eff.
+foreign import canvasWheelCBImpl :: ∀ eff.
                                     CanvasElement
                                  -> (Number -> Eff eff Unit)
                                  -> Eff eff Unit
@@ -291,7 +291,7 @@ trackInnerPad = 5.0
 
 derive instance newtypeTrackCanvas :: Newtype TrackCanvas _
 
-_Dimensions :: forall n r1 r2.
+_Dimensions :: ∀ n r1 r2.
                Newtype n { dimensions :: Canvas.Dimensions | r1 }
             => Lens' n Canvas.Dimensions
 _Dimensions = _Newtype <<< Lens.prop (SProxy :: SProxy "dimensions")
@@ -352,7 +352,7 @@ _Track :: Lens' BrowserCanvas TrackCanvas
 _Track = _Newtype <<< Lens.prop (SProxy :: SProxy "track")
 
 
-foreign import debugBrowserCanvas :: forall e.
+foreign import debugBrowserCanvas :: ∀ e.
                                      String
                                   -> BrowserCanvas
                                   -> Eff e Unit
@@ -444,12 +444,6 @@ browserCanvas dimensions trackPadding el = do
                        , trackOverlay, staticOverlay }
 
 
-trackViewScale :: BrowserCanvas
-               -> CoordSysView
-               -> ViewScale
-trackViewScale bc = viewScale $ bc ^. _Track <<< _Dimensions
-
-
 renderGlyphs :: TrackCanvas
              -> DrawingN
              -> Eff _ Unit
@@ -514,7 +508,7 @@ eqRectangle {x,y,w,h} r =
   && w == r.w && h == r.h
 
 
-appendBoxed :: forall r.
+appendBoxed :: ∀ r.
                Array {rect :: Canvas.Rectangle | r}
             -> {rect :: Canvas.Rectangle | r}
             -> Array {rect :: Canvas.Rectangle | r}
@@ -537,16 +531,14 @@ renderLabels ls ctx = do
     _ <- Canvas.setFont labelFont ctx
 
     for_ toRender \box ->
-      -- TODO *should* change the contexts' textbaseline to hanging,
-      -- but too lazy to add FFI right now, hence `rect.h * 1.6`
       Canvas.fillText ctx box.text
         (box.rect.x - (box.rect.w / 2.0))
-        (box.rect.y + (box.rect.h * 1.6))
+        box.rect.y
 
 
 type Renderable r = { drawings :: Array DrawingN, labels :: Array Label | r }
 
-renderBrowser :: forall a b c.
+renderBrowser :: ∀ a b c.
                  Milliseconds
               -> BrowserCanvas
               -> Number
@@ -575,8 +567,9 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
 
     Drawing.render trackOverlayCtx ui.relativeUI
 
-    -- NB: trackOverlayCtx is already translated to the track viewport
+    translateBuffer {x: (-offset), y: bc.trackPadding.top} bc.trackOverlay
     renderLabels labels trackOverlayCtx
+
 
   -- Render the tracks
   let bfr = (unwrap bc.track).canvas

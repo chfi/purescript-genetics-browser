@@ -152,7 +152,7 @@ fetchJsonChunks url = do
     Just ls -> pure $ chunkProducer 512 ls
 
 
-featureProd :: forall r1 r2.
+featureProd :: ∀ r1 r2.
                String
             -> (Json -> Maybe { feature :: { chrId :: ChrId | r1 } | r2 })
             -> Aff _
@@ -185,7 +185,7 @@ produceAnnots :: CoordSys ChrId _
 produceAnnots cs url = featureProd url $ (annotJSONParse cs)
 
 
-fetchJSON :: forall a.
+fetchJSON :: ∀ a.
              (Json -> Maybe a)
           -> String
           -> Aff _ (Array a)
@@ -266,14 +266,14 @@ getAnnotations cs url = groupToMap _.feature.chrId
 
 
 -- TODO Configgable Annotation -> LegendEntry function (somehow?!)
-annotLegendEntry :: forall r. Annot r -> LegendEntry
+annotLegendEntry :: ∀ r. Annot r -> LegendEntry
 annotLegendEntry a =
   if (String.length a.feature.name) `mod` 2 == 0
     then mkIcon blue "even name"
     else mkIcon red  "odd name"
 
 
-annotLegendTest :: forall f r.
+annotLegendTest :: ∀ f r.
                    Foldable f
                 => Functor f
                 => Map ChrId (f (Annot r))
@@ -290,7 +290,7 @@ annotLegendTest fs = trackLegend annotLegendEntry as
 ------------ new renderers~~~~~~~~~
 
 
-placeScored :: forall r1 r2.
+placeScored :: ∀ r1 r2.
             { min :: Number, max :: Number | r1 }
          -> Feature { score :: Number | r2 }
          -> NPoint
@@ -307,7 +307,7 @@ dist p1 p2 = Math.sqrt $ x' `Math.pow` 2.0 + y' `Math.pow` 2.0
 
 
 
-renderGWAS :: forall r.
+renderGWAS :: ∀ r.
               { min :: Number, max :: Number | r }
            -> Canvas.Dimensions
            -> Map ChrId (Array (GWASFeature ()))
@@ -360,7 +360,7 @@ renderGWAS verscale cdim snps =
 
 
 
-renderAnnot :: forall r.
+renderAnnot :: ∀ r.
                { min :: Number, max :: Number | r }
             -> Canvas.Dimensions
             -> Map ChrId (Array (Annot (score :: Number)))
@@ -377,15 +377,17 @@ renderAnnot verscale cdim annots =
         where lg = annotLegendEntry an
               tail = Drawing.outlined (lineWidth 1.3 <> outlineColor black)
                      $ Drawing.path
-                       [ {x: 0.0, y: 0.0}
-                       , {x: 0.0, y: (tailHeight * cdim.height)}]
+                       [ {x: 0.0, y: 0.0 }
+                       , {x: 0.0, y: tailHeight * cdim.height }]
 
 
       drawings :: Array (Tuple (Annot (score :: Number)) Point) -> Array DrawingN
       drawings = map drawing
 
       label :: Tuple (Annot (score :: Number)) Point -> Label
-      label (Tuple an {x,y}) = { text: an.feature.name, point: {x: x+0.0, y: y+0.0}  }
+      label (Tuple an {x,y}) =
+        { text: an.feature.name
+        , point: { x, y: y - 12.0 }  }
 
       labels :: Array (Tuple (Annot (score :: Number)) Point) -> Array Label
       labels = map label

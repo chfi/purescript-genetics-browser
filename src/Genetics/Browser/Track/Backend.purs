@@ -25,7 +25,7 @@ import Data.Symbol (class IsSymbol, SProxy(SProxy))
 import Data.Tuple (Tuple(..), snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Genetics.Browser.Types (Bp, ChrId)
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap, scaledSegments)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap, scaledSegments, scaledSegments', viewScale)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, FillStyle, OutlineStyle, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
@@ -430,10 +430,9 @@ type Renderer a =
      Canvas.Dimensions
   -> Map ChrId (Array a)
   -> Map ChrId (Pair Number)
-  -> { features :: Array a
-     , drawings :: Array DrawingN
-     , labels   :: Array Label
-     , overlaps :: Number -> Point -> Array a }
+  -> RenderedTrack a
+
+
 
 
 browser :: forall a b c.
@@ -446,10 +445,10 @@ browser :: forall a b c.
            , annotations :: Renderer b }
         -> { gwas        :: Map ChrId (Array a)
            , annotations :: Map ChrId (Array b) }
-        -> { tracks     :: Pair BigInt
+        -> { tracks     :: CoordSysView
                         -> { gwas :: RenderedTrack a
                            , annotations :: RenderedTrack b }
-           , relativeUI :: Pair BigInt -> Drawing
+           , relativeUI :: CoordSysView -> Drawing
            , fixedUI    :: Drawing }
 browser cs trackDim overlayDim uiSlots ui renderers inputTracks =
   let
@@ -472,11 +471,12 @@ browser cs trackDim overlayDim uiSlots ui renderers inputTracks =
 
       segmentPadding = 12.0
 
+      segmentPixels :: CoordSysView -> Map ChrId (Pair Number)
       segmentPixels vw =
         aroundPair (-segmentPadding)
-        <$> scaledSegments cs
-            { screenWidth: trackDim.width, viewWidth: pairSize vw }
+        <$> scaledSegments' cs (viewScale trackDim vw)
 
+      tracks :: CoordSysView -> _
       tracks =
         let gwasT  = renderers.gwas trackDim inputTracks.gwas
             annotT = renderers.annotations trackDim inputTracks.annotations
@@ -498,8 +498,8 @@ browser cs trackDim overlayDim uiSlots ui renderers inputTracks =
       chrLabels :: _
       chrLabels = renderUIElement $ chrLabelTrack cs trackDim
 
-      relativeUI :: Pair BigInt -> Drawing
-      relativeUI v = drawTrackUI v chrLabels
+      relativeUI :: CoordSysView -> Drawing
+      relativeUI v = drawTrackUI (unwrap v) chrLabels
 
   in { tracks
      , relativeUI

@@ -38,9 +38,9 @@ import Data.Traversable (for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Track.Backend (RenderedTrack, browser, bumpFeatures, negLog10, zipMapsWith)
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, trackViewScale, uiSlots, wheelZoom)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, aroundPair, coordSys, normalizeView, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy, viewScale)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -50,14 +50,13 @@ import Simple.JSON (read)
 
 
 
-foreign import windowInnerSize :: forall e.
-                                  Eff e Canvas.Dimensions
+foreign import windowInnerSize :: ∀ e. Eff e Canvas.Dimensions
 
 -- | Set an event to fire on the given button id
-foreign import buttonEvent :: forall eff.
+foreign import buttonEvent :: ∀ e.
                               String
-                           -> Eff eff Unit
-                           -> Eff eff Unit
+                           -> Eff e Unit
+                           -> Eff e Unit
 
 data UpdateView =
     ScrollView Number
@@ -135,13 +134,13 @@ mouseChrSizes =
       ]
 
 -- runs console.time() with the provided string, returns the effect to stop the timer
-foreign import timeEff :: forall eff. String -> Eff eff (Eff eff Unit)
+foreign import timeEff :: ∀ eff. String -> Eff eff (Eff eff Unit)
 
 type UIState e = { view :: AVar CoordSysView
                  , viewCmd :: AVar UpdateView
                  , viewReady :: AVar Unit
                  , renderFiber :: AVar (Fiber e Unit)
-                 -- , cachedTracks :: AVar { cachedScale :: ViewScale
+                 -- , cachedTracks :: AVar { cachedViewWidth :: BigInt
                  --                        , glyphs :: List (Array RenderedTrack) }
                  , lastOverlaps :: AVar (Number -> Point -> { gwas :: Array (GWASFeature ()) } )
                  }
@@ -157,7 +156,7 @@ showView :: CoordSysView -> String
 showView (CoordSysView (Pair l r)) = BigInt.toString l <> " - " <> BigInt.toString r
 
 
-_PairRec :: forall a. Iso' (Pair a) { l :: a, r :: a }
+_PairRec :: ∀ a. Iso' (Pair a) { l :: a, r :: a }
 _PairRec = iso (\(Pair l r) -> {l, r}) (\ {l, r} -> Pair l r)
 
 
@@ -189,15 +188,15 @@ debugView s = do
 
 
 
-uiViewUpdate :: forall r.
+uiViewUpdate :: ∀ r.
                 CoordSys _ BigInt
              -> Milliseconds
              -> { view :: AVar CoordSysView
                 , viewCmd :: AVar UpdateView
-                , viewReady :: AVar Unit| r }
+                , viewReady :: AVar Unit | r }
              -> Aff _ Unit
 uiViewUpdate cs timeout { view, viewCmd, viewReady } = do
-  curCmdVar <- makeVar mempty
+  curCmdVar <- makeVar (ModView id)
 
   let normView = normalizeView cs (BigInt.fromInt 200000)
       loop' updater = do
@@ -228,9 +227,9 @@ uiViewUpdate cs timeout { view, viewCmd, viewReady } = do
 
 
 renderLoop :: CoordSys _ _
-           -> { tracks     :: Pair BigInt -> { gwas :: RenderedTrack (GWASFeature ())
-                                             , annotations :: RenderedTrack (Annot (score :: Number)) }
-              , relativeUI :: Pair BigInt -> Drawing
+           -> { tracks     :: CoordSysView -> { gwas :: RenderedTrack (GWASFeature ())
+                                              , annotations :: RenderedTrack (Annot (score :: Number)) }
+              , relativeUI :: CoordSysView -> Drawing
               , fixedUI :: Drawing }
            -> BrowserCanvas
            -> UIState _
@@ -244,9 +243,7 @@ renderLoop cSys browser canvas state = forever do
   traverse_ (killFiber (error "Resetting renderer"))
     =<< tryTakeVar state.renderFiber
 
-  let uiScale = trackViewScale canvas csView
-
-  liftEff $ log $ "view scale is: " <> showViewScale uiScale
+  let viewWidth = pairSize $ unwrap csView
 
   {-
   -- if the view scale is unchanged, use the cached glyphs
@@ -254,48 +251,42 @@ renderLoop cSys browser canvas state = forever do
     cache <- AVar.tryTakeVar state.cachedTracks
     case cache of
       Just ct
-        | ct.cachedScale == uiScale -> do
+        | ct.cachedViewWidth == viewWidth -> do
             AVar.putVar ct state.cachedTracks
             pure ct.glyphs
       _ -> do
-        let cachedScale = uiScale
-            glyphs = browser.tracks (unwrap csView)
+        let cachedViewWidth = viewWidth
+            glyphs = browser.tracks csView
 
         AVar.putVar {cachedScale, glyphs} state.cachedTracks
         pure glyphs
   -}
 
-  let tracks' = browser.tracks (unwrap csView)
-
   -- fork a new renderFiber
 
-  let (Pair offset _) = pixelsView uiScale csView
+  let currentScale = viewScale (canvas ^. _Track <<< _Dimensions) csView
+      (Pair offset _) = pixelsView currentScale csView
 
-      relativeUI = browser.relativeUI (unwrap csView)
-      fixedUI = browser.fixedUI
+      tracks     = browser.tracks csView
+      relativeUI = browser.relativeUI csView
+      fixedUI    = browser.fixedUI
 
-      ui ::  { tracks     :: _
-             , relativeUI :: Drawing
-             , fixedUI :: Drawing }
-      ui = { tracks: tracks'
-           , relativeUI, fixedUI }
+      toRender = { tracks, relativeUI, fixedUI }
 
 
   _ <- AVar.tryTakeVar state.lastOverlaps
                     -- offset the click by the current canvas translation
   AVar.putVar (\n r -> let r' = {x: r.x + offset, y: r.y }
-                       in { gwas: tracks'.gwas.overlaps n r' }) state.lastOverlaps
+                       in { gwas: tracks.gwas.overlaps n r' }) state.lastOverlaps
 
   renderFiber <- forkAff
-                 $ renderBrowser (wrap 2.0) canvas offset ui
+                 $ renderBrowser (wrap 2.0) canvas offset toRender
 
   putVar renderFiber state.renderFiber
 
 
 
-
-
-printSNPInfo :: forall r. Array (GWASFeature r) -> Eff _ Unit
+printSNPInfo :: ∀ r. Array (GWASFeature r) -> Eff _ Unit
 printSNPInfo fs = do
   let n = length fs :: Int
       m = 5
@@ -309,7 +300,7 @@ printSNPInfo fs = do
   for_ (Array.take m fs) showSnp
 
 
-snpInfoHTML :: forall r. GWASFeature r -> String
+snpInfoHTML :: ∀ r. GWASFeature r -> String
 snpInfoHTML { position, feature } =
     "<p>SNP: "   <> feature.name <> "</p>"
  <> "<p>Chr: "   <> show feature.chrId <> "</p>"
@@ -318,7 +309,7 @@ snpInfoHTML { position, feature } =
  <> "<p>-log10: " <> show (negLog10 feature.score) <> "</p>"
 
 
-snpInfoHTML' :: forall rA rS.
+snpInfoHTML' :: ∀ rA rS.
                 (GWASFeature rS -> Maybe (Annot (score :: Number | rA)))
              -> GWASFeature rS
              -> String
@@ -329,7 +320,7 @@ snpInfoHTML' assocAnnot snp =
              <> "<p>Annot. score: " <> show a.feature.score <> "</p>"
              <> "<p>Annot. -log10: " <> show (negLog10 a.feature.score) <> "</p>"
 
-annotForSnp :: forall rA rS.
+annotForSnp :: ∀ rA rS.
                Bp
             -> Map ChrId (Array (Annot rA))
             -> GWASFeature rS
@@ -339,17 +330,15 @@ annotForSnp radius annotations {position, feature} = do
   Array.find (\a -> ((radius `aroundPair` a.position) `pairsOverlap` position)) chr
 
 
-foreign import setInfoBoxVisibility :: forall e. String -> Eff e Unit
-foreign import setInfoBoxContents :: forall e. String -> Eff e Unit
+foreign import setInfoBoxVisibility :: ∀ e. String -> Eff e Unit
+foreign import setInfoBoxContents :: ∀ e. String -> Eff e Unit
 
-foreign import initDebugDiv :: forall e. Number -> Eff e Unit
+foreign import initDebugDiv :: ∀ e. Number -> Eff e Unit
 
 
-foreign import setDebugDivVisibility :: forall e.
-                                        String -> Eff e Unit
+foreign import setDebugDivVisibility :: ∀ e. String -> Eff e Unit
 
-foreign import setDebugDivPoint :: forall e.
-                                   Point -> Eff e Unit
+foreign import setDebugDivPoint :: ∀ e. Point -> Eff e Unit
 
 
 -- TODO configure UI widths
@@ -492,7 +481,7 @@ type Conf = { browserHeight :: Number
             , urls :: DataURLs
             }
 
-foreign import setWindow :: forall e a. String -> a -> Eff e Unit
+foreign import setWindow :: ∀ e a. String -> a -> Eff e Unit
 
 
 initBrowser :: Foreign -> Eff _ _
@@ -522,7 +511,7 @@ initBrowser rawConfig = do
 
 
 -- TODO this could almost certainly be done better
-chunkConsumer :: forall m a.
+chunkConsumer :: ∀ m a.
                  Foldable m
               => Monoid (m a)
               => AVar (m a)
@@ -541,7 +530,7 @@ type TrackVar a = AVar (Map ChrId (Array a))
 type TrackProducer eff a = Producer (Map ChrId (Array a)) (Aff eff) Unit
 
 -- Feels like this one takes care of a bit too much...
-fetchLoop1 :: forall a.
+fetchLoop1 :: ∀ a.
               (Maybe (Aff _ (TrackProducer _ a)))
            -> Aff _ (TrackVar a)
 fetchLoop1 Nothing = AVar.makeEmptyVar
