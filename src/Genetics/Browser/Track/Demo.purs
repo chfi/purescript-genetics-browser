@@ -4,7 +4,7 @@ import Prelude
 
 import Color (Color, black)
 import Color.Scheme.Clrs (blue, navy, red)
-import Color.Scheme.X11 (darkgrey, lightgrey)
+import Color.Scheme.X11 (darkblue, darkgrey, lightgrey)
 import Control.Coroutine (Producer, transform, ($~), (~~))
 import Control.Monad.Aff (Aff, throwError)
 import Control.Monad.Eff.Exception (error)
@@ -317,10 +317,10 @@ renderGWAS verscale cdim snps =
   let features :: Array (GWASFeature ())
       features = fold snps
 
-      radius = 2.2
+      radius = 3.75
 
       drawing =
-          let color = navy
+          let color = darkblue
               c = circle 0.0 0.0 radius
               out = outlined (outlineColor color) c
               fill = filled (fillColor color) c
