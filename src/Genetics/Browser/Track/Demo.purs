@@ -12,7 +12,7 @@ import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Filterable (filterMap)
+import Data.Filterable (filter, filterMap)
 import Data.Foldable (class Foldable, fold, foldMap)
 import Data.Lens (view, (^?))
 import Data.Lens.Index (ix)
@@ -303,6 +303,16 @@ dist :: Point -> Point -> Number
 dist p1 p2 = Math.sqrt $ x' `Math.pow` 2.0 + y' `Math.pow` 2.0
   where x' = p1.x - p2.x
         y' = p1.y - p2.y
+
+
+
+filterSig :: ∀ r1 r2.
+             { sig :: Number | r1 }
+          -> Map ChrId (Array (GWASFeature r2))
+          -> Map ChrId (Array (GWASFeature r2))
+filterSig {sig} = map (filter isSignificant)
+  where sig' = 10.0 `Math.pow` (-sig)
+        isSignificant {feature} = feature.score <= sig'
 
 
 

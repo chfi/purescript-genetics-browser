@@ -23,7 +23,7 @@ import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
-import Data.Foldable (class Foldable, foldMap, length, null)
+import Data.Foldable (class Foldable, foldMap, length, null, sum)
 import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
 import Data.Lens (Iso', iso, re, to, (^.))
 import Data.Map (Map)
@@ -39,7 +39,7 @@ import Data.Traversable (for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj, on)
 import Genetics.Browser.Track.Backend (RenderedTrack, bumpFeatures, drawBrowser, negLog10, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, filterSig, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy, viewScale)
@@ -248,17 +248,17 @@ uiViewUpdate cs timeout { view, viewCmd, uiCmd } = do
 browserCache
   :: ∀ a b.
      (BrowserCanvas
-      -> { tracks     :: CoordSysView
-                         -> { gwas :: a
-                            , annotations :: b }
-         , relativeUI :: CoordSysView -> Drawing
+      -> CoordSysView
+      -> { tracks     :: { gwas :: a
+                         , annotations :: b }
+         , relativeUI :: Drawing
          , fixedUI :: Drawing })
      -> Aff _ (BrowserCanvas
-               -> Aff _ ({ tracks     :: CoordSysView
-                                         -> { gwas :: a
+               -> Aff _ (CoordSysView
+                         -> { tracks     :: { gwas :: a
                                             , annotations :: b }
-                         , relativeUI :: CoordSysView -> Drawing
-                         , fixedUI :: Drawing }))
+                            , relativeUI :: Drawing
+                            , fixedUI :: Drawing }))
 browserCache f = do
   bcDim <- AVar.makeEmptyVar
   lastOut <- AVar.makeEmptyVar
@@ -287,11 +287,11 @@ browserCache f = do
 
 renderLoop :: CoordSys _ _
            -> (BrowserCanvas
-               -> Aff _ { tracks     :: CoordSysView
-                                     -> { gwas :: RenderedTrack (GWASFeature ())
-                                        , annotations :: RenderedTrack (Annot (score :: Number)) }
-                        , relativeUI :: CoordSysView -> Drawing
-                        , fixedUI :: Drawing })
+               -> Aff _ (CoordSysView
+                         -> { tracks     :: { gwas :: RenderedTrack (GWASFeature ())
+                                            , annotations :: RenderedTrack (Annot (score :: Number)) }
+                            , relativeUI :: Drawing
+                            , fixedUI :: Drawing }))
            -> BrowserCanvas
            -> UIState _
            -> Aff _ Unit
@@ -303,18 +303,14 @@ renderLoop cSys drawCachedBrowser canvas state = forever do
                 let {height} = canvas ^. _Dimensions
                 canvas' <- liftEff $ setBrowserCanvasSize {width, height} canvas
                 putVar (inj _render unit) state.uiCmd
-                renderLoop cSys browser canvas' state)
+                renderLoop cSys drawCachedBrowser canvas' state)
         $ uiCmd
 
 
-  browser <- drawCachedBrowser canvas
 
-  csView <- readVar state.view
   -- if there's a rendering fiber running, we kill it
   traverse_ (killFiber (error "Resetting renderer"))
     =<< tryTakeVar state.renderFiber
-
-  let viewWidth = pairSize $ unwrap csView
 
   {-
   -- if the view scale is unchanged, use the cached glyphs
@@ -335,20 +331,18 @@ renderLoop cSys drawCachedBrowser canvas state = forever do
 
   -- fork a new renderFiber
 
+  csView <- readVar state.view
+
+  toRender <- (_ $ csView) <$> drawCachedBrowser canvas
+
   let currentScale = viewScale (canvas ^. _Track <<< _Dimensions) csView
       (Pair offset _) = pixelsView currentScale csView
-
-      tracks     = browser.tracks csView
-      relativeUI = browser.relativeUI csView
-      fixedUI    = browser.fixedUI
-
-      toRender = { tracks, relativeUI, fixedUI }
 
 
   _ <- AVar.tryTakeVar state.lastOverlaps
                     -- offset the click by the current canvas translation
   AVar.putVar (\n r -> let r' = {x: r.x + offset, y: r.y }
-                       in { gwas: tracks.gwas.overlaps n r' }) state.lastOverlaps
+                       in { gwas: toRender.tracks.gwas.overlaps n r' }) state.lastOverlaps
 
   renderFiber <- forkAff
                  $ renderBrowser (wrap 2.0) canvas offset toRender
@@ -437,6 +431,16 @@ runBrowser config bc = launchAff $ do
                                       bumpRadius)
                        <$> gwas <*> rawAnnotations
 
+    case gwas of
+      Nothing -> pure unit
+      Just snps -> do
+        let sigSnps = filterSig config.score snps
+
+        liftEff do
+          log $ "# total SNPs: " <> show (sum $ Array.length <$> snps)
+          log $ "# significant SNPs: " <> show (sum $ Array.length <$> sigSnps)
+
+
     pure { genes, gwas, annotations }
 
   let initialView :: CoordSysView
@@ -470,7 +474,6 @@ runBrowser config bc = launchAff $ do
 
   view <- makeVar initialView
   renderFiber <- makeEmptyVar
-  -- cachedTracks <- AVar.makeEmptyVar
   lastOverlaps <- AVar.makeEmptyVar
 
   let initState :: UIState _
@@ -541,13 +544,14 @@ runBrowser config bc = launchAff $ do
 
   _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
 
+
   cached <- browserCache mainBrowser
 
   _ <- forkAff $ renderLoop cSys cached bc initState
 
-
-
   pure unit
+
+
 
 type DataURLs = { gwas        :: Maybe String
                 , annotations :: Maybe String

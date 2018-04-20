@@ -426,7 +426,7 @@ type Renderer a =
 
 
 
-drawBrowser :: forall a b c.
+drawBrowser :: forall a b.
                CoordSys ChrId BigInt
             -> { legend :: Legend, vscale :: VScale }
             -> { gwas        :: Renderer a
@@ -434,10 +434,10 @@ drawBrowser :: forall a b c.
             -> { gwas        :: Map ChrId (Array a)
                , annotations :: Map ChrId (Array b) }
             -> BrowserCanvas
-            -> { tracks     :: CoordSysView
-                            -> { gwas :: RenderedTrack a
+            -> CoordSysView
+            -> { tracks     :: { gwas :: RenderedTrack a
                                , annotations :: RenderedTrack b }
-               , relativeUI :: CoordSysView -> Drawing
+               , relativeUI :: Drawing
                , fixedUI    :: Drawing }
 drawBrowser cs ui renderers inputTracks canvas =
   let
@@ -494,7 +494,7 @@ drawBrowser cs ui renderers inputTracks canvas =
       relativeUI :: CoordSysView -> Drawing
       relativeUI v = drawTrackUI (unwrap v) chrLabels
 
-  in { tracks
-     , relativeUI
-     , fixedUI
-     }
+  in \v -> { tracks: tracks v
+           , relativeUI: relativeUI v
+           , fixedUI
+           }
