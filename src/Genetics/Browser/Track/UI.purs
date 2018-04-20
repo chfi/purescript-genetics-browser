@@ -36,9 +36,10 @@ import Data.Pair as Pair
 import Data.Symbol (SProxy(..))
 import Data.Traversable (for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
+import Data.Variant (Variant, case_, inj, on)
 import Genetics.Browser.Track.Backend (RenderedTrack, browser, bumpFeatures, negLog10, zipMapsWith)
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, uiSlots, wheelZoom)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy, viewScale)
 import Global.Unsafe (unsafeStringify)
@@ -56,6 +57,13 @@ foreign import windowInnerSize :: ∀ e. Eff e Canvas.Dimensions
 foreign import buttonEvent :: ∀ e.
                               String
                            -> Eff e Unit
+                           -> Eff e Unit
+
+-- | Set callback to run after the window has resized (see UI.js for
+-- | time waited), providing it with the new window size.
+foreign import resizeEvent :: ∀ e.
+                              ({ width  :: Number
+                               , height :: Number } -> Eff e Unit)
                            -> Eff e Unit
 
 data UpdateView =
@@ -89,7 +97,7 @@ updateViewFold uv iv = case uv of
   ModView f    -> over CoordSysView f iv
 
 
-queueCmd :: AVar UpdateView -> UpdateView -> Eff _ Unit
+queueCmd :: ∀ a. AVar a -> a -> Eff _ Unit
 queueCmd av cmd = launchAff_ $ putVar cmd av
 
 
@@ -136,9 +144,20 @@ mouseChrSizes =
 -- runs console.time() with the provided string, returns the effect to stop the timer
 foreign import timeEff :: ∀ eff. String -> Eff eff (Eff eff Unit)
 
+
+
+type UICmdR = ( render :: Unit
+              , docResize :: { width :: Number, height :: Number } )
+
+_render = SProxy :: SProxy "render"
+_docResize = SProxy :: SProxy "docResize"
+
+
+
 type UIState e = { view :: AVar CoordSysView
                  , viewCmd :: AVar UpdateView
-                 , viewReady :: AVar Unit
+                 , uiCmd :: AVar (Variant UICmdR)
+                 -- , viewReady :: AVar Unit
                  , renderFiber :: AVar (Fiber e Unit)
                  -- , cachedTracks :: AVar { cachedViewWidth :: BigInt
                  --                        , glyphs :: List (Array RenderedTrack) }
@@ -158,7 +177,6 @@ showView (CoordSysView (Pair l r)) = BigInt.toString l <> " - " <> BigInt.toStri
 
 _PairRec :: ∀ a. Iso' (Pair a) { l :: a, r :: a }
 _PairRec = iso (\(Pair l r) -> {l, r}) (\ {l, r} -> Pair l r)
-
 
 
 debugView :: UIState _
@@ -181,11 +199,10 @@ debugView s = do
            Nothing -> pure unit
            Just _  -> do
              let v' = wrap $ lr ^. re _PairRec
-             _ <- AVar.tryPutVar unit s.viewReady
+             _ <- AVar.tryPutVar (inj _render unit) s.uiCmd
              AVar.putVar v' s.view
 
   pure {get, set}
-
 
 
 uiViewUpdate :: ∀ r.
@@ -193,9 +210,10 @@ uiViewUpdate :: ∀ r.
              -> Milliseconds
              -> { view :: AVar CoordSysView
                 , viewCmd :: AVar UpdateView
-                , viewReady :: AVar Unit | r }
+                , uiCmd :: AVar (Variant UICmdR) | r }
+                -- , viewReady :: AVar Unit | r }
              -> Aff _ Unit
-uiViewUpdate cs timeout { view, viewCmd, viewReady } = do
+uiViewUpdate cs timeout { view, viewCmd, uiCmd } = do
   curCmdVar <- makeVar (ModView id)
 
   let normView = normalizeView cs (BigInt.fromInt 200000)
@@ -218,7 +236,7 @@ uiViewUpdate cs timeout { view, viewCmd, viewReady } = do
 
             putVar vr' view
 
-            putVar unit viewReady
+            putVar (inj _render unit) uiCmd
             takeVar curCmdVar *> putVar mempty curCmdVar
 
         loop' updater'
@@ -236,7 +254,13 @@ renderLoop :: CoordSys _ _
            -> Aff _ Unit
 renderLoop cSys browser canvas state = forever do
 
-  _ <- takeVar state.viewReady
+  -- _ <- takeVar state.viewReady
+  uiCmd <- takeVar state.uiCmd
+  case_ # on _render (\_ -> pure unit)
+        # on _docResize (\d -> do
+                let {height} = canvas ^. _Dimensions
+                void $ liftEff $ setBrowserCanvasSize {width: d.width, height} canvas)
+        $ uiCmd
 
   csView <- readVar state.view
   -- if there's a rendering fiber running, we kill it
@@ -373,7 +397,8 @@ runBrowser config bc = launchAff $ do
       trackDims = bc ^. _Track <<< _Dimensions
 
   viewCmd <- makeEmptyVar
-  liftEff $ do
+
+  liftEff do
     btnScroll 0.05 viewCmd
     btnZoom   0.10 viewCmd
 
@@ -388,14 +413,22 @@ runBrowser config bc = launchAff $ do
           queueCmd viewCmd $ ZoomView $ 1.0 + scrollZoomScale * dY
     wheelZoom bc wheelCB
 
+
+  uiCmd <- makeVar (inj _render unit)
+
+  liftEff do
+    resizeEvent \d -> do
+      log $ "resized to: " <> unsafeStringify d
+      queueCmd uiCmd (inj _docResize d)
+
+
   view <- makeVar initialView
-  viewReady <- makeVar unit
   renderFiber <- makeEmptyVar
   -- cachedTracks <- AVar.makeEmptyVar
   lastOverlaps <- AVar.makeEmptyVar
 
   let initState :: UIState _
-      initState = { view, viewCmd, viewReady, renderFiber, lastOverlaps }
+      initState = { view, viewCmd, uiCmd, renderFiber, lastOverlaps }
 
   let
       slots = uiSlots bc
@@ -430,7 +463,6 @@ runBrowser config bc = launchAff $ do
 
   liftEff do
     setWindow "mainBrowser" mainBrowser
-    setWindow "debugView" (debugView initState)
 
     let findAnnot = annotForSnp bumpRadius $ fromMaybe mempty trackData.annotations
 

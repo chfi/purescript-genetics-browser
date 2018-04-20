@@ -388,6 +388,7 @@ setBrowserCanvasSize :: Canvas.Dimensions
                      -> Eff _ BrowserCanvas
 setBrowserCanvasSize dim (BrowserCanvas bc) = do
 
+  -- TODO resize parent element as well
   let trackDim = subtractPadding dim bc.trackPadding
 
   track <- setTrackCanvasSize trackDim bc.track
@@ -398,6 +399,7 @@ setBrowserCanvasSize dim (BrowserCanvas bc) = do
   pure $ BrowserCanvas
        $ bc { dimensions = dim
             , track = track }
+
 
 
 -- | Creates a `BrowserCanvas` and appends it to the provided element.

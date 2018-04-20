@@ -11,6 +11,16 @@ exports.buttonEvent = function(id) {
     };
 };
 
+
+exports.resizeEvent = function(cb) {
+    return function() {
+        var resizeTimeout = null;
+        window.addEventListener('resize', function(ev) {
+            cb(exports.windowInnerSize())();
+        });
+    };
+};
+
 exports.windowInnerSize = function() {
     var w = window.innerWidth;
     var h = window.innerHeight;
