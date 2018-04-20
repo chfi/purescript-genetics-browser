@@ -24,6 +24,8 @@ import Data.Record as Record
 import Data.Symbol (class IsSymbol, SProxy(SProxy))
 import Data.Tuple (Tuple(..), snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas(..), UISlot, UISlots, _Dimensions, _Track)
+import Genetics.Browser.Track.UI.Canvas as Canvas
 import Genetics.Browser.Types (Bp, ChrId)
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap, scaledSegments, scaledSegments', viewScale)
 import Graphics.Canvas as Canvas
@@ -139,9 +141,8 @@ horRulerTrack {min, max, sig} color f = outlined outline rulerDrawing <> label
 
 
 chrLabelTrack :: CoordSys ChrId BigInt
-              -> Canvas.Dimensions
               -> Map ChrId (Array NormalizedGlyph)
-chrLabelTrack cs cdim =
+chrLabelTrack cs =
   let font' = font sansSerif 12 mempty
 
       chrText :: ChrId -> Drawing
@@ -402,15 +403,6 @@ withPixelSegments cs cdim bView =
   in flip foldMapWithIndex (scaledSegments cs scale)
 
 
-
-type UISlot = { offset :: Point
-              , size   :: Canvas.Dimensions }
-
-type UISlots = { left   :: UISlot
-               , right  :: UISlot
-               , top    :: UISlot
-               , bottom :: UISlot }
-
 --------------------------
 
 
@@ -434,24 +426,25 @@ type Renderer a =
 
 
 
-
-browser :: forall a b c.
-           CoordSys ChrId BigInt
-        -> Canvas.Dimensions
-        -> Canvas.Dimensions
-        -> UISlots
-        -> { legend :: Legend, vscale :: VScale }
-        -> { gwas        :: Renderer a
-           , annotations :: Renderer b }
-        -> { gwas        :: Map ChrId (Array a)
-           , annotations :: Map ChrId (Array b) }
-        -> { tracks     :: CoordSysView
-                        -> { gwas :: RenderedTrack a
-                           , annotations :: RenderedTrack b }
-           , relativeUI :: CoordSysView -> Drawing
-           , fixedUI    :: Drawing }
-browser cs trackDim overlayDim uiSlots ui renderers inputTracks =
+drawBrowser :: forall a b c.
+               CoordSys ChrId BigInt
+            -> { legend :: Legend, vscale :: VScale }
+            -> { gwas        :: Renderer a
+               , annotations :: Renderer b }
+            -> { gwas        :: Map ChrId (Array a)
+               , annotations :: Map ChrId (Array b) }
+            -> BrowserCanvas
+            -> { tracks     :: CoordSysView
+                            -> { gwas :: RenderedTrack a
+                               , annotations :: RenderedTrack b }
+               , relativeUI :: CoordSysView -> Drawing
+               , fixedUI    :: Drawing }
+drawBrowser cs ui renderers inputTracks canvas =
   let
+      uiSlots = Canvas.uiSlots canvas
+      trackDim = canvas ^. _Track <<< _Dimensions
+      overlayDim = canvas ^. _Dimensions
+
       drawInSlot {offset, size} d =
           (translate offset.x offset.y
            $ filled (fillColor white)
@@ -496,7 +489,7 @@ browser cs trackDim overlayDim uiSlots ui renderers inputTracks =
         where f {drawing, point} = Drawing.translate point.x point.y (drawing unit)
 
       chrLabels :: _
-      chrLabels = renderUIElement $ chrLabelTrack cs trackDim
+      chrLabels = renderUIElement $ chrLabelTrack cs
 
       relativeUI :: CoordSysView -> Drawing
       relativeUI v = drawTrackUI (unwrap v) chrLabels

@@ -14,10 +14,21 @@ exports.buttonEvent = function(id) {
 
 exports.resizeEvent = function(cb) {
     return function() {
+        var resizeDelay = 500; // ms delay before running resize logic
         var resizeTimeout = null;
-        window.addEventListener('resize', function(ev) {
-            cb(exports.windowInnerSize())();
-        });
+
+        var throttled = function() {
+            if (resizeTimeout) {
+                clearTimeout(resizeTimeout);
+            }
+
+            resizeTimeout = setTimeout(function() {
+                resizeTimeout = null;
+                cb(exports.windowInnerSize())();
+                }, resizeDelay);
+        };
+
+        window.addEventListener('resize', throttled, false);
     };
 };
 

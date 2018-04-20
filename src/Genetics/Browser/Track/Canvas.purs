@@ -26,7 +26,6 @@ import Data.Symbol (SProxy(..))
 import Data.Time.Duration (Milliseconds)
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple), uncurry)
-import Genetics.Browser.Track.Backend (DrawingN, UISlots, Label)
 import Genetics.Browser.Types.Coordinates (CoordSysView, ViewScale, viewScale)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
@@ -366,6 +365,16 @@ subtractPadding {width, height} pad =
   { width:  width - pad.left - pad.right
   , height: height - pad.top - pad.bottom }
 
+
+type UISlot = { offset :: Point
+              , size   :: Canvas.Dimensions }
+
+type UISlots = { left   :: UISlot
+               , right  :: UISlot
+               , top    :: UISlot
+               , bottom :: UISlot }
+
+
 uiSlots :: BrowserCanvas
         -> UISlots
 uiSlots (BrowserCanvas bc) =
@@ -449,7 +458,7 @@ browserCanvas dimensions trackPadding el = do
 
 
 renderGlyphs :: TrackCanvas
-             -> DrawingN
+             -> { drawing :: Drawing, points :: Array Point }
              -> Eff _ Unit
 renderGlyphs (TrackCanvas tc) {drawing, points} = do
   glyphBfr <- Canvas.getContext2D tc.glyphBuffer
@@ -468,6 +477,8 @@ renderGlyphs (TrackCanvas tc) {drawing, points} = do
   runEffFn4 drawCopies tc.glyphBuffer glyphBufferSize ctx points
 
 
+
+type Label = { text :: String, point :: Point }
 
 -- hardcoded global label font for now
 -- can't use Drawing.Font because we need raw Canvas to measure the text size,
@@ -540,7 +551,10 @@ renderLabels ls ctx = do
         box.rect.y
 
 
-type Renderable r = { drawings :: Array DrawingN, labels :: Array Label | r }
+type Renderable r = { drawings :: Array { drawing :: Drawing
+                                        , points :: Array Point }
+                    , labels :: Array { text :: String
+                                      , point :: Point } | r }
 
 renderBrowser :: ∀ a b c.
                  Milliseconds

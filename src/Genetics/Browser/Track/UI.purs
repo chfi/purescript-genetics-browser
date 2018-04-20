@@ -33,15 +33,16 @@ import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (over, unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
+import Data.Record.Extra (eqRecord)
 import Data.Symbol (SProxy(..))
 import Data.Traversable (for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj, on)
-import Genetics.Browser.Track.Backend (RenderedTrack, browser, bumpFeatures, negLog10, zipMapsWith)
+import Genetics.Browser.Track.Backend (RenderedTrack, bumpFeatures, drawBrowser, negLog10, zipMapsWith)
 import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy, viewScale)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy, viewScale)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -154,11 +155,10 @@ _docResize = SProxy :: SProxy "docResize"
 
 
 
-type UIState e = { view :: AVar CoordSysView
-                 , viewCmd :: AVar UpdateView
-                 , uiCmd :: AVar (Variant UICmdR)
-                 -- , viewReady :: AVar Unit
-                 , renderFiber :: AVar (Fiber e Unit)
+type UIState e = { view         :: AVar CoordSysView
+                 , viewCmd      :: AVar UpdateView
+                 , uiCmd        :: AVar (Variant UICmdR)
+                 , renderFiber  :: AVar (Fiber e Unit)
                  -- , cachedTracks :: AVar { cachedViewWidth :: BigInt
                  --                        , glyphs :: List (Array RenderedTrack) }
                  , lastOverlaps :: AVar (Number -> Point -> { gwas :: Array (GWASFeature ()) } )
@@ -244,17 +244,59 @@ uiViewUpdate cs timeout { view, viewCmd, uiCmd } = do
   loop' (pure unit)
 
 
+
+browserCache
+  :: ∀ a b.
+     (BrowserCanvas
+      -> { tracks     :: CoordSysView
+                         -> { gwas :: a
+                            , annotations :: b }
+         , relativeUI :: CoordSysView -> Drawing
+         , fixedUI :: Drawing })
+     -> Aff _ (BrowserCanvas
+               -> Aff _ ({ tracks     :: CoordSysView
+                                         -> { gwas :: a
+                                            , annotations :: b }
+                         , relativeUI :: CoordSysView -> Drawing
+                         , fixedUI :: Drawing }))
+browserCache f = do
+  bcDim <- AVar.makeEmptyVar
+  lastOut <- AVar.makeEmptyVar
+
+  pure \bc -> do
+    let newBCDim = bc ^. _Dimensions
+    oldBCDim <- AVar.tryTakeVar bcDim
+    AVar.putVar newBCDim bcDim
+
+    oldOut <- AVar.tryTakeVar lastOut
+
+    out' <- case oldBCDim, oldOut of
+      Just d, Just o -> do
+        let changed = not $ d `eqRecord` newBCDim
+        liftEff $ log $ "Cache changed? " <> (show changed)
+        pure $ if d `eqRecord` newBCDim then o else f bc
+
+      _, _ -> do
+        liftEff $ log "Cache was empty! Recalculating"
+        pure $ f bc
+
+    AVar.putVar out' lastOut
+    pure out'
+
+
+
 renderLoop :: CoordSys _ _
-           -> { tracks     :: CoordSysView -> { gwas :: RenderedTrack (GWASFeature ())
-                                              , annotations :: RenderedTrack (Annot (score :: Number)) }
-              , relativeUI :: CoordSysView -> Drawing
-              , fixedUI :: Drawing }
+           -> (BrowserCanvas
+               -> Aff _ { tracks     :: CoordSysView
+                                     -> { gwas :: RenderedTrack (GWASFeature ())
+                                        , annotations :: RenderedTrack (Annot (score :: Number)) }
+                        , relativeUI :: CoordSysView -> Drawing
+                        , fixedUI :: Drawing })
            -> BrowserCanvas
            -> UIState _
            -> Aff _ Unit
-renderLoop cSys browser canvas state = forever do
+renderLoop cSys drawCachedBrowser canvas state = forever do
 
-  -- _ <- takeVar state.viewReady
   uiCmd <- takeVar state.uiCmd
   case_ # on _render (\_ -> pure unit)
         # on _docResize (\ {width} -> do
@@ -263,6 +305,9 @@ renderLoop cSys browser canvas state = forever do
                 putVar (inj _render unit) state.uiCmd
                 renderLoop cSys browser canvas' state)
         $ uiCmd
+
+
+  browser <- drawCachedBrowser canvas
 
   csView <- readVar state.view
   -- if there's a rendering fiber running, we kill it
@@ -419,8 +464,7 @@ runBrowser config bc = launchAff $ do
   uiCmd <- makeVar (inj _render unit)
 
   liftEff do
-    resizeEvent \d -> do
-      log $ "resized to: " <> unsafeStringify d
+    resizeEvent \d ->
       queueCmd uiCmd (inj _docResize d)
 
 
@@ -451,13 +495,12 @@ runBrowser config bc = launchAff $ do
 
 
       mainBrowser :: _
-      mainBrowser = browser cSys
-                     trackDims (bc ^. _Dimensions)
-                     (uiSlots bc) {legend, vscale}
-                     { gwas: renderGWAS vscale
-                     , annotations: renderAnnot vscale }
-                     { gwas: fromMaybe mempty trackData.gwas
-                     , annotations: fromMaybe mempty trackData.annotations }
+      mainBrowser = drawBrowser cSys {legend, vscale}
+                      { gwas: renderGWAS vscale
+                      , annotations: renderAnnot vscale }
+                      { gwas: fromMaybe mempty trackData.gwas
+                      , annotations: fromMaybe mempty trackData.annotations }
+
 
 
       viewTimeout :: Milliseconds
@@ -498,7 +541,10 @@ runBrowser config bc = launchAff $ do
 
   _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
 
-  _ <- forkAff $ renderLoop cSys mainBrowser bc initState
+  cached <- browserCache mainBrowser
+
+  _ <- forkAff $ renderLoop cSys cached bc initState
+
 
 
   pure unit
