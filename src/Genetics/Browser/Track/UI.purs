@@ -257,9 +257,11 @@ renderLoop cSys browser canvas state = forever do
   -- _ <- takeVar state.viewReady
   uiCmd <- takeVar state.uiCmd
   case_ # on _render (\_ -> pure unit)
-        # on _docResize (\d -> do
+        # on _docResize (\ {width} -> do
                 let {height} = canvas ^. _Dimensions
-                void $ liftEff $ setBrowserCanvasSize {width: d.width, height} canvas)
+                canvas' <- liftEff $ setBrowserCanvasSize {width, height} canvas
+                putVar (inj _render unit) state.uiCmd
+                renderLoop cSys browser canvas' state)
         $ uiCmd
 
   csView <- readVar state.view

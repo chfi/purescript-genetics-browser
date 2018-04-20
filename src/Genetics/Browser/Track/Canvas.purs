@@ -343,6 +343,7 @@ newtype BrowserCanvas =
                 , dimensions    :: Canvas.Dimensions
                 , staticOverlay :: CanvasElement
                 , trackOverlay  :: BufferedCanvas
+                , container :: Element
                 }
 
 
@@ -388,7 +389,7 @@ setBrowserCanvasSize :: Canvas.Dimensions
                      -> Eff _ BrowserCanvas
 setBrowserCanvasSize dim (BrowserCanvas bc) = do
 
-  -- TODO resize parent element as well
+  setContainerStyle bc.container dim
   let trackDim = subtractPadding dim bc.trackPadding
 
   track <- setTrackCanvasSize trackDim bc.track
@@ -443,7 +444,8 @@ browserCanvas dimensions trackPadding el = do
 
   pure $ BrowserCanvas { dimensions
                        , track, trackPadding
-                       , trackOverlay, staticOverlay }
+                       , trackOverlay, staticOverlay
+                       , container: el}
 
 
 renderGlyphs :: TrackCanvas

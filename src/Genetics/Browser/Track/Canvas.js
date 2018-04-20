@@ -32,7 +32,7 @@ exports.setContainerStyle = function(e) {
             e.style.display  = "block";
             e.style.margin   = "0";
             e.style.padding  = "0";
-            e.style.width = dim.width + "px";
+            e.style.width = (dim.width - 2) + "px"; // remove 2px for the border
             e.style.height = dim.height + "px";
         };
     };
