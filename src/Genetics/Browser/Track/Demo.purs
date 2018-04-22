@@ -12,8 +12,8 @@ import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Filterable (filter, filterMap)
-import Data.Foldable (class Foldable, fold, foldMap)
+import Data.Filterable (class Filterable, filter, filterMap)
+import Data.Foldable (class Foldable, any, fold, foldMap, or)
 import Data.Lens (view, (^?))
 import Data.Lens.Index (ix)
 import Data.Map (Map)
@@ -30,7 +30,7 @@ import Data.Variant (inj)
 import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, Label, _range, _single, groupToMap, mkIcon, negLog10, trackLegend, zipMapsWith)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, pairSize)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
@@ -263,6 +263,34 @@ getAnnotations :: CoordSys ChrId BigInt -> String
                -> Aff _ (Map ChrId (Array (Annot ())))
 getAnnotations cs url = groupToMap _.feature.chrId
                         <$> fetchAnnotJSON cs url
+
+
+getAnnotations' :: CoordSys ChrId BigInt
+                -> String
+                -> Aff _ (Array (Annot ()))
+getAnnotations' = fetchAnnotJSON
+
+
+
+
+inRangeOf :: ∀ rA rB.
+             Bp
+          -> { position :: Pair Bp | rA }
+          -> { position :: Pair Bp | rB }
+          -> Boolean
+inRangeOf r a b = pairsOverlap a.position
+                             $ r `aroundPair` b.position
+
+
+interestingAnnots :: ∀ rA rS f.
+                     Filterable f
+                  => Bp
+                  -> Map ChrId (Array (GWASFeature rS))
+                  -> f (Annot rA)
+                  -> f (Annot rA)
+interestingAnnots radius snps = filter (any (any (inRangeOf radius)) snps)
+
+
 
 
 -- TODO Configgable Annotation -> LegendEntry function (somehow?!)

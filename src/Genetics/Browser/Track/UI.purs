@@ -25,14 +25,16 @@ import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
 import Data.Foldable (class Foldable, foldMap, length, null, sum)
 import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
+import Data.Generic.Rep (class Generic)
 import Data.Lens (Iso', iso, re, to, (^.))
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
-import Data.Newtype (over, unwrap, wrap)
+import Data.Newtype (class Newtype, over, unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
+import Data.Profunctor.Star (Star(..))
 import Data.Record.Extra (eqRecord)
 import Data.Symbol (SProxy(..))
 import Data.Traversable (for_, traverse, traverse_)
@@ -245,12 +247,86 @@ uiViewUpdate cs timeout { view, viewCmd, uiCmd } = do
 
 
 
+
+
+                         -- This is Star (Aff e) a b!
+-- newtype AffCache e a b = AffCache (a -> Aff e b)
+
+
+affCacheStar :: ∀ e a b.
+                (a -> a -> Boolean)
+             -> (a -> b)
+             -> Aff _ (Star (Aff _) a b)
+affCacheStar diff f = do
+  inVar  <- AVar.makeEmptyVar
+  outVar <- AVar.makeEmptyVar
+
+  let cache = \a -> do
+        lastIn  <- AVar.tryTakeVar inVar
+        lastOut <- AVar.tryTakeVar outVar
+        let o = case lastIn, lastOut of
+                  Just i, Just o -> if diff a i then f a else o
+                  _, _ -> f a
+
+        AVar.putVar a inVar
+        AVar.putVar o outVar
+        pure o
+
+  pure $ Star cache
+
+cachedStar :: ∀ a b. Star (Aff _) a b -> a -> Aff _ b
+cachedStar = unwrap
+
+
+
+
+-- newtype AffCache a b =
+--   AffCache { diff :: a -> a -> Boolean
+--            , cache :: ∀ e. a -> Aff (avar :: AVAR | e) b }
+
+newtype AffCache e a b =
+  AffCache { diff :: a -> a -> Boolean
+           , cache :: a -> Aff e b }
+
+derive instance newtypeAffCache :: Newtype (AffCache e a b) _
+derive instance genericAffCache :: Generic (AffCache e a b) _
+
+derive instance functorAffCache :: Functor (AffCache e a)
+
+cacheFun :: ∀ e a b.
+            (a -> a -> Boolean)
+         -> (a -> b)
+         -> Aff _ (AffCache _ a b)
+cacheFun diff f = do
+  inVar  <- AVar.makeEmptyVar
+  outVar <- AVar.makeEmptyVar
+
+  let cache = \a -> do
+        lastIn  <- AVar.tryTakeVar inVar
+        lastOut <- AVar.tryTakeVar outVar
+        let o = case lastIn, lastOut of
+                  Just i, Just o -> if diff a i then f a else o
+                  _, _ -> f a
+
+        AVar.putVar a inVar
+        AVar.putVar o outVar
+        pure o
+
+  pure $ AffCache { diff, cache }
+
+
+cached :: ∀ a b.
+          AffCache _ a b
+       -> a -> Aff _ b
+cached = _.cache <<< unwrap
+
+
 browserCache
   :: ∀ a b.
      (BrowserCanvas
       -> CoordSysView
-      -> { tracks     :: { gwas :: a
-                         , annotations :: b }
+      -> { tracks :: { gwas :: a
+                     , annotations :: b }
          , relativeUI :: Drawing
          , fixedUI :: Drawing })
      -> Aff _ (BrowserCanvas
