@@ -322,6 +322,8 @@ cached :: ∀ a b.
 cached = _.cache <<< unwrap
 
 
+
+
 browserCache
   :: ∀ a b.
      (BrowserCanvas
@@ -331,44 +333,75 @@ browserCache
          , relativeUI :: Drawing
          , fixedUI :: Drawing })
      -> Aff _ (BrowserCanvas
-               -> Aff _ (CoordSysView
-                         -> { tracks     :: { gwas :: a
-                                            , annotations :: b }
-                            , relativeUI :: Drawing
-                            , fixedUI :: Drawing }))
+               -> CoordSysView
+               -> Aff _ ({ tracks :: { gwas :: a
+                                     , annotations :: b }
+                         , relativeUI :: Drawing
+                         , fixedUI :: Drawing }))
 browserCache f = do
   bcDim <- AVar.makeEmptyVar
-  lastOut <- AVar.makeEmptyVar
+  viewSize <- AVar.makeEmptyVar
 
-  pure \bc -> do
+  lastPartial <- AVar.makeEmptyVar
+  lastFinal <- AVar.makeEmptyVar
+
+  pure \bc csv -> do
+
     let newBCDim = bc ^. _Dimensions
     oldBCDim <- AVar.tryTakeVar bcDim
     AVar.putVar newBCDim bcDim
 
-    oldOut <- AVar.tryTakeVar lastOut
+    oldPartial <- AVar.tryTakeVar lastPartial
 
-    out' <- case oldBCDim, oldOut of
+    partial <- case oldBCDim, oldPartial of
       Just d, Just o -> do
         let changed = not $ d `eqRecord` newBCDim
-        liftEff $ log $ "Cache changed? " <> (show changed)
+        liftEff $ log $ "BrowserCanvas changed? " <> (show changed)
+        -- remove the cached final output value on canvas resize,
+        -- since we need to recalculate everything
+        when changed (void $ AVar.tryTakeVar lastFinal)
         pure $ if d `eqRecord` newBCDim then o else f bc
 
       _, _ -> do
-        liftEff $ log "Cache was empty! Recalculating"
+        liftEff $ log "Cache was empty! Recalculating all"
+        _ <- AVar.tryTakeVar lastFinal
         pure $ f bc
 
-    AVar.putVar out' lastOut
-    pure out'
+    AVar.putVar partial lastPartial
+
+    let newViewSize = pairSize $ unwrap csv
+    oldViewSize <- AVar.tryTakeVar viewSize
+    AVar.putVar newViewSize viewSize
+
+    oldFinal <- AVar.tryTakeVar lastFinal
+
+    output <- case oldViewSize, oldFinal of
+      Just vs, Just o -> do
+        let changed = newViewSize /= vs
+        liftEff $ log $ "CoordSysView changed? " <> (show changed)
+        pure $ if not changed then o else partial csv
+
+      _, _ -> do
+        liftEff $ log "Cache was empty! Recalculating tracks"
+        pure $ partial csv
+
+
+
+
+    AVar.putVar output lastFinal
+
+    pure output
 
 
 
 renderLoop :: CoordSys _ _
            -> (BrowserCanvas
-               -> Aff _ (CoordSysView
-                         -> { tracks     :: { gwas :: RenderedTrack (GWASFeature ())
-                                            , annotations :: RenderedTrack (Annot (score :: Number)) }
-                            , relativeUI :: Drawing
-                            , fixedUI :: Drawing }))
+               -> CoordSysView
+               -> Aff _ ({ tracks ::
+                              { gwas :: RenderedTrack (GWASFeature ())
+                              , annotations :: RenderedTrack (Annot (score :: Number)) }
+                         , relativeUI :: Drawing
+                         , fixedUI :: Drawing }))
            -> BrowserCanvas
            -> UIState _
            -> Aff _ Unit
@@ -383,44 +416,23 @@ renderLoop cSys drawCachedBrowser canvas state = forever do
                 renderLoop cSys drawCachedBrowser canvas' state)
         $ uiCmd
 
-
-
   -- if there's a rendering fiber running, we kill it
   traverse_ (killFiber (error "Resetting renderer"))
     =<< tryTakeVar state.renderFiber
 
-  {-
-  -- if the view scale is unchanged, use the cached glyphs
-  tracks' <- do
-    cache <- AVar.tryTakeVar state.cachedTracks
-    case cache of
-      Just ct
-        | ct.cachedViewWidth == viewWidth -> do
-            AVar.putVar ct state.cachedTracks
-            pure ct.glyphs
-      _ -> do
-        let cachedViewWidth = viewWidth
-            glyphs = browser.tracks csView
-
-        AVar.putVar {cachedScale, glyphs} state.cachedTracks
-        pure glyphs
-  -}
-
-  -- fork a new renderFiber
 
   csView <- readVar state.view
-
-  toRender <- (_ $ csView) <$> drawCachedBrowser canvas
+  toRender <- drawCachedBrowser canvas csView
 
   let currentScale = viewScale (canvas ^. _Track <<< _Dimensions) csView
       (Pair offset _) = pixelsView currentScale csView
-
 
   _ <- AVar.tryTakeVar state.lastOverlaps
                     -- offset the click by the current canvas translation
   AVar.putVar (\n r -> let r' = {x: r.x + offset, y: r.y }
                        in { gwas: toRender.tracks.gwas.overlaps n r' }) state.lastOverlaps
 
+  -- fork a new renderFiber
   renderFiber <- forkAff
                  $ renderBrowser (wrap 2.0) canvas offset toRender
 
@@ -615,7 +627,6 @@ runBrowser config bc = launchAff $ do
       , track:   glyphClick }
 
   _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
-
 
   cached <- browserCache mainBrowser
 
