@@ -267,10 +267,15 @@ getAnnotations cs url = groupToMap _.feature.chrId
                         <$> fetchAnnotJSON cs url
 
 
-getAnnotations' :: CoordSys ChrId BigInt
+getAnnotations' :: ∀ rS.
+                   CoordSys ChrId BigInt
+                -> Map ChrId (Array (GWASFeature rS))
                 -> String
-                -> Aff _ (Array (Annot ()))
-getAnnotations' = fetchAnnotJSON
+                -> Aff _ (Map ChrId (Array (Annot ())))
+getAnnotations' cs snps url =  groupToMap _.feature.chrId
+                              <$> interestingAnnots (Bp 50000.0) snps
+                              <$> fetchAnnotJSON cs url
+
 
 
 

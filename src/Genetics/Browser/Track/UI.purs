@@ -38,10 +38,11 @@ import Data.Profunctor.Star (Star(..))
 import Data.Record.Extra (eqRecord)
 import Data.Symbol (SProxy(..))
 import Data.Traversable (for_, traverse, traverse_)
-import Data.Tuple (Tuple(Tuple))
+import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, inj, on)
+import Debug.Trace as Debug
 import Genetics.Browser.Track.Backend (RenderedTrack, bumpFeatures, drawBrowser, negLog10, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, filterSig, getAnnotations, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, filterSig, getAnnotations, getAnnotations', getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy, viewScale)
@@ -498,23 +499,18 @@ runBrowser config bc = launchAff $ do
   trackData <- do
     genes <- traverse (getGenes cSys) config.urls.genes
     gwas  <- traverse (getGWAS  cSys) config.urls.gwas
+
     rawAnnotations <-
-      traverse (getAnnotations cSys) config.urls.annotations
+      traverse (uncurry $ getAnnotations' cSys) do
+        snps <- filterSig config.score <$> gwas
+        url <- config.urls.annotations
+        pure $ Tuple snps url
 
     let annotations = zipMapsWith
                        (bumpFeatures (to _.feature.score)
                                       (SProxy :: SProxy "score")
                                       bumpRadius)
                        <$> gwas <*> rawAnnotations
-
-    case gwas of
-      Nothing -> pure unit
-      Just snps -> do
-        let sigSnps = filterSig config.score snps
-
-        liftEff do
-          log $ "# total SNPs: " <> show (sum $ Array.length <$> snps)
-          log $ "# significant SNPs: " <> show (sum $ Array.length <$> sigSnps)
 
 
     pure { genes, gwas, annotations }
