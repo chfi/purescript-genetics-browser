@@ -22,6 +22,7 @@ import Data.Maybe (Maybe(Just, Nothing))
 import Data.Monoid (mempty)
 import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
+import Data.Pair as Pair
 import Data.Profunctor.Strong (fanout)
 import Data.String as String
 import Data.Traversable (traverse)
@@ -256,6 +257,7 @@ fetchAnnotJSON cs str = fetchJSON (annotJSONParse cs) str
 getGWAS :: CoordSys ChrId BigInt -> String
         -> Aff _ (Map ChrId (Array (GWASFeature ())))
 getGWAS cs url = groupToMap _.feature.chrId
+                  <$> filter (\f -> Pair.fst (f.position) >= wrap zero)
                   <$> fetchJSON (gemmaJSONParse cs) url
 
 
@@ -387,8 +389,9 @@ renderGWAS verscale cdim snps =
                -> Array (GWASFeature ())
       overlaps pts radius' pt = filterMap covers pts
         where covers :: Tuple (GWASFeature ()) Point -> Maybe (GWASFeature ())
-              covers (Tuple f fPt) =
-                if dist fPt pt <= radius + radius' then Just f else Nothing
+              covers (Tuple f fPt)
+                | dist fPt pt <= radius + radius'   = Just f
+                | otherwise = Nothing
 
   in \seg -> let pts = pointed seg
              in { features
