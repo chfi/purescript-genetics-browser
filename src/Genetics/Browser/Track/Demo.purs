@@ -30,10 +30,11 @@ import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple))
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
+import Debug.Trace as Debug
 import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, Label, _range, _single, groupToMap, mkIcon, negLog10, trackLegend, zipMapsWith)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), ViewScale(..), _Segments, aroundPair, pairSize, pairsOverlap, xPerPixel)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
@@ -320,6 +321,15 @@ peaks :: ∀ rS.
       -> Array (GWASFeature rS)
       -> Array (Peak Bp Number (GWASFeature rS))
 peaks r snps = unfoldr (peak1 r) snps
+
+visiblePeaks :: ∀ rS.
+                ViewScale
+             -> Map ChrId (Array (GWASFeature rS))
+             -> Map ChrId (Array (Peak Bp Number (GWASFeature rS)))
+visiblePeaks vs snps = Debug.trace ("radius: " <> show radius) \_ -> map (peaks radius) snps
+  where radius :: Bp
+        radius = wrap $ (xPerPixel vs) * 3.75 -- GWAS glyph radius is 3.75px, see renderGWAS
+
 
 
 -- TODO Configgable Annotation -> LegendEntry function (somehow?!)

@@ -44,10 +44,10 @@ import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, inj, on)
 import Debug.Trace as Debug
 import Genetics.Browser.Track.Backend (RenderedTrack, bumpFeatures, drawBrowser, negLog10, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, filterSig, getAnnotations, getAnnotations', getGWAS, getGenes, peaks, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, Peak, annotLegendTest, filterSig, getAnnotations, getAnnotations', getGWAS, getGenes, peaks, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS, visiblePeaks)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy, viewScale)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), ViewScale(..), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy, viewScale)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -497,6 +497,16 @@ foreign import setDebugDivVisibility :: ∀ e. String -> Eff e Unit
 foreign import setDebugDivPoint :: ∀ e. Point -> Eff e Unit
 
 
+
+observeViewScale :: ∀ r1 r2 .
+                    AVar CoordSysView
+                 -> BrowserCanvas
+                 -> Aff _ ViewScale
+observeViewScale csv bc =
+  viewScale (bc ^. _Dimensions) <$> AVar.readVar csv
+
+
+
 -- TODO configure UI widths
 runBrowser :: Conf -> BrowserCanvas -> Eff _ _
 runBrowser config bc = launchAff $ do
@@ -547,6 +557,11 @@ runBrowser config bc = launchAff $ do
   let initialView :: CoordSysView
       initialView = wrap $ Pair zero (cSys^._TotalSize)
       trackDims = bc ^. _Track <<< _Dimensions
+
+      peaks' :: ViewScale -> Map ChrId (Array (Peak _ _ _))
+      peaks' vs = visiblePeaks vs
+                  $ filterSig config.score
+                  $ fromMaybe mempty trackData.gwas
 
   viewCmd <- makeEmptyVar
 
@@ -641,7 +656,16 @@ runBrowser config bc = launchAff $ do
 
     browserOnClick bc
       { overlay: \_ -> pure unit
+      -- { overlay: overlayDebug
       , track:   glyphClick }
+
+
+  liftEff $ setWindow "peaks" $ launchAff_ do
+    vs <- observeViewScale view bc
+    let ps = peaks' vs
+    liftEff do
+      forWithIndex_ ps \chrId p -> do
+        log $ show chrId <> " peaks: " <> show (Array.length p)
 
   _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
 
