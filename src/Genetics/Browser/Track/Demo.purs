@@ -41,6 +41,7 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
+import Unsafe.Coerce (unsafeCoerce)
 
 
 
@@ -495,3 +496,77 @@ renderAnnot verscale cdim annots =
                 , drawings: drawings pts
                 , labels: labels pts
                 , overlaps: overlaps  }
+
+
+
+
+
+
+renderAnnot' :: ∀ r1 r2.
+                Map ChrId (Array (GWASFeature ()))
+             -> Canvas.Dimensions
+             -> Map ChrId (Array (Annot r2))
+             -> Map ChrId (Pair Number)
+             -> RenderedTrack (Annot r2)
+renderAnnot' sigSnps cdim allAnnots =
+  let features :: Array (Annot r2)
+      features = fold allAnnots
+
+      tailHeight = 0.15
+
+      curPeaks :: Map ChrId (Pair Number)
+               -> Map ChrId (Array (Peak _ _ (GWASFeature ())))
+      curPeaks segs = mapWithIndex f
+        where f :: ChrId -> Pair Number -> Array (Peak _ _ _)
+              f chr seg = fromMaybe [] do
+                  -- snps <- Map.lookup chr sigSnps
+                  -- let rad = (wrap $ pairSize seg * 3.75) /
+                  pure $ peaks
+
+      -- drawing :: Tuple (Annot (score :: Number)) Point -> DrawingN
+      -- drawing (Tuple an pt) = { drawing: tail <> lg.icon , points: [pt] }
+      --   where lg = annotLegendEntry an
+      --         tail = Drawing.outlined (lineWidth 1.3 <> outlineColor black)
+      --                $ Drawing.path
+      --                  [ {x: 0.0, y: 0.0 }
+      --                  , {x: 0.0, y: tailHeight * cdim.height }]
+
+
+      drawings :: Array (Tuple (Annot r2) Point) -> Array DrawingN
+      drawings = map $ unsafeCoerce unit
+
+      -- label :: Tuple (Annot (score :: Number)) Point -> Label
+      -- label (Tuple an {x,y}) =
+      --   { text: an.feature.name
+      --   , point: { x, y: y - 12.0 }  }
+
+      -- labels :: Array (Tuple (Annot (score :: Number)) Point) -> Array Label
+      -- labels = map label
+      labels = mempty
+
+      -- npointed :: Map ChrId (Array (Tuple (Annot (score :: Number)) NPoint))
+      -- npointed = (map <<< map) (fanout id place) annots
+      --   where place p = let p' = placeScored verscale p
+      --                   in { x: p'.x
+      --                      , y: Normalized $ min 1.0 (unwrap p'.y + tailHeight) }
+
+      -- rescale :: Pair Number -> NPoint -> Point
+      -- rescale seg npoint =
+      --   let (Pair offset _) = seg
+      --       x = offset + (pairSize seg) * (unwrap npoint.x)
+      --       y = cdim.height * (one - unwrap npoint.y)
+      --   in {x, y}
+
+      pointed :: Map ChrId (Pair Number)
+              -> Array (Tuple (Annot r2) Point)
+      -- pointed segs = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs npointed
+      pointed segs = mempty
+
+      overlaps :: Number -> Point -> Array (Annot r2)
+      overlaps r p = mempty
+
+  in \segs -> let pts = pointed segs
+              in { features
+                 , drawings: drawings pts
+                 , labels: labels pts
+                 , overlaps: overlaps  }

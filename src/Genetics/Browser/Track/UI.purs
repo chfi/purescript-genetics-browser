@@ -164,8 +164,6 @@ type UIState e = { view         :: AVar CoordSysView
                  , viewCmd      :: AVar UpdateView
                  , uiCmd        :: AVar (Variant UICmdR)
                  , renderFiber  :: AVar (Fiber e Unit)
-                 -- , cachedTracks :: AVar { cachedViewWidth :: BigInt
-                 --                        , glyphs :: List (Array RenderedTrack) }
                  , lastOverlaps :: AVar (Number -> Point -> { gwas :: Array (GWASFeature ()) } )
                  }
 
@@ -281,11 +279,6 @@ cachedStar :: ∀ a b. Star (Aff _) a b -> a -> Aff _ b
 cachedStar = unwrap
 
 
-
-
--- newtype AffCache a b =
---   AffCache { diff :: a -> a -> Boolean
---            , cache :: ∀ e. a -> Aff (avar :: AVAR | e) b }
 
 newtype AffCache e a b =
   AffCache { diff :: a -> a -> Boolean
@@ -536,22 +529,6 @@ runBrowser config bc = launchAff $ do
                                       bumpRadius)
                        <$> gwas <*> rawAnnotations
 
-    case gwas of
-      Nothing -> pure unit
-      Just snps -> do
-        let snps' = filterSig config.score snps
-            snpPeaks = peaks (Bp 500000.0) <$> snps'
-
-        liftEff do
-          forWithIndex_ snpPeaks \chrId ps -> do
-            log $ show chrId
-            for_ ps \p -> log $ "  " <> show p.covers <> " - " <> show p.y
-
-          -- for_ snpPeaks \ps ->
-          forWithIndex_ snpPeaks \chrId ps -> do
-            log $ show chrId <> " peaks: " <> show (Array.length ps)
-
-
     pure { genes, gwas, annotations }
 
   let initialView :: CoordSysView
@@ -608,9 +585,6 @@ runBrowser config bc = launchAff $ do
       vscale = { width: slots.left.size.width
                , color: black
                , min: s.min, max: s.max, sig: s.sig }
-
-      padding = { horizontal: config.trackPadding.left
-                , vertical: config.trackPadding.top }
 
 
       mainBrowser :: _
