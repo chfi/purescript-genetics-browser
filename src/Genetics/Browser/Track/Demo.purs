@@ -12,13 +12,14 @@ import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Filterable (class Filterable, filter, filterMap)
-import Data.Foldable (class Foldable, any, fold, foldMap, or)
+import Data.Filterable (class Filterable, filter, filterMap, partition)
+import Data.Foldable (class Foldable, any, fold, foldMap, maximumBy, minimumBy, or)
+import Data.Function (on)
 import Data.Lens (view, (^?))
 import Data.Lens.Index (ix)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(Just, Nothing))
+import Data.Maybe (Maybe(..))
 import Data.Monoid (mempty)
 import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
@@ -27,6 +28,7 @@ import Data.Profunctor.Strong (fanout)
 import Data.String as String
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple))
+import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
 import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, Label, _range, _single, groupToMap, mkIcon, negLog10, trackLegend, zipMapsWith)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
@@ -277,9 +279,6 @@ getAnnotations' cs snps url =  groupToMap _.feature.chrId
                               <$> fetchAnnotJSON cs url
 
 
-
-
-
 inRangeOf :: ∀ rA rB.
              Bp
           -> { position :: Pair Bp | rA }
@@ -297,7 +296,30 @@ interestingAnnots :: ∀ rA rS f.
                   -> f (Annot rA)
 interestingAnnots radius snps = filter (any (any (inRangeOf radius)) snps)
 
+type Peak x y r = { covers :: Pair x
+                   , y :: y
+                   , elements :: Array r }
 
+peak1 :: ∀ rS.
+         Bp
+      -> Array (GWASFeature rS)
+      -> Maybe (Tuple (Peak _ _ (GWASFeature rS))
+                      (Array (GWASFeature rS)))
+peak1 radius snps = do
+  top <- minimumBy (compare `on` _.feature.score) snps
+
+  let covers = radius `aroundPair` top.position
+      y = top.feature.score
+      {no, yes} = partition (\p -> p.position `pairsOverlap` covers) snps
+
+  pure $ Tuple {covers, y, elements: yes} no
+
+
+peaks :: ∀ rS.
+         Bp
+      -> Array (GWASFeature rS)
+      -> Array (Peak Bp Number (GWASFeature rS))
+peaks r snps = unfoldr (peak1 r) snps
 
 
 -- TODO Configgable Annotation -> LegendEntry function (somehow?!)

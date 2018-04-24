@@ -24,9 +24,10 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
 import Data.Foldable (class Foldable, foldMap, length, null, sum)
+import Data.FoldableWithIndex (forWithIndex_)
 import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
 import Data.Generic.Rep (class Generic)
-import Data.Lens (Iso', iso, re, to, (^.))
+import Data.Lens (Iso', iso, re, to, united, (^.))
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
@@ -38,11 +39,12 @@ import Data.Profunctor.Star (Star(..))
 import Data.Record.Extra (eqRecord)
 import Data.Symbol (SProxy(..))
 import Data.Traversable (for_, traverse, traverse_)
+import Data.TraversableWithIndex (traverseWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, inj, on)
 import Debug.Trace as Debug
 import Genetics.Browser.Track.Backend (RenderedTrack, bumpFeatures, drawBrowser, negLog10, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, filterSig, getAnnotations, getAnnotations', getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, annotLegendTest, filterSig, getAnnotations, getAnnotations', getGWAS, getGenes, peaks, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy, viewScale)
@@ -523,6 +525,21 @@ runBrowser config bc = launchAff $ do
                                       (SProxy :: SProxy "score")
                                       bumpRadius)
                        <$> gwas <*> rawAnnotations
+
+    case gwas of
+      Nothing -> pure unit
+      Just snps -> do
+        let snps' = filterSig config.score snps
+            snpPeaks = peaks (Bp 500000.0) <$> snps'
+
+        liftEff do
+          forWithIndex_ snpPeaks \chrId ps -> do
+            log $ show chrId
+            for_ ps \p -> log $ "  " <> show p.covers <> " - " <> show p.y
+
+          -- for_ snpPeaks \ps ->
+          forWithIndex_ snpPeaks \chrId ps -> do
+            log $ show chrId <> " peaks: " <> show (Array.length ps)
 
 
     pure { genes, gwas, annotations }
