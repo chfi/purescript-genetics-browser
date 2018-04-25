@@ -300,9 +300,35 @@ interestingAnnots :: ∀ rA rS f.
                   -> f (Annot rA)
 interestingAnnots radius snps = filter (any (any (inRangeOf radius)) snps)
 
+type Peak' x r = { covers :: Pair x
+                 , peak   :: r
+                 , mountain  :: Array r }
+
+
+peak' :: ∀ x y a.
+         Ord x
+      => Ring x
+      => { pos   :: a -> Pair x
+         , value :: a -> Ordering }
+      -> x
+      -> Array a
+      -> Maybe (Tuple (Peak' x a)
+                      (Array a))
+peak' {pos, value} radius as = do
+  peak <- maximumBy (compare `on` value) as
+
+  let covers = radius `aroundPair` pos peak
+      {no, yes} = partition (\p -> pos p `pairsOverlap` covers) as
+
+  pure $ Tuple {covers, peak, mountain: yes} no
+
+
+
+
+
 type Peak x y r = { covers :: Pair x
-                   , y :: y
-                   , elements :: Array r }
+                  , y :: y
+                  , elements :: Array r }
 
 peak1 :: ∀ rS.
          Bp
