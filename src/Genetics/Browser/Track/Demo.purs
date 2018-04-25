@@ -13,13 +13,14 @@ import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Filterable (class Filterable, filter, filterMap, partition)
-import Data.Foldable (class Foldable, any, fold, foldMap, maximumBy, minimumBy, or)
+import Data.Foldable (class Foldable, any, fold, foldMap, foldr, maximumBy, minimumBy, or, sum)
 import Data.Function (on)
+import Data.FunctorWithIndex (mapWithIndex)
 import Data.Lens (view, (^?))
 import Data.Lens.Index (ix)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Monoid (mempty)
 import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
@@ -28,6 +29,7 @@ import Data.Profunctor.Strong (fanout)
 import Data.String as String
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple))
+import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
 import Debug.Trace as Debug
@@ -359,12 +361,19 @@ annotLegendTest fs = trackLegend annotLegendEntry as
 
 
 placeScored :: ∀ r1 r2.
-            { min :: Number, max :: Number | r1 }
-         -> Feature { score :: Number | r2 }
-         -> NPoint
-placeScored {min, max} { frameSize, position: (Pair l _), feature } = {x, y}
+               { min :: Number, max :: Number | r1 }
+            -> Feature { score :: Number | r2 }
+            -> NPoint
+placeScored verScale { frameSize, position: (Pair l _), feature } = {x, y}
   where x = Normalized $ unwrap $ l / frameSize
-        y = Normalized $ ((negLog10 feature.score) - min) / (max - min)
+        y = normalizedY verScale feature.score
+
+
+normalizedY :: ∀ r.
+               { min :: Number, max :: Number | r }
+            -> Number
+            -> Normalized Number
+normalizedY {min, max} y = Normalized $ ((negLog10 y) - min) / (max - min)
 
 
 dist :: Point -> Point -> Number
@@ -498,75 +507,107 @@ renderAnnot verscale cdim annots =
                 , overlaps: overlaps  }
 
 
+annotForSnp :: ∀ rA rS.
+               Bp
+            -> Map ChrId (Array (Annot rA))
+            -> GWASFeature rS
+            -> Maybe (Annot rA)
+annotForSnp radius annotations {position, feature} = do
+  chr <- Map.lookup feature.chrId annotations
+  Array.find (\a -> ((radius `aroundPair` a.position) `pairsOverlap` position)) chr
 
 
-
-
-renderAnnot' :: ∀ r1 r2.
-                Map ChrId (Array (GWASFeature ()))
+renderAnnot' :: ∀ r r1 r2.
+                CoordSys _ _
+             -> Map ChrId (Array (GWASFeature ()))
+             -> { min :: Number, max :: Number | r }
              -> Canvas.Dimensions
              -> Map ChrId (Array (Annot r2))
              -> Map ChrId (Pair Number)
              -> RenderedTrack (Annot r2)
-renderAnnot' sigSnps cdim allAnnots =
+renderAnnot' cSys sigSnps verscale cdim allAnnots =
   let features :: Array (Annot r2)
       features = fold allAnnots
 
-      tailHeight = 0.15
-
-      curPeaks :: Map ChrId (Pair Number)
-               -> Map ChrId (Array (Peak _ _ (GWASFeature ())))
-      curPeaks segs = mapWithIndex f
-        where f :: ChrId -> Pair Number -> Array (Peak _ _ _)
+      -- Returns the annotations collected per SNP peak, where the
+      -- peaks are calculated based on current view scale, and peak x
+      -- and y values converted to track canvas coordinates... TODO
+      -- seriously need better mapping between normalized and
+      -- trackcanvas coordinates (9th time the charm)
+      curAnnotPeaks :: Map ChrId (Pair Number)
+                    -> Map ChrId (Array (Peak Number Number (Annot r2)))
+      curAnnotPeaks = mapWithIndex f
+        where f :: ChrId -> Pair Number -> Array (Peak _ _ (Annot r2))
               f chr seg = fromMaybe [] do
-                  -- snps <- Map.lookup chr sigSnps
-                  -- let rad = (wrap $ pairSize seg * 3.75) /
-                  pure $ peaks
+                  snps <- Map.lookup chr sigSnps
+                  segSize <- _.frameSize <$> Array.head snps
 
-      -- drawing :: Tuple (Annot (score :: Number)) Point -> DrawingN
-      -- drawing (Tuple an pt) = { drawing: tail <> lg.icon , points: [pt] }
-      --   where lg = annotLegendEntry an
-      --         tail = Drawing.outlined (lineWidth 1.3 <> outlineColor black)
-      --                $ Drawing.path
-      --                  [ {x: 0.0, y: 0.0 }
-      --                  , {x: 0.0, y: tailHeight * cdim.height }]
+                  let rad = (wrap $ pairSize seg * 3.75) / segSize
+                      snpPeaks = peaks rad snps
+
+                      peakAnnots pk = { covers, y, elements }
+                        where offset = Pair.fst seg
+                              covers = map (\x -> offset + pairSize seg * (unwrap $ x / segSize)) pk.covers
+                              y = cdim.height * (one - (unwrap $ normalizedY verscale pk.y))
+                              elements = fromMaybe [] do
+                                chr <- Map.lookup chr allAnnots
+                                pure $ filter (\a -> a.position
+                                                  `pairsOverlap` pk.covers) chr
+
+                  pure $ map peakAnnots snpPeaks
 
 
-      drawings :: Array (Tuple (Annot r2) Point) -> Array DrawingN
-      drawings = map $ unsafeCoerce unit
 
-      -- label :: Tuple (Annot (score :: Number)) Point -> Label
-      -- label (Tuple an {x,y}) =
-      --   { text: an.feature.name
-      --   , point: { x, y: y - 12.0 }  }
+      tailHeight = 0.08
+      tailPixels = tailHeight * cdim.height
+      iconYOffset = -7.5
+      labelOffset = -10.0
 
-      -- labels :: Array (Tuple (Annot (score :: Number)) Point) -> Array Label
-      -- labels = map label
-      labels = mempty
+      drawing :: Peak Number Number (Annot r2)
+              -> DrawingN
+      drawing aPeak = { drawing: Drawing.translate 0.0 (-15.0) $ tail <> icons
+                      , points: [{x, y: aPeak.y - (tailPixels * 0.8) }] }
+        where (Pair l r) = aPeak.covers
+              x = l + 0.5 * (r - l)
+              icon' = _.icon <<< annotLegendEntry
+              icons = foldr (\a d -> Drawing.translate 0.0 iconYOffset
+                                     $ d <> icon' a) mempty aPeak.elements
 
-      -- npointed :: Map ChrId (Array (Tuple (Annot (score :: Number)) NPoint))
-      -- npointed = (map <<< map) (fanout id place) annots
-      --   where place p = let p' = placeScored verscale p
-      --                   in { x: p'.x
-      --                      , y: Normalized $ min 1.0 (unwrap p'.y + tailHeight) }
+              tail = if Array.null aPeak.elements
+                       then mempty
+                       else Drawing.outlined (lineWidth 1.3 <> outlineColor black)
+                              $ Drawing.path
+                                [ {x: 0.0, y: 0.0 }
+                                , {x: 0.0, y: tailPixels }]
 
-      -- rescale :: Pair Number -> NPoint -> Point
-      -- rescale seg npoint =
-      --   let (Pair offset _) = seg
-      --       x = offset + (pairSize seg) * (unwrap npoint.x)
-      --       y = cdim.height * (one - unwrap npoint.y)
-      --   in {x, y}
 
-      pointed :: Map ChrId (Pair Number)
-              -> Array (Tuple (Annot r2) Point)
-      -- pointed segs = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs npointed
-      pointed segs = mempty
+      drawings :: Map ChrId (Array (Peak Number Number (Annot r2)))
+               -> Array DrawingN
+      drawings = foldMap (map drawing)
+
+
+      label :: Peak Number Number (Annot r2) -> Array Label
+      label aPeak = Tuple.snd
+                    $ foldr f (Tuple (aPeak.y - 2.5 * tailPixels)
+                                     mempty) aPeak.elements
+        where (Pair l r) = aPeak.covers
+              x = l + 0.5 * (r - l)
+              f a (Tuple y ls) = Tuple (y + iconYOffset)
+                                    $ Array.snoc ls -- TODO this is probably reaaaal slow
+                                         { text: a.feature.name
+                                         , point: { x, y } }
+
+
+      labels :: Map ChrId (Array (Peak Number Number (Annot r2)))
+             -> Array Label
+      labels = foldMap (foldMap label)
 
       overlaps :: Number -> Point -> Array (Annot r2)
       overlaps r p = mempty
 
-  in \segs -> let pts = pointed segs
+  in \segs -> let curPeaks = curAnnotPeaks segs
+                  aa = Debug.trace ("#curPeaks: " <> show (sum $ map Array.length curPeaks)) \_ -> unit
               in { features
-                 , drawings: drawings pts
-                 , labels: labels pts
+                 , drawings: drawings curPeaks
+                 , labels: labels curPeaks
                  , overlaps: overlaps  }

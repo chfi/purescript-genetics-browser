@@ -44,7 +44,7 @@ import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, inj, on)
 import Debug.Trace as Debug
 import Genetics.Browser.Track.Backend (RenderedTrack, bumpFeatures, drawBrowser, negLog10, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, Peak, annotLegendTest, filterSig, getAnnotations, getAnnotations', getGWAS, getGenes, peaks, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS, visiblePeaks)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, Peak, annotForSnp, annotLegendTest, filterSig, getAnnotations, getAnnotations', getGWAS, getGenes, peaks, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderAnnot', renderGWAS, visiblePeaks)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), ViewScale(..), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy, viewScale)
@@ -469,15 +469,6 @@ snpInfoHTML' assocAnnot snp =
              <> "<p>Annot. score: " <> show a.feature.score <> "</p>"
              <> "<p>Annot. -log10: " <> show (negLog10 a.feature.score) <> "</p>"
 
-annotForSnp :: ∀ rA rS.
-               Bp
-            -> Map ChrId (Array (Annot rA))
-            -> GWASFeature rS
-            -> Maybe (Annot rA)
-annotForSnp radius annotations {position, feature} = do
-  chr <- Map.lookup feature.chrId annotations
-  Array.find (\a -> ((radius `aroundPair` a.position) `pairsOverlap` position)) chr
-
 
 foreign import setInfoBoxVisibility :: ∀ e. String -> Eff e Unit
 foreign import setInfoBoxContents :: ∀ e. String -> Eff e Unit
@@ -587,10 +578,12 @@ runBrowser config bc = launchAff $ do
                , min: s.min, max: s.max, sig: s.sig }
 
 
+      sigSnps = fromMaybe mempty $ filterSig config.score <$> trackData.gwas
+
       mainBrowser :: _
       mainBrowser = drawBrowser cSys {legend, vscale}
                       { gwas: renderGWAS vscale
-                      , annotations: renderAnnot vscale }
+                      , annotations: renderAnnot' cSys sigSnps vscale }
                       { gwas: fromMaybe mempty trackData.gwas
                       , annotations: fromMaybe mempty trackData.annotations }
 
