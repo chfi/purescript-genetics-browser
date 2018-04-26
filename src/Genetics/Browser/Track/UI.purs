@@ -11,49 +11,52 @@ import Control.Monad.Aff.AVar as AVar
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
-import Control.Monad.Eff.Exception (error)
+import Control.Monad.Eff.Exception (error, throw)
 import Control.Monad.Rec.Class (forever)
+import DOM.Classy.HTMLElement (appendChild, setId) as DOM
 import DOM.Classy.ParentNode (toParentNode)
 import DOM.HTML (window) as DOM
 import DOM.HTML.Types (htmlDocumentToDocument) as DOM
 import DOM.HTML.Window (document) as DOM
+import DOM.Node.Document (createElement, documentElement) as DOM
 import DOM.Node.ParentNode (querySelector) as DOM
+import DOM.Node.Types (Element, ElementId)
 import Data.Array as Array
 import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
-import Data.Foldable (class Foldable, foldMap, length, null, sum)
-import Data.FoldableWithIndex (forWithIndex_)
+import Data.Foldable (class Foldable, foldMap, length, null)
 import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
+import Data.Function (on)
 import Data.Generic.Rep (class Generic)
-import Data.Lens (Iso', iso, re, to, united, (^.))
+import Data.Generic.Rep.Show (genericShow)
+import Data.Int as Int
+import Data.Lens (Iso', iso, re, to, (^.))
 import Data.Map (Map)
-import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (class Newtype, over, unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
-import Data.Profunctor.Star (Star(..))
 import Data.Record.Extra (eqRecord)
 import Data.Symbol (SProxy(..))
 import Data.Traversable (for_, traverse, traverse_)
-import Data.TraversableWithIndex (traverseWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
-import Data.Variant (Variant, case_, inj, on)
-import Debug.Trace as Debug
+import Data.Variant (Variant, case_, inj)
+import Data.Variant as V
 import Genetics.Browser.Track.Backend (RenderedTrack, bumpFeatures, drawBrowser, negLog10, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, Peak, annotForSnp, annotLegendTest, filterSig, getAnnotations, getAnnotations', getGWAS, getGenes, peaks, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderAnnot', renderGWAS, visiblePeaks)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, uiSlots, wheelZoom)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, Peak, annotForSnp, annotLegendTest, filterSig, getAnnotations', getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot', renderGWAS, visiblePeaks)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), ViewScale(..), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, showViewScale, translateViewBy, viewScale)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, translateViewBy, viewScale)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
 import Math as Math
 import Partial.Unsafe (unsafePartial)
 import Simple.JSON (read)
+import Unsafe.Coerce (unsafeCoerce)
 
 
 
@@ -403,8 +406,8 @@ renderLoop :: CoordSys _ _
 renderLoop cSys drawCachedBrowser canvas state = forever do
 
   uiCmd <- takeVar state.uiCmd
-  case_ # on _render (\_ -> pure unit)
-        # on _docResize (\ {width} -> do
+  case_ # V.on _render (\_ -> pure unit)
+        # V.on _docResize (\ {width} -> do
                 let {height} = canvas ^. _Dimensions
                 canvas' <- liftEff $ setBrowserCanvasSize {width, height} canvas
                 putVar (inj _render unit) state.uiCmd
@@ -468,27 +471,55 @@ snpInfoHTML' assocAnnot snp =
      Just a  -> "<p>Annotation: " <> show a.feature.name <> "</p>"
              <> "<p>Annot. score: " <> show a.feature.score <> "</p>"
              <> "<p>Annot. -log10: " <> show (negLog10 a.feature.score) <> "</p>"
-
-
-foreign import setInfoBoxVisibility :: ∀ e. String -> Eff e Unit
-foreign import setInfoBoxContents :: ∀ e. String -> Eff e Unit
-
 foreign import initDebugDiv :: ∀ e. Number -> Eff e Unit
-
-
 foreign import setDebugDivVisibility :: ∀ e. String -> Eff e Unit
-
 foreign import setDebugDivPoint :: ∀ e. Point -> Eff e Unit
 
 
+foreign import setElementContents :: ∀ e. Element -> String -> Eff e Unit
 
-observeViewScale :: ∀ r1 r2 .
-                    AVar CoordSysView
-                 -> BrowserCanvas
-                 -> Aff _ ViewScale
-observeViewScale csv bc =
-  viewScale (bc ^. _Dimensions) <$> AVar.readVar csv
+data InfoBoxF
+  = IBoxShow
+  | IBoxHide
+  | IBoxSetY Int
+  | IBoxSetX Int
+  | IBoxSetContents String
 
+derive instance genericInfoBoxF :: Generic InfoBoxF _
+
+instance showInfoBoxF :: Show InfoBoxF where
+  show = genericShow
+
+updateInfoBox :: Element -> InfoBoxF -> Eff _ Unit
+updateInfoBox el cmd =
+  case cmd of
+    IBoxShow ->
+      setElementStyle el "visibility" "visible"
+    IBoxHide ->
+      setElementStyle el "visibility" "hidden"
+    (IBoxSetX x)    ->
+      setElementStyle el "left" $ show x <> "px"
+    (IBoxSetY y)    ->
+      setElementStyle el "top"  $ show y <> "px"
+    (IBoxSetContents html) ->
+      setElementContents el html
+
+infoBoxId :: ElementId
+infoBoxId = wrap "infoBox"
+
+initInfoBox :: Eff _ (InfoBoxF -> Eff _ Unit)
+initInfoBox = do
+  doc <- map DOM.htmlDocumentToDocument
+           $ DOM.document =<< DOM.window
+  el <- DOM.createElement "div" doc
+
+  DOM.setId infoBoxId el
+
+  DOM.documentElement doc >>= case _ of
+    Nothing -> throw "Couldn't find document body!"
+    Just docBody -> void $ DOM.appendChild el docBody
+
+  pure $ updateInfoBox el
 
 
 -- TODO configure UI widths
@@ -498,6 +529,8 @@ runBrowser config bc = launchAff $ do
   let clickRadius = 1.0
 
   liftEff $ initDebugDiv clickRadius
+
+  cmdInfoBox <- liftEff $ initInfoBox
 
   let cSys :: CoordSys ChrId BigInt
       cSys = coordSys mouseChrSizes
@@ -602,16 +635,17 @@ runBrowser config bc = launchAff $ do
           AVar.tryReadVar lastOverlaps >>= case _ of
              Nothing -> liftEff do
                log "clicked no glyphs"
-               setInfoBoxVisibility "hidden"
+               cmdInfoBox IBoxShow
 
              Just gs -> liftEff do
                let clicked = (gs clickRadius p).gwas
                printSNPInfo clicked
                case Array.head clicked of
-                 Nothing -> setInfoBoxVisibility "hidden"
+                 Nothing -> cmdInfoBox IBoxHide
                  Just g  -> do
-                   setInfoBoxContents $ snpInfoHTML' findAnnot g
-                   setInfoBoxVisibility "visible"
+                   cmdInfoBox IBoxShow
+                   cmdInfoBox $ IBoxSetX $ Int.round p.x
+                   cmdInfoBox $ IBoxSetContents $ snpInfoHTML' findAnnot g
 
 
     let overlayDebug :: _

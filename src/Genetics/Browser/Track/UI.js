@@ -64,20 +64,11 @@ exports.setWindow = function(k) {
     };
 };
 
-
-var infoBoxId = "view";
-
-exports.setInfoBoxVisibility = function(vis) {
-    return function() {
-        var infoBox = document.getElementById(infoBoxId);
-        infoBox.style['visibility'] = vis;
-    };
-};
-
-exports.setInfoBoxContents = function(html) {
-    return function() {
-        var infoBox = document.getElementById(infoBoxId);
-        infoBox.innerHTML = html;
+exports.setElementContents = function(el) {
+    return function(html) {
+        return function() {
+            el.innerHTML = html;
+        };
     };
 };
 
