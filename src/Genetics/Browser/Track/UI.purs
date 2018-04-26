@@ -106,118 +106,12 @@ updateViewFold uv iv = case uv of
   ModView f    -> over CoordSysView f iv
 
 
-queueCmd :: ∀ a. AVar a -> a -> Eff _ Unit
-queueCmd av cmd = launchAff_ $ putVar cmd av
-
-
-btnScroll :: Number -> AVar UpdateView -> Eff _ Unit
-btnScroll x av = do
-  buttonEvent "scrollLeft"  $ queueCmd av $ ScrollView (-x)
-  buttonEvent "scrollRight" $ queueCmd av $ ScrollView   x
-
-
-btnZoom :: Number -> AVar UpdateView -> Eff _ Unit
-btnZoom x av = do
-  buttonEvent "zoomOut" $ queueCmd av $ ZoomView $ 1.0 + x
-  buttonEvent "zoomIn"  $ queueCmd av $ ZoomView $ 1.0 - x
-
-
-
-mouseChrSizes :: Array (Tuple ChrId BigInt)
-mouseChrSizes =
-  unsafePartial
-  $ map (bimap ChrId (fromJust <<< BigInt.fromString))
-      [ Tuple "1"   "195471971"
-      , Tuple "2"   "182113224"
-      , Tuple "3"   "160039680"
-      , Tuple "4"   "156508116"
-      , Tuple "5"   "151834684"
-      , Tuple "6"   "149736546"
-      , Tuple "7"   "145441459"
-      , Tuple "8"   "129401213"
-      , Tuple "9"   "124595110"
-      , Tuple "10"  "130694993"
-      , Tuple "11"  "122082543"
-      , Tuple "12"  "120129022"
-      , Tuple "13"  "120421639"
-      , Tuple "14"  "124902244"
-      , Tuple "15"  "104043685"
-      , Tuple "16"  "98207768"
-      , Tuple "17"  "94987271"
-      , Tuple "18"  "90702639"
-      , Tuple "19"  "61431566"
-      , Tuple "X"   "171031299"
-      , Tuple "Y"   "91744698"
-      ]
-
--- runs console.time() with the provided string, returns the effect to stop the timer
-foreign import timeEff :: ∀ eff. String -> Eff eff (Eff eff Unit)
-
-
-
-type UICmdR = ( render :: Unit
-              , docResize :: { width :: Number, height :: Number } )
-
-_render = SProxy :: SProxy "render"
-_docResize = SProxy :: SProxy "docResize"
-
-
-
-type UIState e = { view         :: AVar CoordSysView
-                 , viewCmd      :: AVar UpdateView
-                 , uiCmd        :: AVar (Variant UICmdR)
-                 , renderFiber  :: AVar (Fiber e Unit)
-                 , lastOverlaps :: AVar (Number -> Point -> { gwas :: Array (GWASFeature ()) } )
-                 }
-
-
-diffView :: CoordSysView -> CoordSysView -> CoordSysView
-diffView v1 v2 =
-  let (Pair l1 r1) = unwrap v1
-      (Pair l2 r2) = unwrap v2
-  in wrap $ Pair (l2 - l1) (r2 - r1)
-
-showView :: CoordSysView -> String
-showView (CoordSysView (Pair l r)) = BigInt.toString l <> " - " <> BigInt.toString r
-
-
-_PairRec :: ∀ a. Iso' (Pair a) { l :: a, r :: a }
-_PairRec = iso (\(Pair l r) -> {l, r}) (\ {l, r} -> Pair l r)
-
-
-debugView :: UIState _
-          -> Eff _ { get :: _
-                   , set :: _ }
-debugView s = do
-  let get name = launchAff_ do
-         view <- AVar.tryReadVar s.view
-         liftEff case view of
-           Nothing -> do
-             log "CoordSysView state empty"
-             setWindow name unit
-           Just (v :: _)  -> do
-             log $ "CoordSysView: " <> showView v
-             setWindow name $ unwrap v ^. _PairRec
-
-  let set lr = launchAff_ do
-         view <- AVar.tryTakeVar s.view
-         case view of
-           Nothing -> pure unit
-           Just _  -> do
-             let v' = wrap $ lr ^. re _PairRec
-             _ <- AVar.tryPutVar (inj _render unit) s.uiCmd
-             AVar.putVar v' s.view
-
-  pure {get, set}
-
-
 uiViewUpdate :: ∀ r.
                 CoordSys _ BigInt
              -> Milliseconds
              -> { view :: AVar CoordSysView
                 , viewCmd :: AVar UpdateView
                 , uiCmd :: AVar (Variant UICmdR) | r }
-                -- , viewReady :: AVar Unit | r }
              -> Aff _ Unit
 uiViewUpdate cs timeout { view, viewCmd, uiCmd } = do
   curCmdVar <- makeVar (ModView id)
@@ -250,37 +144,72 @@ uiViewUpdate cs timeout { view, viewCmd, uiCmd } = do
   loop' (pure unit)
 
 
+queueCmd :: ∀ a. AVar a -> a -> Eff _ Unit
+queueCmd av cmd = launchAff_ $ putVar cmd av
+
+
+btnScroll :: Number -> AVar UpdateView -> Eff _ Unit
+btnScroll x av = do
+  buttonEvent "scrollLeft"  $ queueCmd av $ ScrollView (-x)
+  buttonEvent "scrollRight" $ queueCmd av $ ScrollView   x
+
+
+btnZoom :: Number -> AVar UpdateView -> Eff _ Unit
+btnZoom x av = do
+  buttonEvent "zoomOut" $ queueCmd av $ ZoomView $ 1.0 + x
+  buttonEvent "zoomIn"  $ queueCmd av $ ZoomView $ 1.0 - x
 
 
 
-                         -- This is Star (Aff e) a b!
--- newtype AffCache e a b = AffCache (a -> Aff e b)
+-- runs console.time() with the provided string, returns the effect to stop the timer
+foreign import timeEff :: ∀ eff. String -> Eff eff (Eff eff Unit)
 
 
-affCacheStar :: ∀ e a b.
-                (a -> a -> Boolean)
-             -> (a -> b)
-             -> Aff _ (Star (Aff _) a b)
-affCacheStar diff f = do
-  inVar  <- AVar.makeEmptyVar
-  outVar <- AVar.makeEmptyVar
 
-  let cache = \a -> do
-        lastIn  <- AVar.tryTakeVar inVar
-        lastOut <- AVar.tryTakeVar outVar
-        let o = case lastIn, lastOut of
-                  Just i, Just o -> if diff a i then f a else o
-                  _, _ -> f a
+type UICmdR = ( render :: Unit
+              , docResize :: { width :: Number, height :: Number } )
 
-        AVar.putVar a inVar
-        AVar.putVar o outVar
-        pure o
+_render = SProxy :: SProxy "render"
+_docResize = SProxy :: SProxy "docResize"
 
-  pure $ Star cache
 
-cachedStar :: ∀ a b. Star (Aff _) a b -> a -> Aff _ b
-cachedStar = unwrap
 
+type UIState e = { view         :: AVar CoordSysView
+                 , viewCmd      :: AVar UpdateView
+                 , uiCmd        :: AVar (Variant UICmdR)
+                 , renderFiber  :: AVar (Fiber e Unit)
+                 , lastOverlaps :: AVar (Number -> Point -> { gwas :: Array (GWASFeature ()) } )
+                 }
+
+
+_PairRec :: ∀ a. Iso' (Pair a) { l :: a, r :: a }
+_PairRec = iso (\(Pair l r) -> {l, r}) (\ {l, r} -> Pair l r)
+
+
+debugView :: UIState _
+          -> Eff _ { get :: _
+                   , set :: _ }
+debugView s = do
+  let get name = launchAff_ do
+         view <- AVar.tryReadVar s.view
+         liftEff case view of
+           Nothing -> do
+             log "CoordSysView state empty"
+             setWindow name unit
+           Just v  -> do
+             log $ "CoordSysView: " <> show (map BigInt.toString $ unwrap v)
+             setWindow name $ unwrap v ^. _PairRec
+
+  let set lr = launchAff_ do
+         view <- AVar.tryTakeVar s.view
+         case view of
+           Nothing -> pure unit
+           Just _  -> do
+             let v' = wrap $ lr ^. re _PairRec
+             _ <- AVar.tryPutVar (inj _render unit) s.uiCmd
+             AVar.putVar v' s.view
+
+  pure {get, set}
 
 
 newtype AffCache e a b =
@@ -300,6 +229,38 @@ cacheFun diff f = do
   inVar  <- AVar.makeEmptyVar
   outVar <- AVar.makeEmptyVar
 
+  let cache = \a -> do
+        lastIn  <- AVar.tryTakeVar inVar
+        lastOut <- AVar.tryTakeVar outVar
+        let o = case lastIn, lastOut of
+                  Just i, Just o -> if diff a i then f a else o
+                  _, _ -> f a
+
+        AVar.putVar a inVar
+        AVar.putVar o outVar
+        pure o
+
+  pure $ AffCache { diff, cache }
+
+cacheFun' :: ∀ e a b.
+             (a -> a -> Boolean)
+          -> (a -> b)
+          -> AVar a
+          -> AVar b
+          -> AffCache _ a b
+cacheFun' diff f inVar outVar =
+  let cache = \a -> do
+        lastIn  <- AVar.tryTakeVar inVar
+        lastOut <- AVar.tryTakeVar outVar
+        let o = case lastIn, lastOut of
+                  Just i, Just o -> if diff a i then f a else o
+                  _, _ -> f a
+
+        AVar.putVar a inVar
+        AVar.putVar o outVar
+        pure o
+
+  in AffCache { diff, cache }
   let cache = \a -> do
         lastIn  <- AVar.tryTakeVar inVar
         lastOut <- AVar.tryTakeVar outVar
@@ -373,21 +334,11 @@ browserCache f = do
 
     oldFinal <- AVar.tryTakeVar lastFinal
 
-    output <- case oldViewSize, oldFinal of
-      Just vs, Just o -> do
-        let changed = newViewSize /= vs
-        liftEff $ log $ "CoordSysView changed? " <> (show changed)
-        pure $ if not changed then o else partial csv
-
-      _, _ -> do
-        liftEff $ log "Cache was empty! Recalculating tracks"
-        pure $ partial csv
-
-
-
+    let output = case oldViewSize, oldFinal of
+          Just vs, Just o -> if newViewSize == vs then o else partial csv
+          _, _ -> partial csv
 
     AVar.putVar output lastFinal
-
     pure output
 
 
@@ -418,7 +369,6 @@ renderLoop cSys drawCachedBrowser canvas state = forever do
   traverse_ (killFiber (error "Resetting renderer"))
     =<< tryTakeVar state.renderFiber
 
-
   csView <- readVar state.view
   toRender <- drawCachedBrowser canvas csView
 
@@ -442,35 +392,41 @@ printSNPInfo :: ∀ r. Array (GWASFeature r) -> Eff _ Unit
 printSNPInfo fs = do
   let n = length fs :: Int
       m = 5
+      showSnp f = log $ f.feature.name <> " - "
+                     <> unwrap f.feature.chrId <> " @ "
+                     <> show (map show f.position)
 
-      showSnp f = do
-        log $ f.feature.name <> " - "
-           <> unwrap f.feature.chrId <> " @ "
-           <> show (map show f.position)
-
-  log $ "showing " <> show n <> " clicked glyphs"
+  log $ "showing " <> show m <> " out of " <> show n <> " clicked glyphs"
   for_ (Array.take m fs) showSnp
 
 
-snpInfoHTML :: ∀ r. GWASFeature r -> String
-snpInfoHTML { position, feature } =
-    "<p>SNP: "   <> feature.name <> "</p>"
- <> "<p>Chr: "   <> show feature.chrId <> "</p>"
- <> "<p>Pos: "   <> show (Pair.fst position) <> "</p>"
- <> "<p>Score: " <> show feature.score <> "</p>"
- <> "<p>-log10: " <> show (negLog10 feature.score) <> "</p>"
+wrapWith :: String -> String -> String
+wrapWith tag x =
+  "<"<> tag <>">" <> x <> "</"<> tag <>">"
+
+snpHTML :: ∀ r.
+           GWASFeature r
+        -> String
+snpHTML {position, feature} = wrapWith "div" contents
+  where contents = foldMap (wrapWith "p")
+            [ "SNP: "    <> feature.name
+            , "Chr: "    <> show feature.chrId
+            , "Pos: "    <> show (Pair.fst position)
+            , "Score: "  <> show feature.score
+            , "-log10: " <> show (negLog10 feature.score)
+            ]
+
+annotationHTML :: ∀ r.
+                  Annot (score :: Number | r)
+               -> String
+annotationHTML a = wrapWith "div" contents
+  where contents = foldMap (wrapWith "p")
+          [ "Annotation: " <> a.feature.name
+          , "Score: "      <> show a.feature.score
+          , "-log10: "     <> show (negLog10 a.feature.score)
+          ]
 
 
-snpInfoHTML' :: ∀ rA rS.
-                (GWASFeature rS -> Maybe (Annot (score :: Number | rA)))
-             -> GWASFeature rS
-             -> String
-snpInfoHTML' assocAnnot snp =
-   snpInfoHTML snp <> case assocAnnot snp of
-     Nothing -> "<p>No annotation found</p>"
-     Just a  -> "<p>Annotation: " <> show a.feature.name <> "</p>"
-             <> "<p>Annot. score: " <> show a.feature.score <> "</p>"
-             <> "<p>Annot. -log10: " <> show (negLog10 a.feature.score) <> "</p>"
 foreign import initDebugDiv :: ∀ e. Number -> Eff e Unit
 foreign import setDebugDivVisibility :: ∀ e. String -> Eff e Unit
 foreign import setDebugDivPoint :: ∀ e. Point -> Eff e Unit
@@ -570,16 +526,13 @@ runBrowser config bc = launchAff $ do
     btnScroll 0.05 viewCmd
     btnZoom   0.10 viewCmd
 
-    let dragCB {x,y} =
-          when (Math.abs x >= one)
-          $ queueCmd viewCmd $ ScrollView $ (-x) / trackDims.width
-    dragScroll bc dragCB
-
+    dragScroll bc \ {x,y} ->
+       when (Math.abs x >= one)
+         $ queueCmd viewCmd $ ScrollView $ (-x) / trackDims.width
 
     let scrollZoomScale = 0.06
-        wheelCB dY =
-          queueCmd viewCmd $ ZoomView $ 1.0 + scrollZoomScale * dY
-    wheelZoom bc wheelCB
+    wheelZoom bc \dY ->
+       queueCmd viewCmd $ ZoomView $ 1.0 + scrollZoomScale * dY
 
 
   uiCmd <- makeVar (inj _render unit)
@@ -605,7 +558,6 @@ runBrowser config bc = launchAff $ do
 
       s = config.score
 
-
       vscale = { width: slots.left.size.width
                , color: black
                , min: s.min, max: s.max, sig: s.sig }
@@ -621,14 +573,15 @@ runBrowser config bc = launchAff $ do
                       , annotations: fromMaybe mempty trackData.annotations }
 
 
-
-      viewTimeout :: Milliseconds
-      viewTimeout = wrap 100.0
-
   liftEff do
-    setWindow "mainBrowser" mainBrowser
+    let overlayDebug :: _
+        overlayDebug p = do
 
-    let findAnnot = annotForSnp bumpRadius $ fromMaybe mempty trackData.annotations
+          setDebugDivVisibility "visible"
+          setDebugDivPoint p
+
+    let findAnnot = annotForSnp bumpRadius
+                    $ fromMaybe mempty trackData.annotations
 
     let glyphClick :: _
         glyphClick p = launchAff_ do
@@ -645,14 +598,11 @@ runBrowser config bc = launchAff $ do
                  Just g  -> do
                    cmdInfoBox IBoxShow
                    cmdInfoBox $ IBoxSetX $ Int.round p.x
-                   cmdInfoBox $ IBoxSetContents $ snpInfoHTML' findAnnot g
+                   cmdInfoBox $ IBoxSetContents
+                     $ snpHTML g
+                     <> foldMap annotationHTML (findAnnot g)
 
 
-    let overlayDebug :: _
-        overlayDebug p = do
-
-          setDebugDivVisibility "visible"
-          setDebugDivPoint p
 
 
     browserOnClick bc
@@ -660,13 +610,11 @@ runBrowser config bc = launchAff $ do
       -- { overlay: overlayDebug
       , track:   glyphClick }
 
+  -- debugging only
+  liftEff $ setWindow "mainBrowser" mainBrowser
 
-  liftEff $ setWindow "peaks" $ launchAff_ do
-    vs <- observeViewScale view bc
-    let ps = peaks' vs
-    liftEff do
-      forWithIndex_ ps \chrId p -> do
-        log $ show chrId <> " peaks: " <> show (Array.length p)
+  let viewTimeout :: Milliseconds
+      viewTimeout = wrap 100.0
 
   _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
 
@@ -764,3 +712,32 @@ fetchLoop cs urls = do
   annotations <- fetchLoop1 $ produceAnnots cs <$> urls.annotations
   genes <-       fetchLoop1 $ produceGenes  cs <$> urls.genes
   pure { gwas, genes, annotations }
+
+
+
+mouseChrSizes :: Array (Tuple ChrId BigInt)
+mouseChrSizes =
+  unsafePartial
+  $ map (bimap ChrId (fromJust <<< BigInt.fromString))
+      [ Tuple "1"   "195471971"
+      , Tuple "2"   "182113224"
+      , Tuple "3"   "160039680"
+      , Tuple "4"   "156508116"
+      , Tuple "5"   "151834684"
+      , Tuple "6"   "149736546"
+      , Tuple "7"   "145441459"
+      , Tuple "8"   "129401213"
+      , Tuple "9"   "124595110"
+      , Tuple "10"  "130694993"
+      , Tuple "11"  "122082543"
+      , Tuple "12"  "120129022"
+      , Tuple "13"  "120421639"
+      , Tuple "14"  "124902244"
+      , Tuple "15"  "104043685"
+      , Tuple "16"  "98207768"
+      , Tuple "17"  "94987271"
+      , Tuple "18"  "90702639"
+      , Tuple "19"  "61431566"
+      , Tuple "X"   "171031299"
+      , Tuple "Y"   "91744698"
+      ]
