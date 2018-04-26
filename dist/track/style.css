@@ -1,0 +1,26 @@
+#infoBox {
+    position: absolute;
+    display: inline-block;
+    z-index: 10000;
+    visibility: hidden;
+
+    padding: 5px;
+    border: 2px solid gray;
+    border-radius: 5%;
+    background-color: #ffffff;
+    min-height: 100px;
+    min-width: 10px;
+    max-width:  80%;
+    margin-top: -2.2em;
+
+    font-family: sans-serif;
+}
+
+#infoBox > div {
+    margin: 1.0em 0.5em;
+}
+
+
+#infoBox > div > p {
+    margin: 0.1em;
+}
