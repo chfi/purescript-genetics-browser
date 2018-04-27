@@ -3,21 +3,25 @@ module Genetics.Browser.Track.Demo where
 import Prelude
 
 import Color (Color, black)
-import Color.Scheme.Clrs (blue, navy, red)
+import Color.Scheme.Clrs (blue, red)
 import Color.Scheme.X11 (darkblue, darkgrey, lightgrey)
 import Control.Coroutine (Producer, transform, ($~), (~~))
-import Control.Monad.Aff (Aff, throwError)
-import Control.Monad.Eff.Exception (error)
+import Control.Monad.Aff (Aff, error, throwError)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Filterable (class Filterable, filter, filterMap, partition)
-import Data.Foldable (class Foldable, any, fold, foldMap, foldr, maximumBy, minimumBy, or, sum)
+import Data.Foldable (class Foldable, any, fold, foldMap, foldr, maximumBy, minimumBy, sum)
+import Data.Foreign (F, Foreign, ForeignError(..))
+import Data.Foreign.Index as Foreign
+import Data.Foreign.Keys as Foreign
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Lens (view, (^?))
 import Data.Lens.Index (ix)
+import Data.List (List)
+import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
@@ -26,6 +30,8 @@ import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Profunctor.Strong (fanout)
+import Data.Record.Extra (class Keys)
+import Data.Record.Extra as Record
 import Data.String as String
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple))
@@ -43,6 +49,8 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
+import Simple.JSON as Simple
+import Type.Prelude (class RowToList, RLProxy(..))
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -235,6 +243,9 @@ type AnnotRow r = ( geneID :: String
 type Annot r = Feature {| AnnotRow r}
 
 
+
+
+
 annotJSONParse :: CoordSys ChrId BigInt
               -> Json
               -> Maybe (Annot ())
@@ -258,6 +269,70 @@ annotJSONParse cs j = do
 fetchAnnotJSON :: CoordSys ChrId BigInt -> String
                -> Aff _ (Array (Annot ()))
 fetchAnnotJSON cs str = fetchJSON (annotJSONParse cs) str
+
+
+
+type RawAnnotation r =
+  ( "chr" :: String
+  , "pos" :: Number
+  , "name" :: String
+  , "p_lrt" :: Number
+  , "anno" :: Maybe String
+  , "url" :: Maybe String
+  , "gene" :: Maybe String
+  , "synonymes" :: Maybe String
+  | r )
+
+type Annotation r = Feature (Record (RawAnnotation r))
+
+annotationFields :: ∀ f rl.
+                    Keys rl
+                 => RowToList (RawAnnotation ()) rl
+                 => List String
+annotationFields =
+  Record.keys (unsafeCoerce unit :: Record (RawAnnotation ()))
+
+
+parseAnnotation :: CoordSys ChrId BigInt -> Foreign -> F (Annotation ())
+parseAnnotation cSys a = do
+  (raw :: Record (RawAnnotation ())) <- Simple.read' a
+
+  rest <- parseAnnotationRest a
+
+  let position :: Pair Bp
+      position = (\p -> map wrap (Pair p p)) raw.pos
+      chr = ChrId $ raw.chr
+      feature = { chr
+                , name: raw.name
+                , url: raw.url
+                , p_lrt: raw.p_lrt
+                , gene: raw.gene
+                , rest }
+
+  frameSize <- case Map.lookup chr (view _Segments cSys) of
+    Nothing ->
+      throwError $ pure $ ForeignError
+                     "Annotation chr not found in coordinate system!"
+    Just seg ->
+      pure $ Bp $ BigInt.toNumber $ pairSize seg
+
+  pure $ { position
+         , frameSize
+         , feature }
+
+
+-- | Partially parse the parts of the annotation record that are *not* in the Annotation type
+parseAnnotationRest :: Foreign -> F (List { field :: String, value :: Foreign })
+parseAnnotationRest a = do
+  allFields <- List.fromFoldable <$> Foreign.keys a
+
+  let fun :: Foreign -> String -> F { field :: String, value :: Foreign }
+      fun x field = { field, value: _ } <$> Foreign.readProp field x
+
+      restFields :: List String
+      restFields = allFields `List.difference` annotationFields
+
+  traverse (fun a) restFields
 
 
 getGWAS :: CoordSys ChrId BigInt -> String
