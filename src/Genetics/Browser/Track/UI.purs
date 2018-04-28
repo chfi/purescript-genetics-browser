@@ -46,7 +46,7 @@ import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser.Track.Backend (RenderedTrack, bumpFeatures, drawBrowser, negLog10, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, Peak, annotForSnp, annotLegendTest, annotationFields, filterSig, getAnnotations', getAnnotationsNew, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS, visiblePeaks)
+import Genetics.Browser.Track.Demo (Annot, Annotation, BedFeature, GWASFeature, Peak, annotForSnp, annotLegendTest, annotationFields, annotationForSnp, annotationLegendTest, filterSig, getAnnotations', getAnnotationsNew, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderAnnotation, renderGWAS, showAnnotation, visiblePeaks)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, translateViewBy, viewScale)
@@ -348,7 +348,7 @@ renderLoop :: CoordSys _ _
                -> CoordSysView
                -> Aff _ ({ tracks ::
                               { gwas :: RenderedTrack (GWASFeature ())
-                              , annotations :: RenderedTrack (Annot (score :: Number)) }
+                              , annotations :: RenderedTrack (Annotation ()) }
                          , relativeUI :: Drawing
                          , fixedUI :: Drawing }))
            -> BrowserCanvas
@@ -416,15 +416,12 @@ snpHTML {position, feature} = wrapWith "div" contents
             , "-log10: " <> show (negLog10 feature.score)
             ]
 
-annotationHTML :: ∀ r.
-                  Annot (score :: Number | r)
+annotationHTML :: Annotation ()
                -> String
-annotationHTML a = wrapWith "div" contents
-  where contents = foldMap (wrapWith "p")
-          [ "Annotation: " <> a.feature.name
-          , "Score: "      <> show a.feature.score
-          , "-log10: "     <> show (negLog10 a.feature.score)
-          ]
+annotationHTML a =
+  wrapWith "div"
+    $ foldMap (wrapWith "p")
+    $ showAnnotation a
 
 
 foreign import initDebugDiv :: ∀ e. Number -> Eff e Unit
@@ -497,17 +494,8 @@ runBrowser config bc = launchAff $ do
     genes <- traverse (getGenes cSys) config.urls.genes
     gwas  <- traverse (getGWAS  cSys) config.urls.gwas
 
-    rawAnnotations <-
-      traverse (uncurry $ getAnnotations' cSys) do
-        snps <- filterSig config.score <$> gwas
-        url <- config.urls.annotations
-        pure $ Tuple snps url
-
-    let annotations = zipMapsWith
-                       (bumpFeatures (to _.feature.score)
-                                      (SProxy :: SProxy "score")
-                                      bumpRadius)
-                       <$> gwas <*> rawAnnotations
+    annotations <-
+      traverse (getAnnotationsNew cSys) config.urls.annotations
 
     pure { genes, gwas, annotations }
 
@@ -552,7 +540,7 @@ runBrowser config bc = launchAff $ do
   let
       slots = uiSlots bc
 
-      entries = foldMap annotLegendTest trackData.annotations
+      entries = foldMap annotationLegendTest trackData.annotations
       legend = { width: slots.right.size.width
                , entries }
 
@@ -568,9 +556,10 @@ runBrowser config bc = launchAff $ do
       mainBrowser :: _
       mainBrowser = drawBrowser cSys {legend, vscale}
                       { gwas: renderGWAS vscale
-                      , annotations: renderAnnot' cSys sigSnps vscale }
+                      , annotations: renderAnnotation cSys sigSnps vscale }
                       { gwas: fromMaybe mempty trackData.gwas
                       , annotations: fromMaybe mempty trackData.annotations }
+
 
 
   liftEff do
@@ -580,7 +569,7 @@ runBrowser config bc = launchAff $ do
           setDebugDivVisibility "visible"
           setDebugDivPoint p
 
-    let findAnnot = annotForSnp bumpRadius
+    let findAnnot = annotationForSnp bumpRadius
                     $ fromMaybe mempty trackData.annotations
 
     let glyphClick :: _
@@ -599,8 +588,7 @@ runBrowser config bc = launchAff $ do
                    cmdInfoBox IBoxShow
                    cmdInfoBox $ IBoxSetX $ Int.round p.x
                    cmdInfoBox $ IBoxSetContents
-                     $ snpHTML g
-                     <> foldMap annotationHTML (findAnnot g)
+                     $ fromMaybe (snpHTML g) (annotationHTML <$> (findAnnot g))
 
 
 

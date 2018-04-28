@@ -302,7 +302,7 @@ trackTotalDimensions d = { width:  d.width  + extra
 
 -- TODO calculate based on glyph bounding boxes
 glyphBufferSize :: Canvas.Dimensions
-glyphBufferSize = { width: 100.0, height: 100.0 }
+glyphBufferSize = { width: 15.0, height: 300.0 }
 
 trackCanvas :: Canvas.Dimensions
             -> Eff _ TrackCanvas

@@ -405,11 +405,16 @@ getAnnotationsNew cs url = do
     log $ "Successfully parsed "
         <> show (length parsed.right :: Int)
         <> " annotations."
+
+    -- logging with unsafeCoerce lets us examine the raw JS object in the console!
+    log $ unsafeCoerce (parsed.right)
   case Array.head parsed.right of
     Nothing -> pure unit
     Just an -> liftEff do
       log "first annotation: "
       sequence_ (log <$> (("> " <> _) <$> showAnnotation an))
+
+
 
   pure $ groupToMap _.feature.chr parsed.right
 
@@ -511,6 +516,24 @@ annotLegendTest fs = trackLegend annotLegendEntry as
              $ Array.fromFoldable
              $ Array.fromFoldable <$> Map.values fs
 
+annotationLegendEntry :: ∀ r. Annotation r -> LegendEntry
+annotationLegendEntry a =
+  case a.feature.gene of
+    Nothing -> mkIcon blue "SNP name"
+    Just gn -> mkIcon red "Gene name"
+
+
+annotationLegendTest :: ∀ f r.
+                   Foldable f
+                => Functor f
+                => Map ChrId (f (Annotation r))
+                -> Array LegendEntry
+annotationLegendTest fs = trackLegend annotationLegendEntry as
+  where as = Array.concat
+             $ Array.fromFoldable
+             $ Array.fromFoldable <$> Map.values fs
+
+
 
 
 
@@ -606,64 +629,6 @@ renderGWAS verscale cdim snps =
 
 
 
-renderAnnot :: ∀ r.
-               { min :: Number, max :: Number | r }
-            -> Canvas.Dimensions
-            -> Map ChrId (Array (Annot (score :: Number)))
-            -> Map ChrId (Pair Number)
-            -> RenderedTrack (Annot (score :: Number))
-renderAnnot verscale cdim annots =
-  let features :: Array (Annot (score :: Number))
-      features = fold annots
-
-      tailHeight = 0.15
-
-      drawing :: Tuple (Annot (score :: Number)) Point -> DrawingN
-      drawing (Tuple an pt) = { drawing: tail <> lg.icon , points: [pt] }
-        where lg = annotLegendEntry an
-              tail = Drawing.outlined (lineWidth 1.3 <> outlineColor black)
-                     $ Drawing.path
-                       [ {x: 0.0, y: 0.0 }
-                       , {x: 0.0, y: tailHeight * cdim.height }]
-
-
-      drawings :: Array (Tuple (Annot (score :: Number)) Point) -> Array DrawingN
-      drawings = map drawing
-
-      label :: Tuple (Annot (score :: Number)) Point -> Label
-      label (Tuple an {x,y}) =
-        { text: an.feature.name
-        , point: { x, y: y - 12.0 }  }
-
-      labels :: Array (Tuple (Annot (score :: Number)) Point) -> Array Label
-      labels = map label
-
-      npointed :: Map ChrId (Array (Tuple (Annot (score :: Number)) NPoint))
-      npointed = (map <<< map) (fanout id place) annots
-        where place p = let p' = placeScored verscale p
-                        in { x: p'.x
-                           , y: Normalized $ min 1.0 (unwrap p'.y + tailHeight) }
-
-      rescale :: Pair Number -> NPoint -> Point
-      rescale seg npoint =
-        let (Pair offset _) = seg
-            x = offset + (pairSize seg) * (unwrap npoint.x)
-            y = cdim.height * (one - unwrap npoint.y)
-        in {x, y}
-
-      pointed :: Map ChrId (Pair Number)
-              -> Array (Tuple (Annot (score :: Number)) Point)
-      pointed segs = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs npointed
-
-      overlaps :: Number -> Point -> Array (Annot (score :: Number))
-      overlaps r p = mempty
-
-  in \seg -> let pts = pointed seg
-             in { features
-                , drawings: drawings pts
-                , labels: labels pts
-                , overlaps: overlaps  }
-
 
 annotForSnp :: ∀ rA rS.
                Bp
@@ -674,8 +639,17 @@ annotForSnp radius annotations {position, feature} = do
   chr <- Map.lookup feature.chrId annotations
   Array.find (\a -> ((radius `aroundPair` a.position) `pairsOverlap` position)) chr
 
+annotationForSnp :: ∀ rA rS.
+               Bp
+            -> Map ChrId (Array (Annotation rA))
+            -> GWASFeature rS
+            -> Maybe (Annotation rA)
+annotationForSnp radius annotations {position, feature} = do
+  chr <- Map.lookup feature.chrId annotations
+  Array.find (\a -> ((radius `aroundPair` a.position) `pairsOverlap` position)) chr
 
-renderAnnot' :: ∀ r r1 r2.
+
+renderAnnot :: ∀ r r1 r2.
                 CoordSys _ _
              -> Map ChrId (Array (GWASFeature ()))
              -> { min :: Number, max :: Number | r }
@@ -683,7 +657,7 @@ renderAnnot' :: ∀ r r1 r2.
              -> Map ChrId (Array (Annot r2))
              -> Map ChrId (Pair Number)
              -> RenderedTrack (Annot r2)
-renderAnnot' cSys sigSnps verscale cdim allAnnots =
+renderAnnot cSys sigSnps verscale cdim allAnnots =
   let features :: Array (Annot r2)
       features = fold allAnnots
 
@@ -769,3 +743,98 @@ renderAnnot' cSys sigSnps verscale cdim allAnnots =
                  , drawings: drawings curPeaks
                  , labels: labels curPeaks
                  , overlaps: overlaps  }
+
+
+
+
+renderAnnotation :: ∀ r r1 r2.
+                    CoordSys _ _
+                 -> Map ChrId (Array (GWASFeature ()))
+                 -> { min :: Number, max :: Number | r }
+                 -> Canvas.Dimensions
+                 -> Map ChrId (Array (Annotation r2))
+                 -> Map ChrId (Pair Number)
+                 -> RenderedTrack (Annotation r2)
+renderAnnotation cSys sigSnps verscale cdim allAnnots =
+  let features :: Array (Annotation r2)
+      features = fold allAnnots
+
+      curAnnotPeaks :: Map ChrId (Pair Number)
+                    -> Map ChrId (Array (Peak Number Number (Annotation r2)))
+      curAnnotPeaks = mapWithIndex f
+        where f :: ChrId -> Pair Number -> Array (Peak _ _ (Annotation r2))
+              f chr seg = fromMaybe [] do
+                  snps <- Map.lookup chr sigSnps
+                  segSize <- _.frameSize <$> Array.head snps
+
+                  let rad = ((wrap 3.75) * segSize) / (wrap $ pairSize seg)
+                      snpPeaks = Debug.trace ("radius: " <> show rad) \_ -> peaks rad snps
+
+                      peakAnnots pk = { covers, y, elements }
+                        where offset = Pair.fst seg
+                              covers = map (\x -> offset + pairSize seg * (unwrap $ x / segSize)) pk.covers
+                              y = cdim.height * (one - (unwrap $ normalizedY verscale pk.y))
+                              elements = fromMaybe [] do
+                                chr <- Map.lookup chr allAnnots
+                                pure $ filter (\a -> a.position
+                                                  `pairsOverlap` pk.covers) chr
+
+                  pure $ map peakAnnots snpPeaks
+
+
+
+      tailHeight = 0.06
+      tailPixels = tailHeight * cdim.height
+      iconYOffset = -6.5
+      labelOffset = -8.0
+
+      drawing :: Peak Number Number (Annotation r2)
+              -> DrawingN
+      drawing aPeak = { drawing: tail <> icons
+                      , points: [{x, y: aPeak.y }] }
+        where (Pair l r) = aPeak.covers
+              x = l + 0.5 * (r - l)
+              icon' = _.icon <<< annotationLegendEntry
+              icons = Drawing.translate 0.0 (-tailPixels)
+                      $ foldr (\a d -> Drawing.translate 0.0 iconYOffset
+                                     $ icon' a <> d) mempty aPeak.elements
+
+              tail = if Array.null aPeak.elements
+                       then mempty
+                       else Drawing.outlined (lineWidth 1.3 <> outlineColor black)
+                              $ Drawing.path
+                                [ {x: 0.0, y: 0.0 }
+                                , {x: 0.0, y: -tailPixels }]
+
+
+      drawings :: Map ChrId (Array (Peak Number Number (Annotation r2)))
+               -> Array DrawingN
+      drawings = foldMap (map drawing)
+
+
+      label :: Peak Number Number (Annotation r2) -> Array Label
+      label aPeak = Tuple.snd
+                    $ foldr f (Tuple y0 mempty) aPeak.elements
+        where y0 = aPeak.y - tailPixels + (4.0 * iconYOffset)
+              (Pair l r) = aPeak.covers
+              x = l + 0.5 * (r - l)
+              f a (Tuple y ls) = Tuple (y + labelOffset)
+                                    $ Array.snoc ls -- TODO this use of snoc is probably reaaaal slow
+                                         { text: fromMaybe a.feature.name a.feature.gene
+                                         , point: { x, y } }
+
+
+      labels :: Map ChrId (Array (Peak Number Number (Annotation r2)))
+             -> Array Label
+      labels = foldMap (foldMap label)
+
+      overlaps :: Number -> Point -> Array (Annotation r2)
+      overlaps r p = mempty
+
+  in \segs -> let curPeaks = curAnnotPeaks segs
+              in { features
+                 , drawings: drawings curPeaks
+                 , labels: labels curPeaks
+                 , overlaps: overlaps  }
+
+

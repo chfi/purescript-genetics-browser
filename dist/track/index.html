@@ -24,7 +24,7 @@
       var localUrls =
       { genes:       "./data/mouse.json",
         gwas:        "./data/gwas.json",
-        annotations: "./data/annots_fake.json"
+        annotations: "./data/annotations.json"
       };
 
       var urlRoot = "https://raw.githubusercontent.com/chfi/genetics-browser-example/master/track/data/";
@@ -47,7 +47,7 @@
           left: vscaleWidth,
           right: legendWidth },
         urls: githubUrls
-        score: { min: 0.0, max: 24.0, sig: 3.75 },
+        score: { min: 0.0, max: 24.0, sig: 4 },
       };
 
       GGB.initBrowser(config)();
