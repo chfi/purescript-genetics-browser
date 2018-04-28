@@ -7,18 +7,23 @@ import Color.Scheme.Clrs (blue, red)
 import Color.Scheme.X11 (darkblue, darkgrey, lightgrey)
 import Control.Coroutine (Producer, transform, ($~), (~~))
 import Control.Monad.Aff (Aff, error, throwError)
+import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Console (log)
+import Control.Monad.Except (runExcept)
 import Data.Argonaut (Json, _Array, _Number, _Object, _String)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Filterable (class Filterable, filter, filterMap, partition)
-import Data.Foldable (class Foldable, any, fold, foldMap, foldr, maximumBy, minimumBy, sum)
+import Data.Either (Either(..))
+import Data.Filterable (class Filterable, filter, filterMap, partition, partitionMap)
+import Data.Foldable (class Foldable, any, fold, foldMap, foldr, length, maximumBy, minimumBy, sequence_, sum)
 import Data.Foreign (F, Foreign, ForeignError(..))
+import Data.Foreign as Foreign
 import Data.Foreign.Index as Foreign
 import Data.Foreign.Keys as Foreign
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
-import Data.Lens (view, (^?))
+import Data.Lens (united, view, (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -30,10 +35,12 @@ import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Profunctor.Strong (fanout)
+import Data.Record as Record
+import Data.Record.Builder (build, insert, modify)
 import Data.Record.Extra (class Keys)
 import Data.Record.Extra as Record
 import Data.String as String
-import Data.Traversable (traverse)
+import Data.Traversable (for, traverse)
 import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
@@ -50,7 +57,7 @@ import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
 import Simple.JSON as Simple
-import Type.Prelude (class RowToList, RLProxy(..))
+import Type.Prelude (class RowToList, RLProxy(..), SProxy(..))
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -272,44 +279,47 @@ fetchAnnotJSON cs str = fetchJSON (annotJSONParse cs) str
 
 
 
-type RawAnnotation r =
-  ( "chr" :: String
-  , "pos" :: Number
+type AnnotationRow chr pos r =
+  ( "chr"  :: chr
+  , "pos"  :: pos
   , "name" :: String
-  , "p_lrt" :: Number
-  , "anno" :: Maybe String
-  , "url" :: Maybe String
+  , "url"  :: Maybe String
   , "gene" :: Maybe String
-  , "synonymes" :: Maybe String
   | r )
 
-type Annotation r = Feature (Record (RawAnnotation r))
+type AnnotationMiscField = { field :: String, value :: Foreign }
 
-annotationFields :: ∀ f rl.
+type Annotation r =
+  Feature (Record (AnnotationRow ChrId Bp
+                     ( rest :: List AnnotationMiscField | r )))
+
+annotationFields :: ∀ a b rl.
                     Keys rl
-                 => RowToList (RawAnnotation ()) rl
+                 => RowToList (AnnotationRow a b ()) rl
                  => List String
 annotationFields =
-  Record.keys (unsafeCoerce unit :: Record (RawAnnotation ()))
+  Record.keys (unsafeCoerce unit :: Record (AnnotationRow a b ()))
 
 
-parseAnnotation :: CoordSys ChrId BigInt -> Foreign -> F (Annotation ())
+parseAnnotation :: CoordSys ChrId BigInt
+                -> Foreign
+                -> F (Annotation ())
 parseAnnotation cSys a = do
-  (raw :: Record (RawAnnotation ())) <- Simple.read' a
-
+  raw <- Simple.read' a
   rest <- parseAnnotationRest a
 
-  let position :: Pair Bp
-      position = (\p -> map wrap (Pair p p)) raw.pos
-      chr = ChrId $ raw.chr
-      feature = { chr
-                , name: raw.name
-                , url: raw.url
-                , p_lrt: raw.p_lrt
-                , gene: raw.gene
-                , rest }
+  let
+      feature =
+        build
+         (insert    (SProxy :: SProxy "rest") rest
+         >>> modify (SProxy :: SProxy "chr") ChrId
+         >>> modify (SProxy :: SProxy "pos") Bp) raw
 
-  frameSize <- case Map.lookup chr (view _Segments cSys) of
+      position = (\p -> Pair p p) $ feature.pos
+
+  frameSize <- case Map.lookup feature.chr (view _Segments cSys) of
+
+
     Nothing ->
       throwError $ pure $ ForeignError
                      "Annotation chr not found in coordinate system!"
@@ -322,17 +332,29 @@ parseAnnotation cSys a = do
 
 
 -- | Partially parse the parts of the annotation record that are *not* in the Annotation type
-parseAnnotationRest :: Foreign -> F (List { field :: String, value :: Foreign })
+parseAnnotationRest :: Foreign
+                    -> F (List AnnotationMiscField)
 parseAnnotationRest a = do
   allFields <- List.fromFoldable <$> Foreign.keys a
 
-  let fun :: Foreign -> String -> F { field :: String, value :: Foreign }
-      fun x field = { field, value: _ } <$> Foreign.readProp field x
+  let restFields = allFields `List.difference` annotationFields
 
-      restFields :: List String
-      restFields = allFields `List.difference` annotationFields
+  for restFields \field ->
+     { field, value: _ } <$> Foreign.readProp field a
 
-  traverse (fun a) restFields
+
+showAnnotation :: ∀ r.
+                  Annotation ()
+               -> List String
+showAnnotation a = (List.fromFoldable
+                    [ name, chr, pos ]) <> (map showOther annot.rest)
+  where annot = a.feature
+        name = fromMaybe ("SNP: " <> annot.name)
+                         (("Gene: " <> _) <$> annot.gene)
+        chr = "Chr: " <> show annot.chr
+        pos = "Pos: " <> show annot.pos
+           -- TODO use a proper, data-relevant Foreign -> String instead of unsafeCoerce
+        showOther fv = fv.field <> ": " <> (unsafeCoerce fv.value)
 
 
 getGWAS :: CoordSys ChrId BigInt -> String
@@ -356,6 +378,41 @@ getAnnotations' :: ∀ rS.
 getAnnotations' cs snps url =  groupToMap _.feature.chrId
                               <$> interestingAnnots (Bp 50000.0) snps
                               <$> fetchAnnotJSON cs url
+
+
+getAnnotationsNew :: ∀ rS.
+                     CoordSys ChrId BigInt
+                  -> String
+                  -> Aff _ (Map ChrId (Array (Annotation ())))
+getAnnotationsNew cs url = do
+  resp <- Affjax.get url
+
+  rawAnnots <- case runExcept
+                    $ Foreign.readArray resp.response of
+                 Left err -> throwError $ error "Annotations data is not an array"
+                 Right as -> pure as
+
+  let parsed = partitionMap
+               (runExcept <<< parseAnnotation cs) rawAnnots
+
+
+  -- debug/testing stuff
+  liftEff do
+    log $ "Raw annotations array length: " <> show (Array.length rawAnnots)
+    log $ "Could not parse "
+        <> show (length parsed.left :: Int)
+        <> " annotations."
+    log $ "Successfully parsed "
+        <> show (length parsed.right :: Int)
+        <> " annotations."
+  case Array.head parsed.right of
+    Nothing -> pure unit
+    Just an -> liftEff do
+      log "first annotation: "
+      sequence_ (log <$> (("> " <> _) <$> showAnnotation an))
+
+  pure $ groupToMap _.feature.chr parsed.right
+
 
 
 inRangeOf :: ∀ rA rB.

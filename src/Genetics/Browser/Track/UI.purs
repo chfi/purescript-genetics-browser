@@ -46,7 +46,7 @@ import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser.Track.Backend (RenderedTrack, bumpFeatures, drawBrowser, negLog10, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, Peak, annotForSnp, annotLegendTest, filterSig, getAnnotations', getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot', renderGWAS, visiblePeaks)
+import Genetics.Browser.Track.Demo (Annot, BedFeature, GWASFeature, Peak, annotForSnp, annotLegendTest, annotationFields, filterSig, getAnnotations', getAnnotationsNew, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderGWAS, visiblePeaks)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, translateViewBy, viewScale)
@@ -613,6 +613,8 @@ runBrowser config bc = launchAff $ do
   -- debugging only
   liftEff $ setWindow "mainBrowser" mainBrowser
 
+  newAnnots <- getAnnotationsNew cSys "./data/annotations.json"
+
   let viewTimeout :: Milliseconds
       viewTimeout = wrap 100.0
 
@@ -621,6 +623,10 @@ runBrowser config bc = launchAff $ do
   cached <- browserCache mainBrowser
 
   _ <- forkAff $ renderLoop cSys cached bc initState
+
+  liftEff do
+    log "annotationfields:"
+    log $ foldMap (_ <> ", ") annotationFields
 
   pure unit
 
