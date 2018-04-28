@@ -32,7 +32,7 @@ import Data.Function (on)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
-import Data.Lens (Iso', iso, re, to, (^.))
+import Data.Lens (Iso', iso, re, (^.))
 import Data.Map (Map)
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
@@ -42,14 +42,14 @@ import Data.Pair as Pair
 import Data.Record.Extra (eqRecord)
 import Data.Symbol (SProxy(..))
 import Data.Traversable (for_, traverse, traverse_)
-import Data.Tuple (Tuple(Tuple), uncurry)
+import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
-import Genetics.Browser.Track.Backend (RenderedTrack, bumpFeatures, drawBrowser, negLog10, zipMapsWith)
-import Genetics.Browser.Track.Demo (Annot, Annotation, BedFeature, GWASFeature, Peak, annotForSnp, annotLegendTest, annotationFields, annotationForSnp, annotationLegendTest, filterSig, getAnnotations', getAnnotationsNew, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnot, renderAnnotation, renderGWAS, showAnnotation, visiblePeaks)
+import Genetics.Browser.Track.Backend (RenderedTrack, drawBrowser, negLog10)
+import Genetics.Browser.Track.Demo (Annot, Annotation, BedFeature, GWASFeature, Peak, annotationFields, annotationForSnp, annotationLegendTest, filterSig, getAnnotationsNew, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnotation, renderGWAS, visiblePeaks)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, translateViewBy, viewScale)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, translateViewBy, viewScale, xPerPixel)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -57,7 +57,6 @@ import Math as Math
 import Partial.Unsafe (unsafePartial)
 import Simple.JSON (read)
 import Unsafe.Coerce (unsafeCoerce)
-
 
 
 foreign import windowInnerSize :: ∀ e. Eff e Canvas.Dimensions
@@ -416,12 +415,26 @@ snpHTML {position, feature} = wrapWith "div" contents
             , "-log10: " <> show (negLog10 feature.score)
             ]
 
+
 annotationHTML :: Annotation ()
-               -> String
-annotationHTML a =
-  wrapWith "div"
-    $ foldMap (wrapWith "p")
-    $ showAnnotation a
+                -> String
+annotationHTML {feature} = wrapWith "div" contents
+  where url = fromMaybe "No URL"
+              $ map (\a -> "URL: <a target='_blank' href='"
+                           <> a <> "'>" <> a <> "</a>") feature.url
+
+        name = fromMaybe ("Annotated SNP: " <> feature.name)
+                         (("Gene: " <> _) <$> feature.gene)
+
+        showOther fv = fv.field <> ": " <> (unsafeCoerce fv.value)
+
+        contents = foldMap (wrapWith "p")
+          $ [ name
+            , "Pos: " <> show (feature.pos)
+            , url
+            , "Other data: "
+            ] <> (map showOther
+                  $ Array.fromFoldable feature.rest)
 
 
 foreign import initDebugDiv :: ∀ e. Number -> Eff e Unit
@@ -497,6 +510,8 @@ runBrowser config bc = launchAff $ do
     annotations <-
       traverse (getAnnotationsNew cSys) config.urls.annotations
 
+    liftEff $ log $ unsafeCoerce annotations
+
     pure { genes, gwas, annotations }
 
   let initialView :: CoordSysView
@@ -565,15 +580,19 @@ runBrowser config bc = launchAff $ do
   liftEff do
     let overlayDebug :: _
         overlayDebug p = do
-
           setDebugDivVisibility "visible"
           setDebugDivPoint p
 
-    let findAnnot = annotationForSnp bumpRadius
+    let findAnnot r = annotationForSnp r
                     $ fromMaybe mempty trackData.annotations
 
-    let glyphClick :: _
+        glyphClick :: _
         glyphClick p = launchAff_ do
+
+          v <- AVar.readVar view
+          let vs = viewScale (bc ^. _Track <<< _Dimensions) v
+              radius = wrap $ (xPerPixel vs) * 3.75
+
           AVar.tryReadVar lastOverlaps >>= case _ of
              Nothing -> liftEff do
                log "clicked no glyphs"
@@ -588,7 +607,8 @@ runBrowser config bc = launchAff $ do
                    cmdInfoBox IBoxShow
                    cmdInfoBox $ IBoxSetX $ Int.round p.x
                    cmdInfoBox $ IBoxSetContents
-                     $ fromMaybe (snpHTML g) (annotationHTML <$> (findAnnot g))
+                     $ fromMaybe (snpHTML g)
+                                 (annotationHTML <$> findAnnot radius g)
 
 
 

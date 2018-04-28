@@ -287,11 +287,11 @@ type AnnotationRow chr pos r =
   , "gene" :: Maybe String
   | r )
 
-type AnnotationMiscField = { field :: String, value :: Foreign }
+type AnnotationField = { field :: String, value :: Foreign }
 
 type Annotation r =
   Feature (Record (AnnotationRow ChrId Bp
-                     ( rest :: List AnnotationMiscField | r )))
+                     ( rest :: List AnnotationField | r )))
 
 annotationFields :: ∀ a b rl.
                     Keys rl
@@ -333,7 +333,7 @@ parseAnnotation cSys a = do
 
 -- | Partially parse the parts of the annotation record that are *not* in the Annotation type
 parseAnnotationRest :: Foreign
-                    -> F (List AnnotationMiscField)
+                    -> F (List AnnotationField)
 parseAnnotationRest a = do
   allFields <- List.fromFoldable <$> Foreign.keys a
 
@@ -343,8 +343,8 @@ parseAnnotationRest a = do
      { field, value: _ } <$> Foreign.readProp field a
 
 
-showAnnotation :: ∀ r.
-                  Annotation ()
+
+showAnnotation :: Annotation ()
                -> List String
 showAnnotation a = (List.fromFoldable
                     [ name, chr, pos ]) <> (map showOther annot.rest)
@@ -627,17 +627,6 @@ renderGWAS verscale cdim snps =
                 , labels: mempty
                 , overlaps: overlaps pts }
 
-
-
-
-annotForSnp :: ∀ rA rS.
-               Bp
-            -> Map ChrId (Array (Annot rA))
-            -> GWASFeature rS
-            -> Maybe (Annot rA)
-annotForSnp radius annotations {position, feature} = do
-  chr <- Map.lookup feature.chrId annotations
-  Array.find (\a -> ((radius `aroundPair` a.position) `pairsOverlap` position)) chr
 
 annotationForSnp :: ∀ rA rS.
                Bp
