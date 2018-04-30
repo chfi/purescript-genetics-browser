@@ -6,7 +6,7 @@ import Color (black)
 import Control.Coroutine (Consumer, Producer, connect, runProcess)
 import Control.Coroutine as Co
 import Control.Monad.Aff (Aff, Fiber, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_)
-import Control.Monad.Aff.AVar (AVar, makeEmptyVar, makeVar, putVar, readVar, takeVar, tryTakeVar)
+import Control.Monad.Aff.AVar (AVAR, AVar, makeVar, putVar, readVar, takeVar, tryTakeVar)
 import Control.Monad.Aff.AVar as AVar
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
@@ -29,28 +29,28 @@ import Data.Either (Either(Right, Left))
 import Data.Filterable (filterMap)
 import Data.Foldable (class Foldable, foldMap, length, null)
 import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
-import Data.Function (on)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
-import Data.Lens (Iso', iso, re, (^.))
+import Data.Lens ((^.))
 import Data.Map (Map)
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
-import Data.Newtype (class Newtype, over, unwrap, wrap)
+import Data.Newtype (over, unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
+import Data.Record (delete, get, insert) as Record
 import Data.Record.Extra (eqRecord)
-import Data.Symbol (SProxy(..))
+import Data.Symbol (SProxy(SProxy))
 import Data.Traversable (for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser.Track.Backend (RenderedTrack, drawBrowser, negLog10)
-import Genetics.Browser.Track.Demo (Annot, Annotation, AnnotationField, BedFeature, GWASFeature, Peak, annotationFields, annotationForSnp, annotationLegendTest, filterSig, getAnnotationsNew, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnotation, renderGWAS, showAnnotationField, visiblePeaks)
+import Genetics.Browser.Track.Demo (Annotation, AnnotationField, BedFeature, GWASFeature, annotationFields, annotationForSnp, annotationLegendTest, filterSig, getAnnotations, getGWAS, getGenes, produceGWAS, produceGenes, renderAnnotation, renderGWAS, showAnnotationField)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, uiSlots, wheelZoom)
-import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, translateViewBy, viewScale, xPerPixel)
+import Genetics.Browser.Types (ChrId(ChrId))
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, translateViewBy, viewScale, xPerPixel)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -182,10 +182,6 @@ type UIState e = { view         :: AVar CoordSysView
                  }
 
 
-_PairRec :: ∀ a. Iso' (Pair a) { l :: a, r :: a }
-_PairRec = iso (\(Pair l r) -> {l, r}) (\ {l, r} -> Pair l r)
-
-
 debugView :: UIState _
           -> Eff _ { get :: _
                    , set :: _ }
@@ -198,87 +194,18 @@ debugView s = do
              setWindow name unit
            Just v  -> do
              log $ "CoordSysView: " <> show (map BigInt.toString $ unwrap v)
-             setWindow name $ unwrap v ^. _PairRec
+             setWindow name $ (\(Pair l r) -> {l,r}) $ unwrap v
 
   let set lr = launchAff_ do
          view <- AVar.tryTakeVar s.view
          case view of
            Nothing -> pure unit
            Just _  -> do
-             let v' = wrap $ lr ^. re _PairRec
+             let v' = wrap $ Pair lr.l lr.r
              _ <- AVar.tryPutVar (inj _render unit) s.uiCmd
              AVar.putVar v' s.view
 
   pure {get, set}
-
-
-newtype AffCache e a b =
-  AffCache { diff :: a -> a -> Boolean
-           , cache :: a -> Aff e b }
-
-derive instance newtypeAffCache :: Newtype (AffCache e a b) _
-derive instance genericAffCache :: Generic (AffCache e a b) _
-
-derive instance functorAffCache :: Functor (AffCache e a)
-
-cacheFun :: ∀ e a b.
-            (a -> a -> Boolean)
-         -> (a -> b)
-         -> Aff _ (AffCache _ a b)
-cacheFun diff f = do
-  inVar  <- AVar.makeEmptyVar
-  outVar <- AVar.makeEmptyVar
-
-  let cache = \a -> do
-        lastIn  <- AVar.tryTakeVar inVar
-        lastOut <- AVar.tryTakeVar outVar
-        let o = case lastIn, lastOut of
-                  Just i, Just o -> if diff a i then f a else o
-                  _, _ -> f a
-
-        AVar.putVar a inVar
-        AVar.putVar o outVar
-        pure o
-
-  pure $ AffCache { diff, cache }
-
-cacheFun' :: ∀ e a b.
-             (a -> a -> Boolean)
-          -> (a -> b)
-          -> AVar a
-          -> AVar b
-          -> AffCache _ a b
-cacheFun' diff f inVar outVar =
-  let cache = \a -> do
-        lastIn  <- AVar.tryTakeVar inVar
-        lastOut <- AVar.tryTakeVar outVar
-        let o = case lastIn, lastOut of
-                  Just i, Just o -> if diff a i then f a else o
-                  _, _ -> f a
-
-        AVar.putVar a inVar
-        AVar.putVar o outVar
-        pure o
-
-  in AffCache { diff, cache }
-  let cache = \a -> do
-        lastIn  <- AVar.tryTakeVar inVar
-        lastOut <- AVar.tryTakeVar outVar
-        let o = case lastIn, lastOut of
-                  Just i, Just o -> if diff a i then f a else o
-                  _, _ -> f a
-
-        AVar.putVar a inVar
-        AVar.putVar o outVar
-        pure o
-
-  pure $ AffCache { diff, cache }
-
-
-cached :: ∀ a b.
-          AffCache _ a b
-       -> a -> Aff _ b
-cached = _.cache <<< unwrap
 
 
 
@@ -514,29 +441,26 @@ runBrowser config bc = launchAff $ do
   let cSys :: CoordSys ChrId BigInt
       cSys = coordSys mouseChrSizes
 
-      bumpRadius = Bp 50000000.0
-
   trackData <- do
     genes <- traverse (getGenes cSys) config.urls.genes
     gwas  <- traverse (getGWAS  cSys) config.urls.gwas
 
     annotations <-
-      traverse (getAnnotationsNew cSys) config.urls.annotations
+      traverse (getAnnotations cSys) config.urls.annotations
 
     liftEff $ log $ unsafeCoerce annotations
 
     pure { genes, gwas, annotations }
 
+
+
   let initialView :: CoordSysView
       initialView = wrap $ Pair zero (cSys^._TotalSize)
       trackDims = bc ^. _Track <<< _Dimensions
 
-      peaks' :: ViewScale -> Map ChrId (Array (Peak _ _ _))
-      peaks' vs = visiblePeaks vs
-                  $ filterSig config.score
-                  $ fromMaybe mempty trackData.gwas
 
-  viewCmd <- makeEmptyVar
+
+  viewCmd <- AVar.makeEmptyVar
 
   liftEff do
     btnScroll 0.05 viewCmd
@@ -551,15 +475,18 @@ runBrowser config bc = launchAff $ do
        queueCmd viewCmd $ ZoomView $ 1.0 + scrollZoomScale * dY
 
 
-  uiCmd <- makeVar (inj _render unit)
+  uiCmd <- AVar.makeEmptyVar
 
   liftEff do
     resizeEvent \d ->
       queueCmd uiCmd (inj _docResize d)
 
+    queueCmd uiCmd (inj _render unit)
 
-  view <- makeVar initialView
-  renderFiber <- makeEmptyVar
+
+
+  view <- AVar.makeVar initialView
+  renderFiber <- AVar.makeEmptyVar
   lastOverlaps <- AVar.makeEmptyVar
 
   let initState :: UIState _
@@ -578,8 +505,7 @@ runBrowser config bc = launchAff $ do
                , color: black
                , min: s.min, max: s.max, sig: s.sig }
 
-
-      sigSnps = fromMaybe mempty $ filterSig config.score <$> trackData.gwas
+      sigSnps = foldMap (filterSig config.score) trackData.gwas
 
       mainBrowser :: _
       mainBrowser = drawBrowser cSys {legend, vscale}
@@ -633,8 +559,6 @@ runBrowser config bc = launchAff $ do
 
   -- debugging only
   liftEff $ setWindow "mainBrowser" mainBrowser
-
-  newAnnots <- getAnnotationsNew cSys "./data/annotations.json"
 
   let viewTimeout :: Milliseconds
       viewTimeout = wrap 100.0
@@ -732,13 +656,11 @@ fetchLoop :: CoordSys ChrId BigInt
           -> Aff _
                { gwas :: TrackVar (GWASFeature ())
                , genes :: TrackVar BedFeature
-               , annotations :: TrackVar (Annot ())
                }
 fetchLoop cs urls = do
   gwas <-        fetchLoop1 $ produceGWAS   cs <$> urls.gwas
-  annotations <- fetchLoop1 $ produceAnnots cs <$> urls.annotations
   genes <-       fetchLoop1 $ produceGenes  cs <$> urls.genes
-  pure { gwas, genes, annotations }
+  pure { gwas, genes }
 
 
 
