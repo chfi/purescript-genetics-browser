@@ -26,6 +26,7 @@ import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
+import Data.Filterable (filterMap)
 import Data.Foldable (class Foldable, foldMap, length, null)
 import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
 import Data.Function (on)
@@ -46,7 +47,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser.Track.Backend (RenderedTrack, drawBrowser, negLog10)
-import Genetics.Browser.Track.Demo (Annot, Annotation, BedFeature, GWASFeature, Peak, annotationFields, annotationForSnp, annotationLegendTest, filterSig, getAnnotationsNew, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnotation, renderGWAS, visiblePeaks)
+import Genetics.Browser.Track.Demo (Annot, Annotation, AnnotationField, BedFeature, GWASFeature, Peak, annotationFields, annotationForSnp, annotationLegendTest, filterSig, getAnnotationsNew, getGWAS, getGenes, produceAnnots, produceGWAS, produceGenes, renderAnnotation, renderGWAS, showAnnotationField, visiblePeaks)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, uiSlots, wheelZoom)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), ViewScale, _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, translateViewBy, viewScale, xPerPixel)
@@ -386,17 +387,12 @@ renderLoop cSys drawCachedBrowser canvas state = forever do
   putVar renderFiber state.renderFiber
 
 
-
 printSNPInfo :: ∀ r. Array (GWASFeature r) -> Eff _ Unit
 printSNPInfo fs = do
   let n = length fs :: Int
       m = 5
-      showSnp f = log $ f.feature.name <> " - "
-                     <> unwrap f.feature.chrId <> " @ "
-                     <> show (map show f.position)
-
   log $ "showing " <> show m <> " out of " <> show n <> " clicked glyphs"
-  for_ (Array.take m fs) showSnp
+  for_ (Array.take m fs) (log <<< unsafeCoerce)
 
 
 wrapWith :: String -> String -> String
@@ -416,9 +412,13 @@ snpHTML {position, feature} = wrapWith "div" contents
             ]
 
 
-annotationHTML :: Annotation ()
-                -> String
-annotationHTML {feature} = wrapWith "div" contents
+
+-- | Given a function to transform the data in the annotation's "rest" field
+-- | to text (or Nothing if the field should not be displayed), produce a
+-- | function that generates HTML from annotations
+annotationHTML :: (AnnotationField -> Maybe String)
+                -> Annotation () -> String
+annotationHTML disp {feature} = wrapWith "div" contents
   where url = fromMaybe "No URL"
               $ map (\a -> "URL: <a target='_blank' href='"
                            <> a <> "'>" <> a <> "</a>") feature.url
@@ -433,8 +433,21 @@ annotationHTML {feature} = wrapWith "div" contents
             , "Pos: " <> show (feature.pos)
             , url
             , "Other data: "
-            ] <> (map showOther
+            ] <> (filterMap disp
                   $ Array.fromFoldable feature.rest)
+
+-- | Shows all data in "rest" using the default showAnnotationField (which uses unsafeCoerce)
+annotationHTMLAll :: Annotation () -> String
+annotationHTMLAll =
+  annotationHTML (pure <<< showAnnotationField)
+
+-- | Example HTML generator that only shows the "anno" field
+annotationHTMLAnnoOnly :: Annotation () -> String
+annotationHTMLAnnoOnly = annotationHTML disp
+  where disp fv
+          | fv.field == "anno" = pure $ showAnnotationField fv
+          | otherwise          = Nothing
+
 
 
 foreign import initDebugDiv :: ∀ e. Number -> Eff e Unit
@@ -608,7 +621,7 @@ runBrowser config bc = launchAff $ do
                    cmdInfoBox $ IBoxSetX $ Int.round p.x
                    cmdInfoBox $ IBoxSetContents
                      $ fromMaybe (snpHTML g)
-                                 (annotationHTML <$> findAnnot radius g)
+                                 (annotationHTMLAll <$> findAnnot radius g)
 
 
 

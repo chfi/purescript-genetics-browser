@@ -15,13 +15,13 @@ import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(..))
-import Data.Filterable (class Filterable, filter, filterMap, partition, partitionMap)
-import Data.Foldable (class Foldable, any, fold, foldMap, foldr, length, maximumBy, minimumBy, sequence_, sum)
+import Data.Filterable (filter, filterMap, partition, partitionMap)
+import Data.Foldable (class Foldable, fold, foldMap, foldr, length, maximumBy, minimumBy, sequence_)
 import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.Foreign (F, Foreign, ForeignError(..))
-import Data.Foreign as Foreign
-import Data.Foreign.Index as Foreign
-import Data.Foreign.Keys as Foreign
+import Data.Foreign (readArray) as Foreign
+import Data.Foreign.Index (readProp) as Foreign
+import Data.Foreign.Keys (keys) as Foreign
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Lens (view, (^?))
@@ -36,11 +36,9 @@ import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Profunctor.Strong (fanout)
-import Data.Record as Record
 import Data.Record.Builder (build, insert, modify)
 import Data.Record.Extra (class Keys)
-import Data.Record.Extra as Record
-import Data.String as String
+import Data.Record.Extra (keys) as Record
 import Data.Traversable (for, traverse)
 import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
@@ -50,7 +48,7 @@ import Debug.Trace as Debug
 import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, Label, groupToMap, mkIcon, negLog10, trackLegend)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), ViewScale, _Segments, aroundPair, pairSize, pairsOverlap, xPerPixel)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
@@ -344,18 +342,20 @@ parseAnnotationRest a = do
      { field, value: _ } <$> Foreign.readProp field a
 
 
+-- | A completely dumb default way of rendering arbitrary annotation fields
+showAnnotationField :: AnnotationField -> String
+showAnnotationField fv = fv.field <> ": " <> unsafeCoerce fv.value
+
 
 showAnnotation :: Annotation ()
                -> List String
 showAnnotation a = (List.fromFoldable
-                    [ name, chr, pos ]) <> (map showOther annot.rest)
+                    [ name, chr, pos ]) <> (map showAnnotationField annot.rest)
   where annot = a.feature
         name = fromMaybe ("SNP: " <> annot.name)
                          (("Gene: " <> _) <$> annot.gene)
         chr = "Chr: " <> show annot.chr
         pos = "Pos: " <> show annot.pos
-           -- TODO use a proper, data-relevant Foreign -> String instead of unsafeCoerce
-        showOther fv = fv.field <> ": " <> (unsafeCoerce fv.value)
 
 
 getGWAS :: CoordSys ChrId BigInt -> String
