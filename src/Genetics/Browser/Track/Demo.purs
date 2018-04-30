@@ -17,13 +17,14 @@ import Data.BigInt as BigInt
 import Data.Either (Either(..))
 import Data.Filterable (class Filterable, filter, filterMap, partition, partitionMap)
 import Data.Foldable (class Foldable, any, fold, foldMap, foldr, length, maximumBy, minimumBy, sequence_, sum)
+import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.Foreign (F, Foreign, ForeignError(..))
 import Data.Foreign as Foreign
 import Data.Foreign.Index as Foreign
 import Data.Foreign.Keys as Foreign
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
-import Data.Lens (united, view, (^?))
+import Data.Lens (view, (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -46,18 +47,18 @@ import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
 import Debug.Trace as Debug
-import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, Label, _range, _single, groupToMap, mkIcon, negLog10, trackLegend, zipMapsWith)
+import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, Label, groupToMap, mkIcon, negLog10, trackLegend)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), ViewScale(..), _Segments, aroundPair, pairSize, pairsOverlap, xPerPixel)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), ViewScale, _Segments, aroundPair, pairSize, pairsOverlap, xPerPixel)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
+import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
 import Simple.JSON as Simple
-import Type.Prelude (class RowToList, RLProxy(..), SProxy(..))
+import Type.Prelude (class RowToList, SProxy(SProxy))
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -124,7 +125,7 @@ produceGenes cs url = do
 
 bedDraw :: BedFeature
         -> DrawingV
-bedDraw gene = inj _range \w ->
+bedDraw gene = inj (SProxy :: SProxy "range") \w ->
   let (Pair l r) = gene.position
       toLocal x = w * (unwrap $ x / gene.frameSize)
 
@@ -157,10 +158,10 @@ bedDraw gene = inj _range \w ->
   in { drawing, width }
 
 geneRenderer :: OldRenderer BedFeature
-geneRenderer = inj _single { draw: bedDraw, horPlace, verPlace: const (Normalized 0.10) }
+geneRenderer = inj (SProxy :: SProxy "single") { draw: bedDraw, horPlace, verPlace: const (Normalized 0.10) }
   where horPlace {position, frameSize} =
           let f p = Normalized (unwrap $ p / frameSize)
-          in inj _range $ map f position
+          in inj (SProxy :: SProxy "range") $ map f position
 
 
 
@@ -608,9 +609,12 @@ renderGWAS verscale cdim snps =
             y = cdim.height * (one - unwrap npoint.y)
         in {x, y}
 
+
       pointed :: Map ChrId (Pair Number)
               -> Array (Tuple (GWASFeature ()) Point)
-      pointed segs = fold $ zipMapsWith (\s p -> (map <<< map) (rescale s) p) segs npointed
+      pointed segs = foldMapWithIndex f segs
+        where f chrId seg = foldMap ((map <<< map) $ rescale seg)
+                              $ Map.lookup chrId npointed
 
       overlaps :: Array (Tuple (GWASFeature ()) Point)
                -> Number -> Point

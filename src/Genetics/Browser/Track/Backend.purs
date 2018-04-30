@@ -9,6 +9,7 @@ import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum, minimum)
 import Data.FoldableWithIndex (foldMapWithIndex)
+import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
 import Data.Lens (Getter', view, (^.))
@@ -37,54 +38,9 @@ import Math as Math
 import Type.Prelude (class RowLacks)
 
 
-intersection :: forall k a b.
-                Ord k
-             => Map k a
-             -> Map k b
-             -> Map k a
-intersection a b = Map.filterKeys (flip Map.member b) a
-
-zipMaps :: forall k a b.
-           Ord k
-        => Map k a
-        -> Map k b
-        -> Map k (Tuple a b)
-zipMaps a b =
-  let kas = Array.unzip $ Map.toAscUnfoldable $ a `intersection` b
-      kbs = Array.unzip $ Map.toAscUnfoldable $ b `intersection` a
-      kabs = uncurry Array.zip $ map (Array.zip (snd kas)) kbs
-  in Map.fromFoldable kabs
-
-
-zipMapsWith :: forall k a b c.
-            Ord k
-            => (a -> b -> c)
-            -> Map k a
-            -> Map k b
-            -> Map k c
-zipMapsWith f a b = uncurry f <$> zipMaps a b
-
-
-_point = SProxy :: SProxy "point"
-_range = SProxy :: SProxy "range"
-
-_batch = (SProxy :: SProxy "batch")
-_single = (SProxy :: SProxy "single")
-
 type Feature a = { position  :: Pair Bp
                  , frameSize :: Bp
                  , feature   :: a }
-
-
--- The very basic shapes a glyph can consist of (for now)
-data GlyphShape
-  = GCircle Number
-  | GRect Number Number
-  | GMany (List GlyphShape)
-
--- A `GlyphDrawing` is a shape plus styles informing how to render it (from purescript-drawing)
-data GlyphDrawing
-  = GDrawing OutlineStyle FillStyle GlyphShape
 
 
 type NPoint = { x :: Normalized Number
@@ -150,8 +106,8 @@ chrLabelTrack cs =
         Drawing.text font' zero zero (fillColor black) (unwrap chr)
 
       mkLabel :: ChrId -> NormalizedGlyph
-      mkLabel chr = { drawing: inj _point $ chrText chr
-                    , horPos:  inj _point $ Normalized (0.5)
+      mkLabel chr = { drawing: inj (SProxy :: SProxy "point") $ chrText chr
+                    , horPos:  inj (SProxy :: SProxy "point") $ Normalized (0.5)
                     , verPos: Normalized (0.03) }
 
   in mapWithIndex (\i _ -> [mkLabel i]) $ cs ^. _Segments
@@ -195,32 +151,6 @@ chrLabelTrack' slot segs =
 --              in outlined (outlineColor black <> lineWidth 1.5) rect
 
 
-
-bumpFeatures :: forall f a l i o.
-                Foldable f
-             => Functor f
-             => RowCons l Number i o
-             => RowLacks l i
-             => IsSymbol l
-             => Getter' (Feature (Record a)) Number
-             -> SProxy l
-             -> Bp
-             -> f (Feature (Record a))
-             -> f (Feature (Record i))
-             -> f (Feature (Record o))
-bumpFeatures f l radius other = map bump
-  where minInRadius :: Pair Bp -> Number
-        minInRadius lr = fromMaybe 1.0
-                         $ minimum
-                          $ map (\g -> if pairsOverlap g.position lr
-                                          then f `view` g else 1.0) other
-
-        bump :: Feature (Record i) -> Feature (Record o)
-        bump a =
-          let y = minInRadius (aroundPair radius a.position)
-          in { position: a.position
-             , frameSize: a.frameSize
-             , feature: Record.insert l y a.feature }
 
 
 type VScaleRow r = ( min :: Number
@@ -336,15 +266,13 @@ groupToMap f = foldl (\grp a -> Map.alter (add a) (f a) grp ) mempty
 
 
 
-eqLegend a b = a.text == b.text
-
 trackLegend :: forall f a.
                Foldable f
             => Functor f
             => (a -> LegendEntry)
             -> f a
             -> Array LegendEntry
-trackLegend f as = Array.nubBy eqLegend $ Array.fromFoldable $ map f as
+trackLegend f as = Array.nubBy (eq `on` _.text) $ Array.fromFoldable $ map f as
 
 
 
