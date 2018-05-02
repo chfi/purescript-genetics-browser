@@ -45,10 +45,10 @@ import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
 import Debug.Trace as Debug
-import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, Label, groupToMap, mkIcon, negLog10, trackLegend)
+import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, Label, LegendEntry, NPoint, OldRenderer, RenderedTrack, featureNormX, groupToMap, mkIcon, trackLegend)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
-import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap)
+import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
+import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
@@ -105,20 +105,6 @@ getGenes cs url = do
   let fs = filterMap (bedToFeature cs) ls
 
   pure $ groupToMap _.feature.chrId $ fs
-
-produceGenes :: CoordSys ChrId BigInt -> String
-             -> Aff _
-                (Producer
-                 (Map ChrId (Array BedFeature))
-                 (Aff _) Unit)
-produceGenes cs url = do
-  prod <- fetchForeignChunks url
-
-  pure
-    $ prod
-    $~ parsedLineTransformer
-    ~~ transform
-       (groupToMap _.feature.chrId <<< filterMap (bedToFeature cs))
 
 
 bedDraw :: BedFeature
@@ -185,52 +171,46 @@ featureProd url parse = do
   pure $ prod $~ (transform $ groupToMap _.feature.chrId <<< filterMap parse)
 
 
--- TODO bundle up all the producers into one function on a record of URLs
---      to a record of producers (maprecord? applyrecord?)
-produceGWAS :: CoordSys ChrId _
-            -> String
-            -> Aff _
-               (Producer
-                (Map ChrId
-                 (Array (GWASFeature ())))
-                 (Aff _) Unit)
-produceGWAS cs url = featureProd url $ gemmaJSONParse cs
 
+type SNPRow chr score r =
+  ( "chrId"  :: chr
+  , "name" :: String
+  , "score" :: score
+  | r )
 
-fetchJSON :: ∀ a.
-             (Json -> Maybe a)
-          -> String
-          -> Aff _ (Array a)
-fetchJSON p url = do
-  json <- _.response <$> Affjax.get url
+type SNP r =
+  Feature (Record (SNPRow ChrId Number r))
 
-  case json ^? _Array of
-    Nothing -> throwError $ error "Parse error: JSON is not an array"
-    Just as -> case traverse p as of
-      Nothing -> throwError $ error "Failed to parse JSON features"
-      Just fs -> pure $ fs
+parseSNP :: CoordSys ChrId BigInt
+         -> Foreign
+         -> F (SNP ())
+parseSNP cSys a = do
+  raw <- Simple.read' a
 
+  let
+      snp :: { chr :: _, ps :: _, p_wald :: _, rs :: _ }
+      snp = raw
 
-type GWASFeature r = Feature { score :: Number
-                             , chrId :: ChrId
-                             , name  :: String | r }
+      feature :: Record (SNPRow ChrId Number ())
+      feature =
+        { score:      snp.p_wald
+        , chrId: wrap snp.chr
+        , name:       snp.rs }
 
-gemmaJSONParse :: CoordSys ChrId BigInt
-               -> Json
-               -> Maybe (GWASFeature ())
-gemmaJSONParse cs j = do
-  obj <- j ^? _Object
-  chrId <- ChrId <$> obj ^? ix "chr" <<< _String
-  pos   <- Bp    <$> obj ^? ix "ps"  <<< _Number
-  score <-           obj ^? ix "p_wald"  <<< _Number
-  name  <-           obj ^? ix "rs"  <<< _String
+      position = (\p -> wrap <$> Pair p p) $ snp.ps
 
-  chrSize <- (Bp <<< BigInt.toNumber <<< pairSize) <$> Map.lookup chrId (view _Segments cs)
+  frameSize <- case Map.lookup feature.chrId (view _Segments cSys) of
 
-  pure { position: Pair pos pos
-       , frameSize: chrSize
-       , feature: { score, chrId, name }
-       }
+    Nothing ->
+      throwError $ pure $ ForeignError
+                     "Annotation chr not found in coordinate system!"
+    Just seg ->
+      pure $ Bp $ BigInt.toNumber $ pairSize seg
+
+  pure $ { position
+         , frameSize
+         , feature }
+
 
 
 type AnnotationRow chr pos r =
@@ -313,11 +293,23 @@ showAnnotation a = (List.fromFoldable
         pos = "Pos: " <> show annot.pos
 
 
-getGWAS :: CoordSys ChrId BigInt -> String
-        -> Aff _ (Map ChrId (Array (GWASFeature ())))
-getGWAS cs url = groupToMap _.feature.chrId
-                  <$> filter (\f -> Pair.fst (f.position) >= wrap zero)
-                  <$> fetchJSON (gemmaJSONParse cs) url
+getSNPs :: CoordSys ChrId BigInt
+        -> String
+        -> Aff _ (Map ChrId (Array (SNP ())))
+getSNPs cs url = do
+  resp <- Affjax.get url
+
+  rawSNPs <-
+    case runExcept $ Foreign.readArray resp.response of
+           Left err -> throwError $ error "SNP data is not an array"
+           Right as -> pure as
+
+  let parsed =
+        partitionMap (runExcept <<< parseSNP cs) rawSNPs
+
+  pure $ groupToMap _.feature.chrId
+         $ filter (\f -> Pair.fst (f.position) >= wrap zero)
+         $ parsed.right
 
 
 getAnnotations :: CoordSys ChrId BigInt
@@ -389,9 +381,9 @@ type Peak x y r = { covers :: Pair x
 
 peak1 :: ∀ rS.
          Bp
-      -> Array (GWASFeature rS)
-      -> Maybe (Tuple (Peak _ _ (GWASFeature rS))
-                      (Array (GWASFeature rS)))
+      -> Array (SNP rS)
+      -> Maybe (Tuple (Peak _ _ (SNP rS))
+                      (Array (SNP rS)))
 peak1 radius snps = do
   top <- minimumBy (compare `on` _.feature.score) snps
 
@@ -404,8 +396,8 @@ peak1 radius snps = do
 
 peaks :: ∀ rS.
          Bp
-      -> Array (GWASFeature rS)
-      -> Array (Peak Bp Number (GWASFeature rS))
+      -> Array (SNP rS)
+      -> Array (Peak Bp Number (SNP rS))
 peaks r snps = unfoldr (peak1 r) snps
 
 
@@ -460,23 +452,23 @@ dist p1 p2 = Math.sqrt $ x' `Math.pow` 2.0 + y' `Math.pow` 2.0
 
 filterSig :: ∀ r1 r2.
              { sig :: Number | r1 }
-          -> Map ChrId (Array (GWASFeature r2))
-          -> Map ChrId (Array (GWASFeature r2))
 filterSig {sig} = map (filter isSignificant)
   where sig' = 10.0 `Math.pow` (-sig)
         isSignificant {feature} = feature.score <= sig'
 
+          -> Map ChrId (Array (SNP r2))
+          -> Map ChrId (Array (SNP r2))
 
 
 
-renderGWAS :: ∀ r.
+renderSNPs :: ∀ r.
               { min :: Number, max :: Number | r }
            -> Canvas.Dimensions
-           -> Map ChrId (Array (GWASFeature ()))
+           -> Map ChrId (Array (SNP ()))
            -> Map ChrId (Pair Number)
-           -> RenderedTrack (GWASFeature ())
-renderGWAS verscale cdim snps =
-  let features :: Array (GWASFeature ())
+           -> RenderedTrack (SNP ())
+renderSNPs verScale cdim snps =
+  let features :: Array (SNP ())
       features = fold snps
 
       radius = 3.75
@@ -488,12 +480,12 @@ renderGWAS verscale cdim snps =
               fill = filled (fillColor color) c
           in out <> fill
 
-      drawings :: Array (Tuple (GWASFeature ()) Point) -> Array DrawingN
+      drawings :: Array (Tuple (SNP ()) Point) -> Array DrawingN
       drawings pts = let (Tuple _ points) = Array.unzip pts
                      in [{ drawing, points }]
 
-      npointed :: Map ChrId (Array (Tuple (GWASFeature ()) NPoint))
       npointed = (map <<< map) (fanout id (placeScored verscale)) snps
+      npointed :: Map ChrId (Array (Tuple (SNP ()) NPoint))
 
       rescale :: Pair Number -> NPoint -> Point
       rescale seg npoint =
@@ -504,16 +496,16 @@ renderGWAS verscale cdim snps =
 
 
       pointed :: Map ChrId (Pair Number)
-              -> Array (Tuple (GWASFeature ()) Point)
+              -> Array (Tuple (SNP ()) Point)
       pointed segs = foldMapWithIndex f segs
         where f chrId seg = foldMap ((map <<< map) $ rescale seg)
                               $ Map.lookup chrId npointed
 
-      overlaps :: Array (Tuple (GWASFeature ()) Point)
+      overlaps :: Array (Tuple (SNP ()) Point)
                -> Number -> Point
-               -> Array (GWASFeature ())
+               -> Array (SNP ())
       overlaps pts radius' pt = filterMap covers pts
-        where covers :: Tuple (GWASFeature ()) Point -> Maybe (GWASFeature ())
+        where covers :: Tuple (SNP ()) Point -> Maybe (SNP ())
               covers (Tuple f fPt)
                 | dist fPt pt <= radius + radius'   = Just f
                 | otherwise = Nothing
@@ -541,7 +533,7 @@ annotationForSnp radius annotations {position, feature} = do
 
 renderAnnotation :: ∀ r r1 r2.
                     CoordSys _ _
-                 -> Map ChrId (Array (GWASFeature ()))
+                 -> Map ChrId (Array (SNP ()))
                  -> { min :: Number, max :: Number | r }
                  -> Canvas.Dimensions
                  -> Map ChrId (Array (Annotation r2))

@@ -46,11 +46,11 @@ import Data.Traversable (for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
-import Genetics.Browser.Track.Backend (RenderedTrack, drawBrowser, negLog10)
-import Genetics.Browser.Track.Demo (Annotation, AnnotationField, BedFeature, GWASFeature, annotationFields, annotationForSnp, annotationLegendTest, filterSig, getAnnotations, getGWAS, getGenes, produceGWAS, produceGenes, renderAnnotation, renderGWAS, showAnnotationField)
+import Genetics.Browser.Track.Backend (RenderedTrack, drawBrowser)
+import Genetics.Browser.Track.Demo (Annotation, AnnotationField, BedFeature, SNP, annotationFields, annotationLegendTest, filterSig, getAnnotations, getGenes, getSNPs, renderAnnotation, renderSNPs, showAnnotationField)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, uiSlots, wheelZoom)
-import Genetics.Browser.Types (ChrId(ChrId))
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pixelsView, scaleViewBy, translateViewBy, viewScale, xPerPixel)
+import Genetics.Browser.Types (ChrId(ChrId), _NegLog10)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, translateViewBy, viewScale, xPerPixel)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -178,7 +178,7 @@ type UIState e = { view         :: AVar CoordSysView
                  , viewCmd      :: AVar UpdateView
                  , uiCmd        :: AVar (Variant UICmdR)
                  , renderFiber  :: AVar (Fiber e Unit)
-                 , lastOverlaps :: AVar (Number -> Point -> { gwas :: Array (GWASFeature ()) } )
+                 , lastOverlaps :: AVar (Number -> Point -> { snps :: Array (SNP ()) } )
                  }
 
 
@@ -214,13 +214,13 @@ browserCache
   :: ∀ a b.
      (BrowserCanvas
       -> CoordSysView
-      -> { tracks :: { gwas :: a
+      -> { tracks :: { snps :: a
                      , annotations :: b }
          , relativeUI :: Drawing
          , fixedUI :: Drawing })
      -> Aff _ (BrowserCanvas
                -> CoordSysView
-               -> Aff _ ({ tracks :: { gwas :: a
+               -> Aff _ ({ tracks :: { snps :: a
                                      , annotations :: b }
                          , relativeUI :: Drawing
                          , fixedUI :: Drawing }))
@@ -274,7 +274,7 @@ renderLoop :: CoordSys _ _
            -> (BrowserCanvas
                -> CoordSysView
                -> Aff _ ({ tracks ::
-                              { gwas :: RenderedTrack (GWASFeature ())
+                              { snps :: RenderedTrack (SNP ())
                               , annotations :: RenderedTrack (Annotation ()) }
                          , relativeUI :: Drawing
                          , fixedUI :: Drawing }))
@@ -305,7 +305,7 @@ renderLoop cSys drawCachedBrowser canvas state = forever do
   _ <- AVar.tryTakeVar state.lastOverlaps
                     -- offset the click by the current canvas translation
   AVar.putVar (\n r -> let r' = {x: r.x + offset, y: r.y }
-                       in { gwas: toRender.tracks.gwas.overlaps n r' }) state.lastOverlaps
+                       in { snps: toRender.tracks.snps.overlaps n r' }) state.lastOverlaps
 
   -- fork a new renderFiber
   renderFiber <- forkAff
@@ -314,7 +314,7 @@ renderLoop cSys drawCachedBrowser canvas state = forever do
   putVar renderFiber state.renderFiber
 
 
-printSNPInfo :: ∀ r. Array (GWASFeature r) -> Eff _ Unit
+printSNPInfo :: ∀ r. Array (SNP r) -> Eff _ Unit
 printSNPInfo fs = do
   let n = length fs :: Int
       m = 5
@@ -327,7 +327,7 @@ wrapWith tag x =
   "<"<> tag <>">" <> x <> "</"<> tag <>">"
 
 snpHTML :: ∀ r.
-           GWASFeature r
+           SNP r
         -> String
 snpHTML {position, feature} = wrapWith "div" contents
   where contents = foldMap (wrapWith "p")
@@ -443,22 +443,18 @@ runBrowser config bc = launchAff $ do
 
   trackData <- do
     genes <- traverse (getGenes cSys) config.urls.genes
-    gwas  <- traverse (getGWAS  cSys) config.urls.gwas
+    snps  <- traverse (getSNPs  cSys) config.urls.snps
 
     annotations <-
       traverse (getAnnotations cSys) config.urls.annotations
 
     liftEff $ log $ unsafeCoerce annotations
 
-    pure { genes, gwas, annotations }
-
-
+    pure { genes, snps, annotations }
 
   let initialView :: CoordSysView
       initialView = wrap $ Pair zero (cSys^._TotalSize)
       trackDims = bc ^. _Track <<< _Dimensions
-
-
 
   viewCmd <- AVar.makeEmptyVar
 
@@ -505,13 +501,13 @@ runBrowser config bc = launchAff $ do
                , color: black
                , min: s.min, max: s.max, sig: s.sig }
 
-      sigSnps = foldMap (filterSig config.score) trackData.gwas
+      sigSnps = foldMap (filterSig config.score) trackData.snps
 
       mainBrowser :: _
       mainBrowser = drawBrowser cSys {legend, vscale}
-                      { gwas: renderGWAS vscale
+                      { snps: renderSNPs vscale
                       , annotations: renderAnnotation cSys sigSnps vscale }
-                      { gwas: fromMaybe mempty trackData.gwas
+                      { snps: fromMaybe mempty trackData.snps
                       , annotations: fromMaybe mempty trackData.annotations }
 
 
@@ -538,7 +534,7 @@ runBrowser config bc = launchAff $ do
                cmdInfoBox IBoxShow
 
              Just gs -> liftEff do
-               let clicked = (gs clickRadius p).gwas
+               let clicked = (gs clickRadius p).snps
                printSNPInfo clicked
                case Array.head clicked of
                  Nothing -> cmdInfoBox IBoxHide
@@ -577,7 +573,7 @@ runBrowser config bc = launchAff $ do
 
 
 
-type DataURLs = { gwas        :: Maybe String
+type DataURLs = { snps        :: Maybe String
                 , annotations :: Maybe String
                 , genes       :: Maybe String
                 }

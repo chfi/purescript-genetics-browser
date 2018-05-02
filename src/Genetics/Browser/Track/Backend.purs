@@ -357,13 +357,13 @@ type Renderer a =
 drawBrowser :: forall a b.
                CoordSys ChrId BigInt
             -> { legend :: Legend, vscale :: VScale }
-            -> { gwas        :: Renderer a
+            -> { snps        :: Renderer a
                , annotations :: Renderer b }
-            -> { gwas        :: Map ChrId (Array a)
+            -> { snps        :: Map ChrId (Array a)
                , annotations :: Map ChrId (Array b) }
             -> BrowserCanvas
             -> CoordSysView
-            -> { tracks     :: { gwas :: RenderedTrack a
+            -> { tracks     :: { snps :: RenderedTrack a
                                , annotations :: RenderedTrack b }
                , relativeUI :: Drawing
                , fixedUI    :: Drawing }
@@ -399,10 +399,10 @@ drawBrowser cs ui renderers inputTracks canvas =
 
       tracks :: CoordSysView -> _
       tracks =
-        let gwasT  = renderers.gwas trackDim inputTracks.gwas
+        let snpsT  = renderers.snps trackDim inputTracks.snps
             annotT = renderers.annotations trackDim inputTracks.annotations
         in \v -> let segs = segmentPixels v
-                 in { gwas: gwasT segs
+                 in { snps: snpsT segs
                     , annotations: annotT segs }
 
 

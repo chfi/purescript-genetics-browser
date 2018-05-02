@@ -560,7 +560,7 @@ renderBrowser :: ∀ a b c.
                  Milliseconds
               -> BrowserCanvas
               -> Number
-              -> { tracks     :: { gwas :: Renderable a
+              -> { tracks     :: { snps :: Renderable a
                                  , annotations :: Renderable b }
                 , relativeUI :: Drawing
                 , fixedUI :: Drawing }
@@ -568,7 +568,7 @@ renderBrowser :: ∀ a b c.
 renderBrowser d (BrowserCanvas bc) offset ui = do
 
   let
-      labels = ui.tracks.gwas.labels <> ui.tracks.annotations.labels
+      labels = ui.tracks.snps.labels <> ui.tracks.annotations.labels
 
   -- Render the UI
   liftEff do
@@ -604,10 +604,10 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
   liftEff $ translateBuffer { x: trackInnerPad - offset
                             , y: trackInnerPad } bfr
 
-  let gwasTrack  = ui.tracks.gwas.drawings
+  let snpsTrack  = ui.tracks.snps.drawings
       annotTrack = ui.tracks.annotations.drawings
 
-  for_ [gwasTrack, annotTrack] \t ->
+  for_ [snpsTrack, annotTrack] \t ->
     for_ t \s -> do
       liftEff $ renderGlyphs bc.track s
       delay d
