@@ -2,7 +2,7 @@ module Genetics.Browser.Track.Demo where
 
 import Prelude
 
-import Color (Color, black)
+import Color (black)
 import Color.Scheme.Clrs (blue, red)
 import Color.Scheme.X11 (darkblue, darkgrey, lightgrey)
 import Control.Coroutine (Producer, transform, ($~), (~~))
@@ -24,7 +24,8 @@ import Data.Foreign.Index (readProp) as Foreign
 import Data.Foreign.Keys (keys) as Foreign
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
-import Data.Lens (view, (^?))
+import Data.Lens (Iso', re, view, viewOn, (^.), (^?))
+import Data.Lens as Lens
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -32,7 +33,8 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Monoid (mempty)
-import Data.Newtype (unwrap, wrap)
+import Data.Newtype (under, unwrap, wrap)
+import Data.Newtype as Newtype
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Profunctor.Strong (fanout)
@@ -83,7 +85,6 @@ bedToFeature cs pl = do
       blocks = Array.zipWith
                  (\start size -> map toBp (Pair start size))
                  pl.blockStarts pl.blockSizes
-
 
   pure { position
        , frameSize
@@ -146,7 +147,6 @@ geneRenderer = inj (SProxy :: SProxy "single") { draw: bedDraw, horPlace, verPla
   where horPlace {position, frameSize} =
           let f p = Normalized (unwrap $ p / frameSize)
           in inj (SProxy :: SProxy "range") $ map f position
-
 
 
 fetchJsonChunks :: String
@@ -349,32 +349,6 @@ getAnnotations cs url = do
 
 
 
-type Peak' x r = { covers :: Pair x
-                 , peak   :: r
-                 , mountain  :: Array r }
-
-
-peak' :: ∀ x y a.
-         Ord x
-      => Ring x
-      => { pos   :: a -> Pair x
-         , value :: a -> Ordering }
-      -> x
-      -> Array a
-      -> Maybe (Tuple (Peak' x a)
-                      (Array a))
-peak' {pos, value} radius as = do
-  peak <- maximumBy (compare `on` value) as
-
-  let covers = radius `aroundPair` pos peak
-      {no, yes} = partition (\p -> pos p `pairsOverlap` covers) as
-
-  pure $ Tuple {covers, peak, mountain: yes} no
-
-
-
-
-
 type Peak x y r = { covers :: Pair x
                   , y :: y
                   , elements :: Array r }
@@ -421,26 +395,20 @@ annotationLegendTest fs = trackLegend annotationLegendEntry as
 
 
 
-
-
-
 ------------ new renderers~~~~~~~~~
-
 
 placeScored :: ∀ r1 r2.
                { min :: Number, max :: Number | r1 }
             -> Feature { score :: Number | r2 }
             -> NPoint
-placeScored verScale { frameSize, position: (Pair l _), feature } = {x, y}
-  where x = Normalized $ unwrap $ l / frameSize
-        y = normalizedY verScale feature.score
+placeScored vs s =
+    { x: featureNormX s
+    , y: wrap $ normYLogScore vs s.feature.score
+    }
 
 
-normalizedY :: ∀ r.
-               { min :: Number, max :: Number | r }
-            -> Number
-            -> Normalized Number
-normalizedY {min, max} y = Normalized $ ((negLog10 y) - min) / (max - min)
+normYLogScore s =
+  normalize s.min s.max <<< unwrap <<< view _NegLog10
 
 
 dist :: Point -> Point -> Number
@@ -449,16 +417,12 @@ dist p1 p2 = Math.sqrt $ x' `Math.pow` 2.0 + y' `Math.pow` 2.0
         y' = p1.y - p2.y
 
 
-
 filterSig :: ∀ r1 r2.
              { sig :: Number | r1 }
-filterSig {sig} = map (filter isSignificant)
-  where sig' = 10.0 `Math.pow` (-sig)
-        isSignificant {feature} = feature.score <= sig'
-
           -> Map ChrId (Array (SNP r2))
           -> Map ChrId (Array (SNP r2))
-
+filterSig {sig} = map (filter
+  (\snp -> snp.feature.score <= (NegLog10 sig ^. re _NegLog10)))
 
 
 renderSNPs :: ∀ r.
@@ -484,8 +448,13 @@ renderSNPs verScale cdim snps =
       drawings pts = let (Tuple _ points) = Array.unzip pts
                      in [{ drawing, points }]
 
-      npointed = (map <<< map) (fanout id (placeScored verscale)) snps
       npointed :: Map ChrId (Array (Tuple (SNP ()) NPoint))
+      npointed = (map <<< map)
+        (fanout id (\s ->
+           { x: featureNormX s
+           , y: wrap $ normYLogScore verScale s.feature.score })) snps
+
+
 
       rescale :: Pair Number -> NPoint -> Point
       rescale seg npoint =
@@ -517,18 +486,6 @@ renderSNPs verScale cdim snps =
                 , overlaps: overlaps pts }
 
 
-annotationForSnp :: ∀ rA rS.
-               Bp
-            -> Map ChrId (Array (Annotation rA))
-            -> GWASFeature rS
-            -> Maybe (Annotation rA)
-annotationForSnp radius annotations {position, feature} = do
-  chr <- Map.lookup feature.chrId annotations
-  Array.find (\a -> ((radius `aroundPair` a.position) `pairsOverlap` position)) chr
-
-
-
-
 
 
 renderAnnotation :: ∀ r r1 r2.
@@ -539,32 +496,28 @@ renderAnnotation :: ∀ r r1 r2.
                  -> Map ChrId (Array (Annotation r2))
                  -> Map ChrId (Pair Number)
                  -> RenderedTrack (Annotation r2)
-renderAnnotation cSys sigSnps verscale cdim allAnnots =
-  let features :: Array (Annotation r2)
-      features = fold allAnnots
+renderAnnotation cSys sigSnps vScale cdim allAnnots =
+  let
+      peakAnnots seg@(Pair l _) snps size annots pk = { covers, y, elements }
+
+        where covers = (\x -> l + pairSize seg * (unwrap $ x / size)) <$> pk.covers
+              y = cdim.height * (one - normYLogScore vScale pk.y)
+              elements = filter (pairsOverlap pk.covers <<< _.position) annots
+
 
       curAnnotPeaks :: Map ChrId (Pair Number)
                     -> Map ChrId (Array (Peak Number Number (Annotation r2)))
       curAnnotPeaks = mapWithIndex f
         where f :: ChrId -> Pair Number -> Array (Peak _ _ (Annotation r2))
               f chr seg = fromMaybe [] do
-                  snps <- Map.lookup chr sigSnps
-                  segSize <- _.frameSize <$> Array.head snps
+                  snps      <- Map.lookup chr sigSnps
+                  annots    <- Map.lookup chr allAnnots
+                  frameSize <- _.frameSize <$> Array.head snps
 
-                  let rad = ((wrap 3.75) * segSize) / (wrap $ pairSize seg)
-                      snpPeaks = Debug.trace ("radius: " <> show rad) \_ -> peaks rad snps
+                  let rad = (wrap 3.75 * frameSize) / (wrap $ pairSize seg)
 
-                      peakAnnots pk = { covers, y, elements }
-                        where offset = Pair.fst seg
-                              covers = map (\x -> offset + pairSize seg * (unwrap $ x / segSize)) pk.covers
-                              y = cdim.height * (one - (unwrap $ normalizedY verscale pk.y))
-                              elements = fromMaybe [] do
-                                chr <- Map.lookup chr allAnnots
-                                pure $ filter (\a -> a.position
-                                                  `pairsOverlap` pk.covers) chr
-
-                  pure $ map peakAnnots snpPeaks
-
+                  pure $ peakAnnots seg snps frameSize annots
+                       <$> peaks rad snps
 
 
       tailHeight = 0.06
@@ -612,6 +565,9 @@ renderAnnotation cSys sigSnps verscale cdim allAnnots =
              -> Array Label
       labels = foldMap (foldMap label)
 
+      features :: Array (Annotation r2)
+      features = fold allAnnots
+
       overlaps :: Number -> Point -> Array (Annotation r2)
       overlaps r p = mempty
 
@@ -620,5 +576,3 @@ renderAnnotation cSys sigSnps verscale cdim allAnnots =
                  , drawings: drawings curPeaks
                  , labels: labels curPeaks
                  , overlaps: overlaps  }
-
-

@@ -34,6 +34,7 @@ import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
 import Data.Lens ((^.))
 import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (over, unwrap, wrap)
@@ -335,7 +336,7 @@ snpHTML {position, feature} = wrapWith "div" contents
             , "Chr: "    <> show feature.chrId
             , "Pos: "    <> show (Pair.fst position)
             , "Score: "  <> show feature.score
-            , "-log10: " <> show (negLog10 feature.score)
+            , "-log10: " <> show (unwrap $ (feature.score ^. _NegLog10))
             ]
 
 
@@ -428,7 +429,6 @@ initInfoBox = do
   pure $ updateInfoBox el
 
 
--- TODO configure UI widths
 runBrowser :: Conf -> BrowserCanvas -> Eff _ _
 runBrowser config bc = launchAff $ do
 
@@ -480,7 +480,6 @@ runBrowser config bc = launchAff $ do
     queueCmd uiCmd (inj _render unit)
 
 
-
   view <- AVar.makeVar initialView
   renderFiber <- AVar.makeEmptyVar
   lastOverlaps <- AVar.makeEmptyVar
@@ -511,15 +510,18 @@ runBrowser config bc = launchAff $ do
                       , annotations: fromMaybe mempty trackData.annotations }
 
 
-
   liftEff do
     let overlayDebug :: _
         overlayDebug p = do
           setDebugDivVisibility "visible"
           setDebugDivPoint p
 
-    let findAnnot r = annotationForSnp r
-                    $ fromMaybe mempty trackData.annotations
+    let annotAround r snp =
+          Array.find (\a -> ((r `aroundPair` a.position)
+                             `pairsOverlap` snp.position))
+            =<< Map.lookup snp.feature.chrId
+            =<< trackData.annotations
+
 
         glyphClick :: _
         glyphClick p = launchAff_ do
@@ -543,9 +545,7 @@ runBrowser config bc = launchAff $ do
                    cmdInfoBox $ IBoxSetX $ Int.round p.x
                    cmdInfoBox $ IBoxSetContents
                      $ fromMaybe (snpHTML g)
-                                 (annotationHTMLAll <$> findAnnot radius g)
-
-
+                                 (annotationHTMLAll <$> annotAround radius g)
 
 
     browserOnClick bc
@@ -564,10 +564,6 @@ runBrowser config bc = launchAff $ do
   cached <- browserCache mainBrowser
 
   _ <- forkAff $ renderLoop cSys cached bc initState
-
-  liftEff do
-    log "annotationfields:"
-    log $ foldMap (_ <> ", ") annotationFields
 
   pure unit
 
@@ -647,6 +643,7 @@ fetchLoop1 (Just startProd) = do
 -- | Starts threads that fetch & parse each of the provided tracks,
 -- | filling an AVar over time per track, which can be used by other parts of the application
 -- | (read only, should be a newtype)
+{-
 fetchLoop :: CoordSys ChrId BigInt
           -> DataURLs
           -> Aff _
@@ -657,7 +654,7 @@ fetchLoop cs urls = do
   gwas <-        fetchLoop1 $ produceGWAS   cs <$> urls.gwas
   genes <-       fetchLoop1 $ produceGenes  cs <$> urls.genes
   pure { gwas, genes }
-
+-}
 
 
 mouseChrSizes :: Array (Tuple ChrId BigInt)

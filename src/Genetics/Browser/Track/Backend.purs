@@ -18,7 +18,7 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
-import Data.Newtype (unwrap)
+import Data.Newtype (unwrap, wrap)
 import Data.Number.Format as Num
 import Data.Pair (Pair(..))
 import Data.Record as Record
@@ -41,6 +41,10 @@ import Type.Prelude (class RowLacks)
 type Feature a = { position  :: Pair Bp
                  , frameSize :: Bp
                  , feature   :: a }
+
+featureNormX :: Feature _ -> Normalized Number
+featureNormX { frameSize, position: (Pair l _) } = wrap $ unwrap (l / frameSize)
+
 
 
 type NPoint = { x :: Normalized Number
@@ -162,9 +166,6 @@ type VScale = { width :: Number
               , color :: Color
               | VScaleRow () }
 
-
-negLog10 :: Number -> Number
-negLog10 p = - ((Math.log p) / Math.ln10)
 
 drawVScale :: forall r.
               VScale
@@ -336,8 +337,6 @@ withPixelSegments cs cdim bView =
 
 type DrawingN = { drawing :: Drawing, points :: Array Point }
 type Label = { text :: String, point :: Point }
-
-
 
 
 type RenderedTrack a = { features :: Array a

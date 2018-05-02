@@ -1,6 +1,7 @@
 module Genetics.Browser.Types where
 
 import Prelude
+
 import Data.Foreign.Class (class Decode, class Encode)
 import Data.Lens (iso)
 import Data.Lens.Iso.Newtype (_Newtype)
@@ -8,6 +9,7 @@ import Data.Lens.Types (Iso')
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.String as String
+import Math as Math
 
 type Point = { x :: Number, y :: Number}
 
@@ -131,3 +133,15 @@ bpToPixels (BpPerPixel s) (Bp p) = p / s
 
 pixelsToBp :: BpPerPixel -> Number -> Bp
 pixelsToBp (BpPerPixel s) p = Bp $ p * s
+
+
+
+newtype NegLog10 = NegLog10 Number
+
+derive instance newtypeNegLog10 :: Newtype NegLog10 _
+
+
+_NegLog10 :: Iso' Number NegLog10
+_NegLog10 = iso to from
+  where to   p = wrap $ (-((Math.log p) / Math.ln10))
+        from (NegLog10 p) = 10.0 `Math.pow` (-p)

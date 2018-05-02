@@ -331,3 +331,16 @@ scaleViewBy :: CoordSysView
             -> Number
             -> CoordSysView
 scaleViewBy (CoordSysView p) x = CoordSysView $ scalePairBy p x
+
+
+
+lerp :: ∀ a.
+        Ring a
+     => a -> a -> a -> a
+lerp x0 x1 t = (one - t) * x0 + (t * x1)
+
+
+normalize :: ∀ a.
+             EuclideanRing a
+          => a -> a -> a -> a
+normalize x0 x1 t = (t - x0) / (x1 - x0)
