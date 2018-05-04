@@ -457,9 +457,8 @@ renderSNPs verScale cdim snps =
 
 
       rescale :: Pair Number -> NPoint -> Point
-      rescale seg npoint =
-        let (Pair offset _) = seg
-            x = offset + (pairSize seg) * (unwrap npoint.x)
+      rescale seg@(Pair offset _) npoint =
+        let x = offset + (pairSize seg) * (unwrap npoint.x)
             y = cdim.height * (one - unwrap npoint.y)
         in {x, y}
 
@@ -559,6 +558,66 @@ renderAnnotation cSys sigSnps vScale cdim allAnnots =
                                     $ Array.snoc ls -- TODO this use of snoc is probably reaaaal slow
                                          { text: fromMaybe a.feature.name a.feature.gene
                                          , point: { x, y } }
+
+
+      -- part of the canvas that a given peak will cover when rendered
+      drawingCovers :: ∀ a.
+                       Peak Number Number a
+                    -> Canvas.Rectangle
+      drawingCovers aPeak = {x,y,w,h}
+        where (Pair x _) = aPeak.covers
+              w = 14.0  -- hardcoded glyph width in pixels
+              gH = 14.0 -- hardcoded height
+              h = gH * length aPeak.elements
+              y = aPeak.y - h
+
+
+      drawAndLabel :: Peak Number Number (Annotation r2)
+                   -> Tuple DrawingN (Array Label)
+      drawAndLabel aPeak = Tuple drawing' label'
+        where
+              (Pair l r) = aPeak.covers
+              x = l + 0.5 * (r - l)
+
+              icon' = _.icon <<< annotationLegendEntry
+              icons = Drawing.translate 0.0 (-tailPixels)
+                      $ foldr (\a d -> Drawing.translate 0.0 iconYOffset
+                                     $ icon' a <> d) mempty aPeak.elements
+
+              tail = if Array.null aPeak.elements
+                       then mempty
+                       else Drawing.outlined (lineWidth 1.3 <> outlineColor black)
+                              $ Drawing.path
+                                [ {x: 0.0, y: 0.0 }, {x: 0.0, y: -tailPixels }]
+
+              drawing' = { drawing: tail <> icons, points: [{x, y: aPeak.y }] }
+
+              dC = drawingCovers aPeak
+
+                    -- hardcoded test to see if a few lines of labels fit above
+              labelX0 =
+                if (drawingCovers aPeak).y > 55.0
+                    then x
+                    else x + 1.5 * dC.w
+
+              labelY0 = aPeak.y - tailPixels + (4.0 * iconYOffset)
+
+              label' = Tuple.snd $ foldr f (Tuple labelY0 mempty) aPeak.elements
+              f a (Tuple y ls) = Tuple (y + labelOffset)
+                                    $ Array.snoc ls
+                                         { text: fromMaybe a.feature.name a.feature.gene
+                                         , point: { x: labelX0, y } }
+
+
+
+
+
+
+
+
+
+
+
 
 
       labels :: Map ChrId (Array (Peak Number Number (Annotation r2)))
