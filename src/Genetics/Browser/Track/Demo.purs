@@ -47,8 +47,9 @@ import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
 import Debug.Trace as Debug
-import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, Label, LegendEntry, NPoint, OldRenderer, RenderedTrack, featureNormX, groupToMap, mkIcon, trackLegend)
+import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, featureNormX, groupToMap, mkIcon, trackLegend)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
+import Genetics.Browser.Track.UI.Canvas (Label, LabelPlace(..))
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
 import Graphics.Canvas as Canvas
@@ -485,8 +486,6 @@ renderSNPs verScale cdim snps =
                 , overlaps: overlaps pts }
 
 
-
-
 renderAnnotation :: ∀ r r1 r2.
                     CoordSys _ _
                  -> Map ChrId (Array (SNP ()))
@@ -498,7 +497,6 @@ renderAnnotation :: ∀ r r1 r2.
 renderAnnotation cSys sigSnps vScale cdim allAnnots =
   let
       peakAnnots seg@(Pair l _) snps size annots pk = { covers, y, elements }
-
         where covers = (\x -> l + pairSize seg * (unwrap $ x / size)) <$> pk.covers
               y = cdim.height * (one - normYLogScore vScale pk.y)
               elements = filter (pairsOverlap pk.covers <<< _.position) annots
@@ -518,47 +516,10 @@ renderAnnotation cSys sigSnps vScale cdim allAnnots =
                   pure $ peakAnnots seg snps frameSize annots
                        <$> peaks rad snps
 
-
       tailHeight = 0.06
       tailPixels = tailHeight * cdim.height
-      iconYOffset = -6.5
-      labelOffset = -8.0
-
-      drawing :: Peak Number Number (Annotation r2)
-              -> DrawingN
-      drawing aPeak = { drawing: tail <> icons
-                      , points: [{x, y: aPeak.y }] }
-        where (Pair l r) = aPeak.covers
-              x = l + 0.5 * (r - l)
-              icon' = _.icon <<< annotationLegendEntry
-              icons = Drawing.translate 0.0 (-tailPixels)
-                      $ foldr (\a d -> Drawing.translate 0.0 iconYOffset
-                                     $ icon' a <> d) mempty aPeak.elements
-
-              tail = if Array.null aPeak.elements
-                       then mempty
-                       else Drawing.outlined (lineWidth 1.3 <> outlineColor black)
-                              $ Drawing.path
-                                [ {x: 0.0, y: 0.0 }
-                                , {x: 0.0, y: -tailPixels }]
-
-
-      drawings :: Map ChrId (Array (Peak Number Number (Annotation r2)))
-               -> Array DrawingN
-      drawings = foldMap (map drawing)
-
-
-      label :: Peak Number Number (Annotation r2) -> Array Label
-      label aPeak = Tuple.snd
-                    $ foldr f (Tuple y0 mempty) aPeak.elements
-        where y0 = aPeak.y - tailPixels + (4.0 * iconYOffset)
-              (Pair l r) = aPeak.covers
-              x = l + 0.5 * (r - l)
-              f a (Tuple y ls) = Tuple (y + labelOffset)
-                                    $ Array.snoc ls -- TODO this use of snoc is probably reaaaal slow
-                                         { text: fromMaybe a.feature.name a.feature.gene
-                                         , point: { x, y } }
-
+      iconYOffset = 6.5
+      labelOffset = 8.0
 
       -- part of the canvas that a given peak will cover when rendered
       drawingCovers :: ∀ a.
@@ -567,71 +528,58 @@ renderAnnotation cSys sigSnps vScale cdim allAnnots =
       drawingCovers aPeak = {x,y,w,h}
         where (Pair x _) = aPeak.covers
               w = 14.0  -- hardcoded glyph width in pixels
-              gH = 14.0 -- hardcoded height
-              h = gH * length aPeak.elements
+              gH = (11.0 - iconYOffset) -- hardcoded height
+              h = tailPixels + gH * length aPeak.elements
               y = aPeak.y - h
 
 
       drawAndLabel :: Peak Number Number (Annotation r2)
-                   -> Tuple DrawingN (Array Label)
-      drawAndLabel aPeak = Tuple drawing' label'
+                   -> Tuple (Array DrawingN) (Array Label)
+      drawAndLabel aPeak = Tuple [drawing] label
         where
               (Pair l r) = aPeak.covers
               x = l + 0.5 * (r - l)
 
-              icon' = _.icon <<< annotationLegendEntry
               icons = Drawing.translate 0.0 (-tailPixels)
-                      $ foldr (\a d -> Drawing.translate 0.0 iconYOffset
-                                     $ icon' a <> d) mempty aPeak.elements
+                      $ foldr (\a d -> Drawing.translate 0.0 (-iconYOffset)
+                                     $ (annotationLegendEntry a).icon <> d)
+                          mempty aPeak.elements
 
               tail = if Array.null aPeak.elements
-                       then mempty
-                       else Drawing.outlined (lineWidth 1.3 <> outlineColor black)
-                              $ Drawing.path
-                                [ {x: 0.0, y: 0.0 }, {x: 0.0, y: -tailPixels }]
+                then mempty
+                else Drawing.outlined (lineWidth 1.3 <> outlineColor black)
+                       $ Drawing.path [ {x: 0.0, y: 0.0 }, {x: 0.0, y: -tailPixels }]
 
-              drawing' = { drawing: tail <> icons, points: [{x, y: aPeak.y }] }
+              drawing = { drawing: tail <> icons, points: [{x, y: aPeak.y }] }
+
+              -- hardcoded font size because this will be handled by UI.Canvas later
+              fontHeight = 14.0
+              labelsHeight = length aPeak.elements * fontHeight
 
               dC = drawingCovers aPeak
+                -- if all the labels fit above the icons, they're centered;
+                -- otherwise just place them to the left and hope for the best
+              {g, y0} = if dC.y > labelsHeight
+                then { g: LCenter, y0: dC.y  }
+                else { g: LLeft, y0: aPeak.y }
 
-                    -- hardcoded test to see if a few lines of labels fit above
-              labelX0 =
-                if (drawingCovers aPeak).y > 55.0
-                    then x
-                    else x + 1.5 * dC.w
-
-              labelY0 = aPeak.y - tailPixels + (4.0 * iconYOffset)
-
-              label' = Tuple.snd $ foldr f (Tuple labelY0 mempty) aPeak.elements
-              f a (Tuple y ls) = Tuple (y + labelOffset)
+              label = Tuple.snd $ foldr f (Tuple y0 mempty) aPeak.elements
+              f a (Tuple y ls) = Tuple (y - labelOffset)
                                     $ Array.snoc ls
                                          { text: fromMaybe a.feature.name a.feature.gene
-                                         , point: { x: labelX0, y } }
+                                         , point: { x, y }
+                                         , gravity: g
+                                         }
 
-
-
-
-
-
-
-
-
-
-
-
-
-      labels :: Map ChrId (Array (Peak Number Number (Annotation r2)))
-             -> Array Label
-      labels = foldMap (foldMap label)
+      drawAndLabelAll :: Map ChrId (Array (Peak _ _ _))
+                      -> Tuple (Array DrawingN) (Array Label)
+      drawAndLabelAll pks = foldMap (foldMap drawAndLabel) pks
 
       features :: Array (Annotation r2)
       features = fold allAnnots
 
-      overlaps :: Number -> Point -> Array (Annotation r2)
-      overlaps r p = mempty
-
-  in \segs -> let curPeaks = curAnnotPeaks segs
+  in \segs -> let (Tuple drawings labels) =
+                    drawAndLabelAll $ curAnnotPeaks segs
               in { features
-                 , drawings: drawings curPeaks
-                 , labels: labels curPeaks
-                 , overlaps: overlaps  }
+                 , drawings, labels
+                 , overlaps: mempty  }
