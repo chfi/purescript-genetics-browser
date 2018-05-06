@@ -25,7 +25,7 @@ import Data.Record as Record
 import Data.Symbol (class IsSymbol, SProxy(SProxy))
 import Data.Tuple (Tuple(..), snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas(..), UISlot, UISlots, _Dimensions, _Track)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas(..), UISlot, UISlots, Label, _Dimensions, _Track)
 import Genetics.Browser.Track.UI.Canvas as Canvas
 import Genetics.Browser.Types (Bp, ChrId)
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap, scaledSegments, scaledSegments', viewScale)
@@ -336,7 +336,6 @@ withPixelSegments cs cdim bView =
 
 
 type DrawingN = { drawing :: Drawing, points :: Array Point }
-type Label = { text :: String, point :: Point }
 
 
 type RenderedTrack a = { features :: Array a

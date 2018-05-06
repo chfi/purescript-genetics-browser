@@ -478,7 +478,12 @@ renderGlyphs (TrackCanvas tc) {drawing, points} = do
 
 
 
-type Label = { text :: String, point :: Point }
+type Label = { text :: String, point :: Point, gravity :: LabelPlace }
+
+data LabelPlace = LLeft | LCenter | LRight
+
+derive instance eqLabelPlace :: Eq LabelPlace
+
 
 -- hardcoded global label font for now
 -- can't use Drawing.Font because we need raw Canvas to measure the text size,
@@ -493,15 +498,21 @@ labelFont = Drawing.fontString $ Drawing.font sansSerif labelFontSize mempty
 -- | Calculate the rectangle covered by a label when it'd be rendered
 -- | to a provided canvas context
 labelBox :: Context2D -> Label -> Eff _ Canvas.Rectangle
-labelBox ctx {text, point} = do
+labelBox ctx {text, point, gravity} = do
   {width} <- Canvas.withContext ctx do
     _ <- Canvas.setFont labelFont ctx
     Canvas.measureText ctx text
 
   -- close enough height, actually calculating it is a nightmare
   let height = Int.toNumber labelFontSize
+      pad = 14.0 + width / 2.0
+      x = case gravity of
+        LCenter -> point.x
+        LLeft   -> point.x - pad
+        LRight  -> point.x + pad
 
-  pure $ { x: point.x, y: point.y
+  pure $ { x
+         , y: point.y - height
          , w: width, h: height }
 
 
@@ -551,10 +562,11 @@ renderLabels ls ctx = do
         box.rect.y
 
 
+
 type Renderable r = { drawings :: Array { drawing :: Drawing
                                         , points :: Array Point }
-                    , labels :: Array { text :: String
-                                      , point :: Point } | r }
+                    , labels :: Array Label | r }
+
 
 renderBrowser :: ∀ a b c.
                  Milliseconds
@@ -562,8 +574,8 @@ renderBrowser :: ∀ a b c.
               -> Number
               -> { tracks     :: { snps :: Renderable a
                                  , annotations :: Renderable b }
-                , relativeUI :: Drawing
-                , fixedUI :: Drawing }
+                 , relativeUI :: Drawing
+                 , fixedUI :: Drawing }
              -> Aff _ Unit
 renderBrowser d (BrowserCanvas bc) offset ui = do
 
