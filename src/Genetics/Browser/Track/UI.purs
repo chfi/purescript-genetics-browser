@@ -41,6 +41,8 @@ import Data.Newtype (over, unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Record (delete, get, insert) as Record
+import Data.Record.Builder as Record
+import Data.Record.Builder (insert)
 import Data.Record.Extra (eqRecord)
 import Data.Symbol (SProxy(SProxy))
 import Data.Traversable (for_, traverse, traverse_)
@@ -107,15 +109,23 @@ updateViewFold uv iv = case uv of
   ModView f    -> over CoordSysView f iv
 
 
+queueCmd :: ∀ a. AVar a -> a -> Eff _ Unit
+queueCmd av cmd = launchAff_ $ putVar cmd av
+
+
+-- | Provided with the AVar containing the view state (which is updated atomically)
+-- | and the UICmd AVar queue (which is only written to),
+-- | return a function that queues view updates using the provided timeout.
 uiViewUpdate :: ∀ r.
                 CoordSys _ BigInt
              -> Milliseconds
-             -> { view :: AVar CoordSysView
-                , viewCmd :: AVar UpdateView
+             -> { view  :: AVar CoordSysView
                 , uiCmd :: AVar (Variant UICmdR) | r }
-             -> Aff _ Unit
-uiViewUpdate cs timeout { view, viewCmd, uiCmd } = do
-  curCmdVar <- makeVar (ModView id)
+             -> Aff _ (UpdateView -> Eff _ Unit)
+uiViewUpdate cs timeout { view, uiCmd } = do
+  viewCmd <- AVar.makeEmptyVar
+
+  curCmdVar <- AVar.makeVar (ModView id)
 
   let normView = normalizeView cs (BigInt.fromInt 200000)
       loop' updater = do
@@ -131,10 +141,9 @@ uiViewUpdate cs timeout { view, viewCmd, uiCmd } = do
         updater' <- forkAff do
             delay timeout
             liftEff $ log "Running view update"
+
             vr <- takeVar view
-
             let vr' = normView $ updateViewFold cmd' vr
-
             putVar vr' view
 
             putVar (inj _render unit) uiCmd
@@ -142,28 +151,20 @@ uiViewUpdate cs timeout { view, viewCmd, uiCmd } = do
 
         loop' updater'
 
-  loop' (pure unit)
+  _ <- forkAff $ loop' (pure unit)
 
-
-queueCmd :: ∀ a. AVar a -> a -> Eff _ Unit
-queueCmd av cmd = launchAff_ $ putVar cmd av
-
-
-btnScroll :: Number -> AVar UpdateView -> Eff _ Unit
-btnScroll x av = do
-  buttonEvent "scrollLeft"  $ queueCmd av $ ScrollView (-x)
-  buttonEvent "scrollRight" $ queueCmd av $ ScrollView   x
-
-
-btnZoom :: Number -> AVar UpdateView -> Eff _ Unit
-btnZoom x av = do
-  buttonEvent "zoomOut" $ queueCmd av $ ZoomView $ 1.0 + x
-  buttonEvent "zoomIn"  $ queueCmd av $ ZoomView $ 1.0 - x
+  pure $ queueCmd viewCmd
 
 
 
--- runs console.time() with the provided string, returns the effect to stop the timer
-foreign import timeEff :: ∀ eff. String -> Eff eff (Eff eff Unit)
+btnUI :: { scrollMod :: Number, zoomMod :: Number }
+      -> (UpdateView -> Eff _ Unit)
+      -> Eff _ Unit
+btnUI mods cb = do
+  buttonEvent "scrollLeft"  $ cb $ ScrollView     (-mods.scrollMod)
+  buttonEvent "scrollRight" $ cb $ ScrollView       mods.scrollMod
+  buttonEvent "zoomOut"     $ cb $ ZoomView $ 1.0 + mods.zoomMod
+  buttonEvent "zoomIn"      $ cb $ ZoomView $ 1.0 - mods.zoomMod
 
 
 
@@ -176,7 +177,6 @@ _docResize = SProxy :: SProxy "docResize"
 
 
 type UIState e = { view         :: AVar CoordSysView
-                 , viewCmd      :: AVar UpdateView
                  , uiCmd        :: AVar (Variant UICmdR)
                  , renderFiber  :: AVar (Fiber e Unit)
                  , lastOverlaps :: AVar (Number -> Point -> { snps :: Array (SNP ()) } )
@@ -456,19 +456,6 @@ runBrowser config bc = launchAff $ do
       initialView = wrap $ Pair zero (cSys^._TotalSize)
       trackDims = bc ^. _Track <<< _Dimensions
 
-  viewCmd <- AVar.makeEmptyVar
-
-  liftEff do
-    btnScroll 0.05 viewCmd
-    btnZoom   0.10 viewCmd
-
-    dragScroll bc \ {x,y} ->
-       when (Math.abs x >= one)
-         $ queueCmd viewCmd $ ScrollView $ (-x) / trackDims.width
-
-    let scrollZoomScale = 0.06
-    wheelZoom bc \dY ->
-       queueCmd viewCmd $ ZoomView $ 1.0 + scrollZoomScale * dY
 
 
   uiCmd <- AVar.makeEmptyVar
@@ -485,28 +472,39 @@ runBrowser config bc = launchAff $ do
   lastOverlaps <- AVar.makeEmptyVar
 
   let initState :: UIState _
-      initState = { view, viewCmd, uiCmd, renderFiber, lastOverlaps }
+      initState = { view, uiCmd, renderFiber, lastOverlaps }
+
+  queueViewCmd <- uiViewUpdate cSys (wrap 100.0) initState
+  liftEff do
+    btnUI { scrollMod: 0.05, zoomMod: 0.1 } queueViewCmd
+
+    dragScroll bc \ {x,y} ->
+       when (Math.abs x >= one)
+         $ queueViewCmd $ ScrollView $ (-x) / trackDims.width
+
+    let scrollZoomScale = 0.06
+    wheelZoom bc \dY ->
+       queueViewCmd $ ZoomView $ 1.0 + scrollZoomScale * dY
+
 
   let
       slots = uiSlots bc
 
-      entries = foldMap annotationLegendTest trackData.annotations
       legend = { width: slots.right.size.width
-               , entries }
+               , entries: foldMap annotationLegendTest trackData.annotations }
 
-      s = config.score
-
-      vscale = { width: slots.left.size.width
-               , color: black
-               , min: s.min, max: s.max, sig: s.sig }
+      vscale =
+        Record.build (insert (SProxy :: SProxy "width") slots.left.size.width
+                  >>> insert (SProxy :: SProxy "color") black)
+                      $ config.score
 
       sigSnps = foldMap (filterSig config.score) trackData.snps
 
       mainBrowser :: _
       mainBrowser = drawBrowser cSys {legend, vscale}
-                      { snps: renderSNPs vscale
+                      { snps:        renderSNPs vscale
                       , annotations: renderAnnotation cSys sigSnps vscale }
-                      { snps: fromMaybe mempty trackData.snps
+                      { snps:        fromMaybe mempty trackData.snps
                       , annotations: fromMaybe mempty trackData.annotations }
 
 
@@ -555,11 +553,6 @@ runBrowser config bc = launchAff $ do
 
   -- debugging only
   liftEff $ setWindow "mainBrowser" mainBrowser
-
-  let viewTimeout :: Milliseconds
-      viewTimeout = wrap 100.0
-
-  _ <- forkAff $ uiViewUpdate cSys viewTimeout initState
 
   cached <- browserCache mainBrowser
 
