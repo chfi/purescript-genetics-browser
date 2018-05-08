@@ -38,24 +38,6 @@ exports.windowInnerSize = function() {
     return { width: w, height: h };
 };
 
-exports.timeEff = function(name) {
-    return function() {
-        console.time(name);
-        return function() {
-            console.timeEnd(name);
-        }
-    };
-};
-
-
-exports.timeFun = function(f) {
-    return function() {
-        console.time();
-        f();
-        console.timeEnd();
-    };
-};
-
 exports.setWindow = function(k) {
     return function(v) {
         return function() {

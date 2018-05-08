@@ -5,14 +5,13 @@ import Prelude
 import Color (black)
 import Control.Coroutine (Consumer, Producer, connect, runProcess)
 import Control.Coroutine as Co
-import Control.Monad.Aff (Aff, Fiber, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_)
-import Control.Monad.Aff.AVar (AVAR, AVar, makeVar, putVar, readVar, takeVar, tryTakeVar)
+import Control.Monad.Aff (Aff, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_)
+import Control.Monad.Aff.AVar (AVar)
 import Control.Monad.Aff.AVar as AVar
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error, throw)
-import Control.Monad.Rec.Class (forever)
 import DOM.Classy.HTMLElement (appendChild, setId) as DOM
 import DOM.Classy.ParentNode (toParentNode)
 import DOM.HTML (window) as DOM
@@ -33,6 +32,7 @@ import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
 import Data.Lens ((^.))
+import Data.Lens as Lens
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
@@ -40,8 +40,7 @@ import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (over, unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
-import Data.Record (delete, get, insert) as Record
-import Data.Record.Builder as Record
+import Data.Record.Builder (build) as Record
 import Data.Record.Builder (insert)
 import Data.Record.Extra (eqRecord)
 import Data.Symbol (SProxy(SProxy))
@@ -50,7 +49,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser.Track.Backend (RenderedTrack, drawBrowser)
-import Genetics.Browser.Track.Demo (Annotation, AnnotationField, BedFeature, SNP, annotationFields, annotationLegendTest, filterSig, getAnnotations, getGenes, getSNPs, renderAnnotation, renderSNPs, showAnnotationField)
+import Genetics.Browser.Track.Demo (Annotation, AnnotationField, SNP, annotationLegendTest, filterSig, getAnnotations, getGenes, getSNPs, renderAnnotation, renderSNPs, showAnnotationField)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, uiSlots, wheelZoom)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10)
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, translateViewBy, viewScale, xPerPixel)
@@ -77,6 +76,94 @@ foreign import resizeEvent :: ∀ e.
                               ({ width  :: Number
                                , height :: Number } -> Eff e Unit)
                            -> Eff e Unit
+
+
+-- | The value returned by the function that initializes the genome browser;
+-- | provides an interface to the running browser instance.
+type BrowserInterface e a
+  = { getView          :: Aff e CoordSysView
+    , getBrowserCanvas :: Aff e BrowserCanvas
+    , lastOverlaps     :: Aff e (Number -> Point -> a)
+    , queueCommand     :: Variant UICmdR -> Aff e Unit
+    , queueUpdateView  :: UpdateView -> Eff e Unit
+    }
+
+-- | Creates the browser using the provided initial data, returning
+-- | a BrowserInterface for reading state & sending commands to it
+initializeBrowser :: CoordSys _ _
+                  -> (BrowserCanvas -> CoordSysView
+                      -> { tracks :: { snps :: RenderedTrack (SNP ())
+                                     , annotations :: RenderedTrack (Annotation ()) }
+                         , relativeUI :: Drawing
+                         , fixedUI :: Drawing })
+                  -> CoordSysView
+                  -> BrowserCanvas
+                  -> Aff _ (BrowserInterface _ ({snps :: Array (SNP ())}))
+initializeBrowser cSys mainBrowser initView bc = do
+
+  renderFiberVar <- AVar.makeEmptyVar
+
+  viewVar <- AVar.makeVar initView
+  bcVar <- AVar.makeVar bc
+
+  uiCmdVar <- AVar.makeEmptyVar
+  lastOverlapsVar <- AVar.makeEmptyVar
+
+  drawCachedBrowser <- browserCache mainBrowser
+
+  let getView = AVar.readVar viewVar
+      getBrowserCanvas = AVar.readVar bcVar
+      queueCommand = flip AVar.putVar uiCmdVar
+      lastOverlaps = AVar.readVar lastOverlapsVar
+
+    -- hardcoded timeout for now
+  queueUpdateView <- uiViewUpdate cSys (wrap 100.0) {view: viewVar, uiCmd: uiCmdVar}
+
+  let mainLoop = do
+        uiCmd <- AVar.takeVar uiCmdVar
+        case_ # V.on _render (\_ -> pure unit)
+              # V.on _docResize (\ {width} -> do
+                      canvas <- AVar.takeVar bcVar
+                      let {height} = canvas ^. _Dimensions
+                      canvas' <- liftEff $ setBrowserCanvasSize {width, height} canvas
+                      AVar.putVar canvas' bcVar
+                      queueCommand $ inj _render unit
+                      mainLoop)
+              $ uiCmd
+
+        -- if there's a rendering fiber running, we kill it
+        traverse_ (killFiber (error "Resetting renderer"))
+          =<< AVar.tryTakeVar renderFiberVar
+
+        csView <- getView
+        canvas <- getBrowserCanvas
+        toRender <- drawCachedBrowser canvas csView
+
+        let currentScale = viewScale (canvas ^. _Track <<< _Dimensions) csView
+            (Pair offset _) = pixelsView currentScale csView
+
+                          -- offset the click by the current canvas translation
+        _ <- AVar.tryTakeVar lastOverlapsVar
+        AVar.putVar (\n r -> let r' = {x: r.x + offset, y: r.y }
+                             in { snps: toRender.tracks.snps.overlaps n r' }) lastOverlapsVar
+
+        -- fork a new renderFiber
+        renderFiber <- forkAff
+                       $ renderBrowser (wrap 2.0) canvas offset toRender
+        AVar.putVar renderFiber renderFiberVar
+
+        mainLoop
+
+  _ <- forkAff mainLoop
+
+  queueCommand $ inj _render unit
+
+  pure { getView
+       , getBrowserCanvas
+       , lastOverlaps
+       , queueCommand
+       , queueUpdateView }
+
 
 data UpdateView =
     ScrollView Number
@@ -110,7 +197,7 @@ updateViewFold uv iv = case uv of
 
 
 queueCmd :: ∀ a. AVar a -> a -> Eff _ Unit
-queueCmd av cmd = launchAff_ $ putVar cmd av
+queueCmd av cmd = launchAff_ $ AVar.putVar cmd av
 
 
 -- | Provided with the AVar containing the view state (which is updated atomically)
@@ -129,25 +216,25 @@ uiViewUpdate cs timeout { view, uiCmd } = do
 
   let normView = normalizeView cs (BigInt.fromInt 200000)
       loop' updater = do
-        cmd <- takeVar viewCmd
+        cmd <- AVar.takeVar viewCmd
 
         killFiber (error "Resetting view update") updater
         liftEff $ log $ "forking view update"
 
-        curCmd <- takeVar curCmdVar
+        curCmd <- AVar.takeVar curCmdVar
         let cmd' = curCmd <> cmd
-        putVar cmd' curCmdVar
+        AVar.putVar cmd' curCmdVar
 
         updater' <- forkAff do
             delay timeout
             liftEff $ log "Running view update"
 
-            vr <- takeVar view
+            vr <- AVar.takeVar view
             let vr' = normView $ updateViewFold cmd' vr
-            putVar vr' view
+            AVar.putVar vr' view
 
-            putVar (inj _render unit) uiCmd
-            takeVar curCmdVar *> putVar mempty curCmdVar
+            AVar.putVar (inj _render unit) uiCmd
+            AVar.takeVar curCmdVar *> AVar.putVar mempty curCmdVar
 
         loop' updater'
 
@@ -176,39 +263,21 @@ _docResize = SProxy :: SProxy "docResize"
 
 
 
-type UIState e = { view         :: AVar CoordSysView
-                 , uiCmd        :: AVar (Variant UICmdR)
-                 , renderFiber  :: AVar (Fiber e Unit)
-                 , lastOverlaps :: AVar (Number -> Point -> { snps :: Array (SNP ()) } )
-                 }
 
-
-debugView :: UIState _
+debugView :: BrowserInterface _ _
           -> Eff _ { get :: _
                    , set :: _ }
 debugView s = do
   let get name = launchAff_ do
-         view <- AVar.tryReadVar s.view
-         liftEff case view of
-           Nothing -> do
-             log "CoordSysView state empty"
-             setWindow name unit
-           Just v  -> do
-             log $ "CoordSysView: " <> show (map BigInt.toString $ unwrap v)
-             setWindow name $ (\(Pair l r) -> {l,r}) $ unwrap v
+         view <- s.getView
+         liftEff do
+           log $ "CoordSysView: " <> show (map BigInt.toString $ unwrap view)
+           setWindow name $ (\(Pair l r) -> {l,r}) $ unwrap view
 
-  let set lr = launchAff_ do
-         view <- AVar.tryTakeVar s.view
-         case view of
-           Nothing -> pure unit
-           Just _  -> do
-             let v' = wrap $ Pair lr.l lr.r
-             _ <- AVar.tryPutVar (inj _render unit) s.uiCmd
-             AVar.putVar v' s.view
+  let set lr = s.queueUpdateView
+               $ ModView $ const (BigInt.fromNumber <$> Pair lr.l lr.r)
 
   pure {get, set}
-
-
 
 
 browserCache
@@ -271,48 +340,6 @@ browserCache f = do
 
 
 
-renderLoop :: CoordSys _ _
-           -> (BrowserCanvas
-               -> CoordSysView
-               -> Aff _ ({ tracks ::
-                              { snps :: RenderedTrack (SNP ())
-                              , annotations :: RenderedTrack (Annotation ()) }
-                         , relativeUI :: Drawing
-                         , fixedUI :: Drawing }))
-           -> BrowserCanvas
-           -> UIState _
-           -> Aff _ Unit
-renderLoop cSys drawCachedBrowser canvas state = forever do
-
-  uiCmd <- takeVar state.uiCmd
-  case_ # V.on _render (\_ -> pure unit)
-        # V.on _docResize (\ {width} -> do
-                let {height} = canvas ^. _Dimensions
-                canvas' <- liftEff $ setBrowserCanvasSize {width, height} canvas
-                putVar (inj _render unit) state.uiCmd
-                renderLoop cSys drawCachedBrowser canvas' state)
-        $ uiCmd
-
-  -- if there's a rendering fiber running, we kill it
-  traverse_ (killFiber (error "Resetting renderer"))
-    =<< tryTakeVar state.renderFiber
-
-  csView <- readVar state.view
-  toRender <- drawCachedBrowser canvas csView
-
-  let currentScale = viewScale (canvas ^. _Track <<< _Dimensions) csView
-      (Pair offset _) = pixelsView currentScale csView
-
-  _ <- AVar.tryTakeVar state.lastOverlaps
-                    -- offset the click by the current canvas translation
-  AVar.putVar (\n r -> let r' = {x: r.x + offset, y: r.y }
-                       in { snps: toRender.tracks.snps.overlaps n r' }) state.lastOverlaps
-
-  -- fork a new renderFiber
-  renderFiber <- forkAff
-                 $ renderBrowser (wrap 2.0) canvas offset toRender
-
-  putVar renderFiber state.renderFiber
 
 
 printSNPInfo :: ∀ r. Array (SNP r) -> Eff _ Unit
@@ -452,43 +479,7 @@ runBrowser config bc = launchAff $ do
 
     pure { genes, snps, annotations }
 
-  let initialView :: CoordSysView
-      initialView = wrap $ Pair zero (cSys^._TotalSize)
-      trackDims = bc ^. _Track <<< _Dimensions
-
-
-
-  uiCmd <- AVar.makeEmptyVar
-
-  liftEff do
-    resizeEvent \d ->
-      queueCmd uiCmd (inj _docResize d)
-
-    queueCmd uiCmd (inj _render unit)
-
-
-  view <- AVar.makeVar initialView
-  renderFiber <- AVar.makeEmptyVar
-  lastOverlaps <- AVar.makeEmptyVar
-
-  let initState :: UIState _
-      initState = { view, uiCmd, renderFiber, lastOverlaps }
-
-  queueViewCmd <- uiViewUpdate cSys (wrap 100.0) initState
-  liftEff do
-    btnUI { scrollMod: 0.05, zoomMod: 0.1 } queueViewCmd
-
-    dragScroll bc \ {x,y} ->
-       when (Math.abs x >= one)
-         $ queueViewCmd $ ScrollView $ (-x) / trackDims.width
-
-    let scrollZoomScale = 0.06
-    wheelZoom bc \dY ->
-       queueViewCmd $ ZoomView $ 1.0 + scrollZoomScale * dY
-
-
-  let
-      slots = uiSlots bc
+  let slots = uiSlots bc
 
       legend = { width: slots.right.size.width
                , entries: foldMap annotationLegendTest trackData.annotations }
@@ -508,6 +499,30 @@ runBrowser config bc = launchAff $ do
                       , annotations: fromMaybe mempty trackData.annotations }
 
 
+  browser <-
+    initializeBrowser cSys mainBrowser (wrap $ Pair zero (cSys^._TotalSize)) bc
+
+
+  liftEff do
+    resizeEvent \d ->
+      launchAff_ $ browser.queueCommand $ inj _docResize d
+
+    btnUI { scrollMod: 0.05, zoomMod: 0.1 } browser.queueUpdateView
+
+    dragScroll bc \ {x,y} ->
+       when (Math.abs x >= one) $ launchAff_ do
+         trackDims <- Lens.view (_Track <<< _Dimensions)
+                      <$> browser.getBrowserCanvas
+
+         liftEff $ browser.queueUpdateView
+                 $ ScrollView $ (-x) / trackDims.width
+
+    let scrollZoomScale = 0.06
+    wheelZoom bc \dY ->
+       browser.queueUpdateView
+         $ ZoomView $ 1.0 + scrollZoomScale * dY
+
+
   liftEff do
     let overlayDebug :: _
         overlayDebug p = do
@@ -524,39 +539,29 @@ runBrowser config bc = launchAff $ do
         glyphClick :: _
         glyphClick p = launchAff_ do
 
-          v <- AVar.readVar view
+          v <- browser.getView
           let vs = viewScale (bc ^. _Track <<< _Dimensions) v
               radius = wrap $ (xPerPixel vs) * 3.75
 
-          AVar.tryReadVar lastOverlaps >>= case _ of
-             Nothing -> liftEff do
-               log "clicked no glyphs"
-               cmdInfoBox IBoxShow
 
-             Just gs -> liftEff do
-               let clicked = (gs clickRadius p).snps
-               printSNPInfo clicked
-               case Array.head clicked of
-                 Nothing -> cmdInfoBox IBoxHide
-                 Just g  -> do
-                   cmdInfoBox IBoxShow
-                   cmdInfoBox $ IBoxSetX $ Int.round p.x
-                   cmdInfoBox $ IBoxSetContents
-                     $ fromMaybe (snpHTML g)
-                                 (annotationHTMLAll <$> annotAround radius g)
+          lastOverlaps' <- browser.lastOverlaps
+          liftEff do
+            let clicked = (lastOverlaps' clickRadius p).snps
+            printSNPInfo clicked
+            case Array.head clicked of
+              Nothing -> cmdInfoBox IBoxHide
+              Just g  -> do
+                cmdInfoBox IBoxShow
+                cmdInfoBox $ IBoxSetX $ Int.round p.x
+                cmdInfoBox $ IBoxSetContents
+                  $ fromMaybe (snpHTML g)
+                    (annotationHTMLAll <$> annotAround radius g)
 
 
     browserOnClick bc
       { overlay: \_ -> pure unit
       -- { overlay: overlayDebug
       , track:   glyphClick }
-
-  -- debugging only
-  liftEff $ setWindow "mainBrowser" mainBrowser
-
-  cached <- browserCache mainBrowser
-
-  _ <- forkAff $ renderLoop cSys cached bc initState
 
   pure unit
 
@@ -577,8 +582,8 @@ type Conf = { browserHeight :: Number
 foreign import setWindow :: ∀ e a. String -> a -> Eff e Unit
 
 
-initBrowser :: Foreign -> Eff _ _
-initBrowser rawConfig = do
+main :: Foreign -> Eff _ _
+main rawConfig = do
 
   el' <- do
     doc <- DOM.htmlDocumentToDocument
@@ -611,12 +616,12 @@ chunkConsumer :: ∀ m a.
               -> Consumer (m a) (Aff _) Unit
 chunkConsumer av = Co.consumer \m ->
   if null m
-     then pure $ Just unit
-     else do
-       sofar <- takeVar av
-       putVar (sofar <> m) av
-       delay (wrap 20.0)
-       pure Nothing
+    then pure $ Just unit
+    else do
+      sofar <- AVar.takeVar av
+      AVar.putVar (sofar <> m) av
+      delay (wrap 20.0)
+      pure Nothing
 
 
 type TrackVar a = AVar (Map ChrId (Array a))
@@ -629,7 +634,7 @@ fetchLoop1 :: ∀ a.
 fetchLoop1 Nothing = AVar.makeEmptyVar
 fetchLoop1 (Just startProd) = do
   prod <- startProd
-  avar <- makeVar mempty
+  avar <- AVar.makeVar mempty
   _ <- forkAff $ runProcess $ prod `connect` chunkConsumer avar
   pure avar
 
