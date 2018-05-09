@@ -26,13 +26,12 @@ import Data.Symbol (SProxy(..))
 import Data.Time.Duration (Milliseconds)
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple), uncurry)
-import Genetics.Browser.Types.Coordinates (CoordSysView, ViewScale, viewScale)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
-import Graphics.Drawing as Drawing
+import Graphics.Drawing (render, translate) as Drawing
 import Graphics.Drawing.Font (sansSerif)
-import Graphics.Drawing.Font as Drawing
+import Graphics.Drawing.Font (font, fontString) as Drawing
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -368,6 +367,11 @@ subtractPadding {width, height} pad =
 
 type UISlot = { offset :: Point
               , size   :: Canvas.Dimensions }
+
+data UISlotGravity = UILeft | UIRight | UITop | UIBottom
+
+derive instance eqUISlotGravity :: Eq UISlotGravity
+derive instance ordUISlotGravity :: Ord UISlotGravity
 
 type UISlots = { left   :: UISlot
                , right  :: UISlot

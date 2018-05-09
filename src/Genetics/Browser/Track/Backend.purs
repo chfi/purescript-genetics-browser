@@ -7,35 +7,32 @@ import Color.Scheme.Clrs (red)
 import Data.Array ((..))
 import Data.Array as Array
 import Data.BigInt (BigInt)
-import Data.Foldable (class Foldable, fold, foldMap, foldl, length, maximum, minimum)
+import Data.Foldable (class Foldable, fold, foldMap, foldl, length)
 import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens (Getter', view, (^.))
-import Data.List (List)
+import Data.Lens ((^.))
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe, fromMaybe)
+import Data.Maybe (Maybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (unwrap, wrap)
 import Data.Number.Format as Num
 import Data.Pair (Pair(..))
-import Data.Record as Record
-import Data.Symbol (class IsSymbol, SProxy(SProxy))
-import Data.Tuple (Tuple(..), snd, uncurry)
+import Data.Symbol (SProxy(SProxy))
+import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj, onMatch)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas(..), UISlot, UISlots, Label, _Dimensions, _Track)
-import Genetics.Browser.Track.UI.Canvas as Canvas
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, Label, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), _Dimensions, _Track)
+import Genetics.Browser.Track.UI.Canvas (uiSlots) as Canvas
 import Genetics.Browser.Types (Bp, ChrId)
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(..), Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap, scaledSegments, scaledSegments', viewScale)
-import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing, FillStyle, OutlineStyle, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, scaledSegments, scaledSegments', viewScale)
+import Graphics.Canvas (Dimensions) as Canvas
+import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math (pow)
 import Math as Math
-import Type.Prelude (class RowLacks)
 
 
 type Feature a = { position  :: Pair Bp
@@ -80,13 +77,12 @@ type NormalizedGlyph = { drawing :: Variant DrawingR
 type SingleGlyph = { drawing :: Unit -> Drawing, point :: Point, width :: Number }
 
 
-
-horRulerTrack :: forall r.
+sigLevelRuler :: forall r.
                  { min :: Number, max :: Number, sig :: Number | r }
               -> Color
               -> Canvas.Dimensions
               -> Drawing
-horRulerTrack {min, max, sig} color f = outlined outline rulerDrawing <> label
+sigLevelRuler {min, max, sig} color f = outlined outline rulerDrawing <> label
   where normY = (sig - min) / (max - min)
         thickness = 2.0
         outline = outlineColor color <> lineWidth thickness
@@ -117,28 +113,6 @@ chrLabelTrack cs =
   in mapWithIndex (\i _ -> [mkLabel i]) $ cs ^. _Segments
 
 
-chrLabelTrack' :: UISlot
-               -> Map ChrId (Pair Number)
-               -> Tuple UISlot (Array DrawingN)
-chrLabelTrack' slot segs =
-  let font' = font sansSerif 12 mempty
-
-      chrText :: ChrId -> Drawing
-      chrText chr =
-        Drawing.text font' zero zero (fillColor black) (unwrap chr)
-
-
-      y = slot.offset.y - (0.5 * slot.size.height)
-
-      label :: ChrId -> Pair Number -> Array DrawingN
-      label chr seg@(Pair l _) =
-        let drawing = chrText chr
-            point = { x: slot.offset.x + l + (pairSize seg) * 0.5, y }
-        in [{ drawing, points: [point] }]
-
-  in Tuple slot (foldMapWithIndex label segs)
-
-
 
 -- boxesTrack :: Number
 --            -> CoordSys ChrId BigInt
@@ -162,43 +136,44 @@ type VScaleRow r = ( min :: Number
                    , sig :: Number
                    | r )
 
-type VScale = { width :: Number
-              , color :: Color
+type VScale = { color :: Color
               | VScaleRow () }
 
-
-drawVScale :: forall r.
-              VScale
-           -> Number
-           -> Drawing
-drawVScale vscale height =
+drawVScaleInSlot :: ∀ r.
+                    { color :: Color | VScaleRow r }
+                 -> UISlot
+                 -> Drawing
+drawVScaleInSlot vscale {offset, size} =
   let
-      hPad = vscale.width  / 8.0
+      -- these should be configurable
+      hPad = size.width / 8.0
+      numSteps = 3
+      -- as well as the font sizes, linewidths, etc...
+      -- and also the left vs right horizontal padding
+
       x = 7.0 * hPad
 
-      numSteps = 3
       spokes = (_ / (Int.toNumber numSteps))
                <<< Int.toNumber <$> (0 .. numSteps)
 
       barOutline = outlineColor vscale.color <> lineWidth 2.0
 
-      vBar = Drawing.path [{x, y: 0.0}, {x, y: height}]
+      vBar = Drawing.path [{x, y: 0.0}, {x, y: size.height}]
 
       hBar w y = Drawing.path [{x:x-w, y}, {x, y}]
       bars = vBar
-          <> foldMap (\i -> hBar 8.0 (i * height)) spokes
-
+          <> foldMap (\i -> hBar 8.0 (i * size.height)) spokes
 
       unitLabel =
-        Drawing.translate (vscale.width * 0.5 - hPad) (height * 0.72)
+        Drawing.translate (size.width * 0.5 - hPad) (size.height * 0.72)
         $ Drawing.rotate (- Math.pi / 2.0)
         $ Drawing.text (font sansSerif 18 mempty)
             0.0 0.0 (fillColor black) "-log10 (P value)"
 
       label yN = Drawing.text
                     (font sansSerif 14 mempty)
-                    (vscale.width * 0.6 - hPad)
-                    (yN * height + 5.0)
+                    (size.width * 0.6 - hPad)
+                    (yN * size.height + 5.0)
                     (fillColor black)
                  $ Num.toStringWith (Num.fixed 0)
                  $ (\p -> min vscale.max p)
@@ -209,10 +184,10 @@ drawVScale vscale height =
   in outlined barOutline bars <> labels <> unitLabel
 
 
+
 type LegendEntry = { text :: String, icon :: Drawing }
 
-type Legend = { width :: Number
-              , entries :: Array LegendEntry }
+type Legend = { entries :: Array LegendEntry }
 
 
 
@@ -232,20 +207,34 @@ drawLegendItem {text, icon} =
   in icon <> t
 
 
-drawLegend :: Legend
-           -> Number
-           -> Drawing
-drawLegend {width, entries} height =
-  let hPad = width  / 5.0
-      vPad = height / 5.0
-      n :: Int
-      n = length entries
+drawLegendInSlot :: ∀ r.
+                    { entries :: Array LegendEntry | r }
+                 -> UISlot
+                 -- -> { offset :: Point, size :: { width :: Number, height :: Number } }
+                 -> Drawing
+drawLegendInSlot {entries} {offset, size} =
+  let
+      -- these should be configurable
+      hPad = size.width  / 5.0
+      vPad = size.height / 5.0
+      -- as well as the font sizes, linewidths, etc...
+      -- and also the left vs right horizontal padding
+
       x = hPad
-      f :: Number -> { text :: String, icon :: Drawing } -> Drawing
-      f y ic = translate x y $ drawLegendItem ic
-      d = (height - 2.0*vPad) / (length entries)
-      ds = mapWithIndex (\i ic -> f (vPad+(vPad*(Int.toNumber i))) ic) entries
+
+      font' = font sansSerif 12 mempty
+
+      drawEntry :: Number -> { text :: String, icon :: Drawing } -> Drawing
+      drawEntry y {text, icon} =
+        translate x y
+          $ icon <> Drawing.text font' 12.0 0.0 (fillColor black) text
+
+      d = (size.height - 2.0*vPad) / length entries
+      -- ds' = foldl (\d' e -> Drawing.translate 0.0 vPad $ (drawEntry e <> d')) entries mempty
+      ds = mapWithIndex (\i ic -> drawEntry (vPad*(Int.toNumber (i+1) )) ic) entries
   in fold ds
+
+
 
 
 type Padding = { vertical :: Number
@@ -351,58 +340,60 @@ type Renderer a =
   -> RenderedTrack a
 
 
+pixelSegments :: CoordSys _ _
+              -> BrowserCanvas
+              -> CoordSysView
+              -> _
+pixelSegments cSys canvas csView =
+  let trackDim = canvas ^. _Track <<< _Dimensions
+      segmentPadding = 12.0 -- TODO this should be configurable
+  in aroundPair (-segmentPadding)
+       <$> scaledSegments' cSys (viewScale trackDim csView)
 
-drawBrowser :: forall a b.
-               CoordSys ChrId BigInt
-            -> { legend :: Legend, vscale :: VScale }
-            -> { snps        :: Renderer a
-               , annotations :: Renderer b }
-            -> { snps        :: Map ChrId (Array a)
-               , annotations :: Map ChrId (Array b) }
+
+renderTrack :: ∀ a b.
+               CoordSys ChrId _
+            -> Renderer a
+            -> Map ChrId (Array a)
             -> BrowserCanvas
             -> CoordSysView
-            -> { tracks     :: { snps :: RenderedTrack a
-                               , annotations :: RenderedTrack b }
-               , relativeUI :: Drawing
-               , fixedUI    :: Drawing }
-drawBrowser cs ui renderers inputTracks canvas =
-  let
-      uiSlots = Canvas.uiSlots canvas
-      trackDim = canvas ^. _Track <<< _Dimensions
-      overlayDim = canvas ^. _Dimensions
+            -> RenderedTrack a
+renderTrack cSys renderer trackData canvas =
+  let trackDim = canvas ^. _Track <<< _Dimensions
+  in renderer trackDim trackData <<< pixelSegments cSys canvas
 
-      drawInSlot {offset, size} d =
+renderFixedUI :: forall a b.
+                 (UISlot -> Drawing)
+              -> UISlotGravity
+              -> BrowserCanvas
+              -> Drawing
+renderFixedUI uiDrawing slotG canvas =
+  let slots = Canvas.uiSlots canvas
+
+      slot@{offset, size} = case slotG of
+        UILeft   -> slots.left
+        UIRight  -> slots.right
+        UITop    -> slots.top
+        UIBottom -> slots.bottom
+
+      drawInSlot :: _
+      drawInSlot d =
           (translate offset.x offset.y
            $ filled (fillColor white)
            $ rectangle zero zero size.width size.height)
         <> translate offset.x offset.y d
-
-      vScale = drawInSlot uiSlots.left
-                 $ drawVScale ui.vscale uiSlots.left.size.height
-      legend = drawInSlot uiSlots.right
-                 $ drawLegend ui.legend uiSlots.right.size.height
-
-      ruler   = Drawing.translate ui.vscale.width uiSlots.top.size.height
-                $ horRulerTrack ui.vscale red trackDim
-
-      fixedUI = vScale <> legend <> ruler
+  in drawInSlot (uiDrawing slot)
 
 
-      segmentPadding = 12.0
-
-      segmentPixels :: CoordSysView -> Map ChrId (Pair Number)
-      segmentPixels vw =
-        aroundPair (-segmentPadding)
-        <$> scaledSegments' cs (viewScale trackDim vw)
-
-      tracks :: CoordSysView -> _
-      tracks =
-        let snpsT  = renderers.snps trackDim inputTracks.snps
-            annotT = renderers.annotations trackDim inputTracks.annotations
-        in \v -> let segs = segmentPixels v
-                 in { snps: snpsT segs
-                    , annotations: annotT segs }
-
+renderRelativeUI :: CoordSys ChrId BigInt
+                 -> Map ChrId (Array NormalizedGlyph)
+                 -> BrowserCanvas
+                 -> CoordSysView
+                 -> Drawing
+renderRelativeUI cSys uiGlyphs canvas =
+  let
+      trackDim = canvas ^. _Track <<< _Dimensions
+      overlayDim = canvas ^. _Dimensions
 
       renderUIElement :: Map ChrId (Array NormalizedGlyph)
                       -> ChrId -> Pair Number -> Array SingleGlyph
@@ -411,16 +402,19 @@ drawBrowser cs ui renderers inputTracks canvas =
                 <$> (Map.lookup k m)
 
       drawTrackUI :: Pair BigInt -> (ChrId -> Pair Number -> (Array _)) -> Drawing
-      drawTrackUI v = foldMap f <<< withPixelSegments cs trackDim v
+      drawTrackUI v = foldMap f <<< withPixelSegments cSys trackDim v
         where f {drawing, point} = Drawing.translate point.x point.y (drawing unit)
 
-      chrLabels :: _
-      chrLabels = renderUIElement $ chrLabelTrack cs
+  in \v -> drawTrackUI (unwrap v) $ renderUIElement uiGlyphs
 
-      relativeUI :: CoordSysView -> Drawing
-      relativeUI v = drawTrackUI (unwrap v) chrLabels
 
-  in \v -> { tracks: tracks v
-           , relativeUI: relativeUI v
-           , fixedUI
-           }
+chrLabelsUI :: CoordSys ChrId BigInt
+            -> BrowserCanvas
+            -> CoordSysView
+            -> Drawing
+chrLabelsUI cSys = renderRelativeUI cSys (chrLabelTrack cSys)
+
+
+type Peak x y r = { covers :: Pair x
+                  , y :: y
+                  , elements :: Array r }
