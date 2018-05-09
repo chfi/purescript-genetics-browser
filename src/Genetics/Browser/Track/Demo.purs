@@ -47,9 +47,9 @@ import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
 import Debug.Trace as Debug
-import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, RenderedTrack, featureNormX, groupToMap, mkIcon, trackLegend)
 import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
 import Genetics.Browser.Track.UI.Canvas (Label, LabelPlace(..))
+import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, chrLabelsUI, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, mkIcon, renderFixedUI, renderTrack, sigLevelRuler, trackLegend)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
 import Graphics.Canvas as Canvas
@@ -350,14 +350,10 @@ getAnnotations cs url = do
 
 
 
-type Peak x y r = { covers :: Pair x
-                  , y :: y
-                  , elements :: Array r }
-
 peak1 :: ∀ rS.
          Bp
       -> Array (SNP rS)
-      -> Maybe (Tuple (Peak _ _ (SNP rS))
+      -> Maybe (Tuple (Peak Bp Number (SNP rS))
                       (Array (SNP rS)))
 peak1 radius snps = do
   top <- minimumBy (compare `on` _.feature.score) snps
@@ -425,6 +421,20 @@ filterSig :: ∀ r1 r2.
 filterSig {sig} = map (filter
   (\snp -> snp.feature.score <= (NegLog10 sig ^. re _NegLog10)))
 
+
+snpsUI :: ∀ r.
+          { min :: Number, max :: Number, sig :: Number, color :: Color | r }
+       -> UISlotGravity
+       -> BrowserCanvas
+       -> Drawing
+snpsUI vscale = renderFixedUI (drawVScaleInSlot vscale)
+
+annotationsUI :: ∀ r.
+                 { entries :: Array LegendEntry | r }
+              -> UISlotGravity
+              -> BrowserCanvas
+              -> Drawing
+annotationsUI legend = renderFixedUI (drawLegendInSlot legend)
 
 renderSNPs :: ∀ r.
               { min :: Number, max :: Number | r }
@@ -583,3 +593,47 @@ renderAnnotation cSys sigSnps vScale cdim allAnnots =
               in { features
                  , drawings, labels
                  , overlaps: mempty  }
+
+
+demoBrowser :: ∀ r.
+               CoordSys ChrId BigInt
+            -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
+            -> { snps        :: Map ChrId (Array _)
+               , annotations :: Map ChrId (Array _)
+               , genes       :: Map ChrId (Array _) }
+            -> BrowserCanvas
+            -> CoordSysView
+            -> { tracks     :: { snps        :: RenderedTrack (SNP _)
+                               , annotations :: RenderedTrack (Annotation _) }
+               , relativeUI :: Drawing
+               , fixedUI    :: Drawing }
+demoBrowser cSys config trackData =
+  let
+      vscale =
+        build (insert (SProxy :: SProxy "color") black)
+          $ config.score
+
+      sigSnps = filterSig config.score trackData.snps
+      entries = annotationLegendTest trackData.annotations
+
+      snps =
+        renderTrack cSys (renderSNPs vscale) trackData.snps
+
+      annotations =
+        renderTrack cSys (renderAnnotation cSys sigSnps vscale) trackData.annotations
+
+      relativeUI = chrLabelsUI cSys
+
+
+  in \bc v ->
+    let trackDim = bc ^. _Track <<< _Dimensions
+        slots = uiSlots bc
+        fixedUI = (snpsUI vscale UILeft bc)
+                <> (annotationsUI {entries} UIRight bc)
+                <> (Drawing.translate slots.left.size.width slots.top.size.height
+                    $ sigLevelRuler vscale red trackDim)
+
+    in { tracks: { snps: snps bc v
+                 , annotations: annotations bc v }
+       , relativeUI: relativeUI bc v
+       , fixedUI }

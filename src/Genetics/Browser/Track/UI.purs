@@ -48,9 +48,9 @@ import Data.Traversable (for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
-import Genetics.Browser.Track.Backend (RenderedTrack, drawBrowser)
-import Genetics.Browser.Track.Demo (Annotation, AnnotationField, SNP, annotationLegendTest, filterSig, getAnnotations, getGenes, getSNPs, renderAnnotation, renderSNPs, showAnnotationField)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, uiSlots, wheelZoom)
+import Genetics.Browser.Track.Backend (Peak, RenderedTrack, pixelSegments)
+import Genetics.Browser.Track.Demo (Annotation, AnnotationField, SNP, annotationsForScale, demoBrowser, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, wheelZoom)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10)
 import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, translateViewBy, viewScale, xPerPixel)
 import Global.Unsafe (unsafeStringify)
@@ -468,17 +468,7 @@ runBrowser config bc = launchAff $ do
   let cSys :: CoordSys ChrId BigInt
       cSys = coordSys mouseChrSizes
 
-  trackData <- do
-    genes <- traverse (getGenes cSys) config.urls.genes
-    snps  <- traverse (getSNPs  cSys) config.urls.snps
-
-    annotations <-
-      traverse (getAnnotations cSys) config.urls.annotations
-
-    liftEff $ log $ unsafeCoerce annotations
-
-    pure { genes, snps, annotations }
-
+  {-
   let slots = uiSlots bc
 
       legend = { width: slots.right.size.width
@@ -497,7 +487,14 @@ runBrowser config bc = launchAff $ do
                       , annotations: renderAnnotation cSys sigSnps vscale }
                       { snps:        fromMaybe mempty trackData.snps
                       , annotations: fromMaybe mempty trackData.annotations }
+-}
+  trackData <-
+    {genes:_, snps:_, annotations:_}
+    <$> foldMap (getGenes       cSys) config.urls.genes
+    <*> foldMap (getSNPs        cSys) config.urls.snps
+    <*> foldMap (getAnnotations cSys) config.urls.annotations
 
+  let mainBrowser = demoBrowser cSys config trackData
 
   browser <-
     initializeBrowser cSys mainBrowser (wrap $ Pair zero (cSys^._TotalSize)) bc
