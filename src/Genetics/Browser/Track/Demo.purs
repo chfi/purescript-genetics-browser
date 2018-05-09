@@ -2,21 +2,21 @@ module Genetics.Browser.Track.Demo where
 
 import Prelude
 
-import Color (black)
+import Color (Color, black)
 import Color.Scheme.Clrs (blue, red)
 import Color.Scheme.X11 (darkblue, darkgrey, lightgrey)
-import Control.Coroutine (Producer, transform, ($~), (~~))
+import Control.Coroutine (Producer, transform, ($~))
 import Control.Monad.Aff (Aff, error, throwError)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Except (runExcept)
-import Data.Argonaut (Json, _Array, _Number, _Object, _String)
+import Data.Argonaut (Json, _Array)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(..))
 import Data.Filterable (filter, filterMap, partition, partitionMap)
-import Data.Foldable (class Foldable, fold, foldMap, foldr, length, maximumBy, minimumBy, sequence_)
+import Data.Foldable (class Foldable, fold, foldMap, foldr, length, minimumBy, sequence_)
 import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.Foreign (F, Foreign, ForeignError(..))
 import Data.Foreign (readArray) as Foreign
@@ -24,8 +24,7 @@ import Data.Foreign.Index (readProp) as Foreign
 import Data.Foreign.Keys (keys) as Foreign
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
-import Data.Lens (Iso', re, view, viewOn, (^.), (^?))
-import Data.Lens as Lens
+import Data.Lens (re, view, (^.), (^?))
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -33,27 +32,25 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Monoid (mempty)
-import Data.Newtype (under, unwrap, wrap)
-import Data.Newtype as Newtype
+import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Profunctor.Strong (fanout)
 import Data.Record.Builder (build, insert, modify)
 import Data.Record.Extra (class Keys)
 import Data.Record.Extra (keys) as Record
-import Data.Traversable (for, traverse)
+import Data.Traversable (for)
 import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Debug.Trace as Debug
-import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed, fetchForeignChunks, parsedLineTransformer)
-import Genetics.Browser.Track.UI.Canvas (Label, LabelPlace(..))
 import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, chrLabelsUI, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, mkIcon, renderFixedUI, renderTrack, sigLevelRuler, trackLegend)
+import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed)
+import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, Label, LabelPlace(LLeft, LCenter), UISlotGravity(UIRight, UILeft), _Dimensions, _Track, uiSlots)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
-import Genetics.Browser.Types.Coordinates (CoordSys, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
+import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
@@ -466,19 +463,15 @@ renderSNPs verScale cdim snps =
            , y: wrap $ normYLogScore verScale s.feature.score })) snps
 
 
-
-      rescale :: Pair Number -> NPoint -> Point
-      rescale seg@(Pair offset _) npoint =
-        let x = offset + (pairSize seg) * (unwrap npoint.x)
-            y = cdim.height * (one - unwrap npoint.y)
-        in {x, y}
-
-
       pointed :: Map ChrId (Pair Number)
               -> Array (Tuple (SNP ()) Point)
-      pointed segs = foldMapWithIndex f segs
-        where f chrId seg = foldMap ((map <<< map) $ rescale seg)
-                              $ Map.lookup chrId npointed
+      pointed = foldMapWithIndex scaleSegs
+        where rescale seg@(Pair offset _) npoint =
+                  { x: offset + (pairSize seg) * (unwrap npoint.x)
+                  , y: cdim.height * (one - unwrap npoint.y) }
+
+              scaleSegs chrId seg = foldMap (map <<< map $ rescale seg)
+                                      $ Map.lookup chrId npointed
 
       overlaps :: Array (Tuple (SNP ()) Point)
                -> Number -> Point
@@ -496,35 +489,51 @@ renderSNPs verScale cdim snps =
                 , overlaps: overlaps pts }
 
 
-renderAnnotation :: ∀ r r1 r2.
-                    CoordSys _ _
-                 -> Map ChrId (Array (SNP ()))
-                 -> { min :: Number, max :: Number | r }
-                 -> Canvas.Dimensions
-                 -> Map ChrId (Array (Annotation r2))
-                 -> Map ChrId (Pair Number)
-                 -> RenderedTrack (Annotation r2)
-renderAnnotation cSys sigSnps vScale cdim allAnnots =
-  let
-      peakAnnots seg@(Pair l _) snps size annots pk = { covers, y, elements }
-        where covers = (\x -> l + pairSize seg * (unwrap $ x / size)) <$> pk.covers
-              y = cdim.height * (one - normYLogScore vScale pk.y)
-              elements = filter (pairsOverlap pk.covers <<< _.position) annots
 
+annotationsForScale :: ∀ r1 r2 i c.
+                       CoordSys i c
+                    -> Map ChrId (Array (SNP r1))
+                    -> Map ChrId (Array (Annotation r2))
+                    -> Map ChrId (Pair Number)
+                    -> Map ChrId (Array (Peak Bp Number (Annotation r2)))
+annotationsForScale cSys snps annots =
+  mapWithIndex \chr seg -> fromMaybe [] do
+    segSnps      <- Map.lookup chr snps
+    segAnnots    <- Map.lookup chr annots
+    frameSize <- _.frameSize <$> Array.head segSnps
+
+    let rad = (wrap 3.75 * frameSize) / (wrap $ pairSize seg)
+        f pk = pk { elements = filter
+                          (pairsOverlap pk.covers <<< _.position) segAnnots }
+
+    pure $ f <$> peaks rad segSnps
+
+
+renderAnnotationPeaks :: ∀ r r1 r2.
+                         CoordSys ChrId BigInt
+                      -> { min :: Number, max :: Number | r1 }
+                      -> Map ChrId (Array (Peak Bp Number (Annotation r2)))
+                      -> Canvas.Dimensions
+                      -> Map ChrId (Pair Number)
+                      -> { drawings :: _, labels :: _ }
+renderAnnotationPeaks cSys vScale annoPks cdim =
+  let
 
       curAnnotPeaks :: Map ChrId (Pair Number)
                     -> Map ChrId (Array (Peak Number Number (Annotation r2)))
-      curAnnotPeaks = mapWithIndex f
-        where f :: ChrId -> Pair Number -> Array (Peak _ _ (Annotation r2))
-              f chr seg = fromMaybe [] do
-                  snps      <- Map.lookup chr sigSnps
-                  annots    <- Map.lookup chr allAnnots
-                  frameSize <- _.frameSize <$> Array.head snps
+      curAnnotPeaks segs = mapWithIndex f annoPks
+        where f :: ChrId -> Array (Peak _ _ _) -> Array (Peak _ _ (Annotation r2))
+              f chr pks = fromMaybe [] do
+                  frameSize <- (wrap <<< BigInt.toNumber <<< pairSize)
+                             <$> (Map.lookup chr $ cSys ^. _Segments)
+                  pxSeg@(Pair l _) <- Map.lookup chr segs
 
-                  let rad = (wrap 3.75 * frameSize) / (wrap $ pairSize seg)
+                  let rescale pk = pk { covers = (\x -> l + pairSize pxSeg *
+                                          (unwrap $ x / frameSize)) <$> pk.covers
+                                      , y = cdim.height * (one - normYLogScore vScale pk.y) }
 
-                  pure $ peakAnnots seg snps frameSize annots
-                       <$> peaks rad snps
+                  pure $ map rescale pks
+
 
       tailHeight = 0.06
       tailPixels = tailHeight * cdim.height
@@ -581,18 +590,33 @@ renderAnnotation cSys sigSnps vScale cdim allAnnots =
                                          , gravity: g
                                          }
 
+
       drawAndLabelAll :: Map ChrId (Array (Peak _ _ _))
                       -> Tuple (Array DrawingN) (Array Label)
       drawAndLabelAll pks = foldMap (foldMap drawAndLabel) pks
 
-      features :: Array (Annotation r2)
-      features = fold allAnnots
 
   in \segs -> let (Tuple drawings labels) =
                     drawAndLabelAll $ curAnnotPeaks segs
-              in { features
-                 , drawings, labels
-                 , overlaps: mempty  }
+              in { drawings, labels }
+
+
+renderAnnotation :: ∀ r r1 r2.
+                    CoordSys _ _
+                 -> Map ChrId (Array (SNP ()))
+                 -> { min :: Number, max :: Number | r }
+                 -> Canvas.Dimensions
+                 -> Map ChrId (Array (Annotation r2))
+                 -> Map ChrId (Pair Number)
+                 -> RenderedTrack (Annotation r2)
+renderAnnotation cSys sigSnps vScale cdim allAnnots =
+  let features = fold allAnnots
+      annoPeaks = annotationsForScale cSys sigSnps allAnnots
+
+  in \segs -> let {drawings, labels} =
+                    renderAnnotationPeaks cSys vScale (annoPeaks segs) cdim segs
+              in { features, overlaps: mempty
+                 , drawings, labels }
 
 
 demoBrowser :: ∀ r.
