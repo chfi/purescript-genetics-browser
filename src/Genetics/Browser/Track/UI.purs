@@ -2,7 +2,6 @@ module Genetics.Browser.Track.UI where
 
 import Prelude
 
-import Color (black)
 import Control.Coroutine (Consumer, Producer, connect, runProcess)
 import Control.Coroutine as Co
 import Control.Monad.Aff (Aff, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_)
@@ -40,11 +39,9 @@ import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (over, unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
-import Data.Record.Builder (build) as Record
-import Data.Record.Builder (insert)
 import Data.Record.Extra (eqRecord)
 import Data.Symbol (SProxy(SProxy))
-import Data.Traversable (for_, traverse, traverse_)
+import Data.Traversable (for_, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
@@ -52,7 +49,7 @@ import Genetics.Browser.Track.Backend (Peak, RenderedTrack, pixelSegments)
 import Genetics.Browser.Track.Demo (Annotation, AnnotationField, SNP, annotationsForScale, demoBrowser, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, wheelZoom)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10)
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, aroundPair, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, translateViewBy, viewScale, xPerPixel)
+import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, translateViewBy, viewScale)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -367,6 +364,18 @@ snpHTML {position, feature} = wrapWith "div" contents
             ]
 
 
+peakHTML :: ∀ a.
+            (a -> String)
+         -> Peak _ _ a
+         -> String
+peakHTML disp peak =
+  case Array.uncons peak.elements of
+    Nothing               -> ""
+    Just {head, tail: []} -> disp head
+    Just {head, tail}     ->
+      wrapWith "div" $ wrapWith "p"
+        $ show (length tail + 1) <> " annotations"
+
 
 -- | Given a function to transform the data in the annotation's "rest" field
 -- | to text (or Nothing if the field should not be displayed), produce a
@@ -468,26 +477,6 @@ runBrowser config bc = launchAff $ do
   let cSys :: CoordSys ChrId BigInt
       cSys = coordSys mouseChrSizes
 
-  {-
-  let slots = uiSlots bc
-
-      legend = { width: slots.right.size.width
-               , entries: foldMap annotationLegendTest trackData.annotations }
-
-      vscale =
-        Record.build (insert (SProxy :: SProxy "width") slots.left.size.width
-                  >>> insert (SProxy :: SProxy "color") black)
-                      $ config.score
-
-      sigSnps = foldMap (filterSig config.score) trackData.snps
-
-      mainBrowser :: _
-      mainBrowser = drawBrowser cSys {legend, vscale}
-                      { snps:        renderSNPs vscale
-                      , annotations: renderAnnotation cSys sigSnps vscale }
-                      { snps:        fromMaybe mempty trackData.snps
-                      , annotations: fromMaybe mempty trackData.annotations }
--}
   trackData <-
     {genes:_, snps:_, annotations:_}
     <$> foldMap (getGenes       cSys) config.urls.genes
@@ -498,7 +487,6 @@ runBrowser config bc = launchAff $ do
 
   browser <-
     initializeBrowser cSys mainBrowser (wrap $ Pair zero (cSys^._TotalSize)) bc
-
 
   liftEff do
     resizeEvent \d ->
@@ -519,27 +507,25 @@ runBrowser config bc = launchAff $ do
        browser.queueUpdateView
          $ ZoomView $ 1.0 + scrollZoomScale * dY
 
-
   liftEff do
     let overlayDebug :: _
         overlayDebug p = do
           setDebugDivVisibility "visible"
           setDebugDivPoint p
 
-    let annotAround r snp =
-          Array.find (\a -> ((r `aroundPair` a.position)
-                             `pairsOverlap` snp.position))
-            =<< Map.lookup snp.feature.chrId
-            =<< trackData.annotations
-
+    let sigSnps = filterSig config.score trackData.snps
+        annotAround pks snp =
+          Array.find (\a -> a.covers `pairsOverlap` snp.position)
+            =<< Map.lookup snp.feature.chrId pks
 
         glyphClick :: _
         glyphClick p = launchAff_ do
+          v  <- browser.getView
+          bc <- browser.getBrowserCanvas
 
-          v <- browser.getView
-          let vs = viewScale (bc ^. _Track <<< _Dimensions) v
-              radius = wrap $ (xPerPixel vs) * 3.75
-
+          let segs = pixelSegments cSys bc v
+              annoPeaks = annotationsForScale cSys sigSnps
+                            trackData.annotations segs
 
           lastOverlaps' <- browser.lastOverlaps
           liftEff do
@@ -551,8 +537,8 @@ runBrowser config bc = launchAff $ do
                 cmdInfoBox IBoxShow
                 cmdInfoBox $ IBoxSetX $ Int.round p.x
                 cmdInfoBox $ IBoxSetContents
-                  $ fromMaybe (snpHTML g)
-                    (annotationHTMLAll <$> annotAround radius g)
+                  $ snpHTML g
+                  <> foldMap (peakHTML annotationHTMLAll) (annotAround annoPeaks g)
 
 
     browserOnClick bc
