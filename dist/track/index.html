@@ -22,7 +22,7 @@
     <script>
 
       var localUrls =
-      { genes:       "./data/mouse.json",
+      { genes:       null,
         snps:        "./data/gwas.json",
         annotations: "./data/annotations.json"
       };
@@ -46,8 +46,8 @@
           bottom: 35.0,
           left: vscaleWidth,
           right: legendWidth },
-        urls: githubUrls
         score: { min: 0.0, max: 30.0, sig: 4 },
+        urls: localUrls
       };
 
       GGB.main(config)();

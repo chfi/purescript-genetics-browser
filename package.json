@@ -3,15 +3,7 @@
   "version": "0.0.1",
   "description": "Genetics network browser written in Purescript",
   "dependencies": {
-    "big-integer": "^1.6.26",
-    "cytoscape": "^3.1.1",
-    "end-of-stream": "^1.4.0",
-    "ipfs-api": "^14.1.2"
-  },
-  "devDependencies": {
-    "bower": "1.8.2",
-    "pulp": "12.0.1",
-    "pscid": "2.0.2"
+    "big-integer": "^1.6.26"
   },
   "license": "MIT",
   "repository": {

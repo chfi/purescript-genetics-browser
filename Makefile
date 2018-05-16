@@ -1,52 +1,34 @@
 BUILD = pulp $(FLAGS)
 
-BUNDLE = $(BUILD) browserify --skip-entry-point --no-check-main --standalone $(NAMESPACE) --main
+BUNDLE = $(BUILD) --psc-package browserify --skip-entry-point --no-check-main --standalone $(NAMESPACE) --main
 NAMESPACE = GGB
 
-halogen-app:	OUT = ./dist/halogen/app.js
-halogen-app:	MODULE = Genetics.Browser.UI.Container
+OUT = ./dist/track/app.js
+MODULE  = Genetics.Browser.Track.UI
 
-track: OUT = ./dist/track/app.js
-track: MODULE  = Genetics.Browser.Track.UI
-
-bundles = halogen-app track
-
-$(bundles): deps
+$(OUT): deps
 	$(BUNDLE) $(MODULE)  --to $(OUT)
 
-build: deps
-	$(BUILD) build
+build: $(OUT)
 
-test: deps
+.PHONY: test
+test:
 	$(BUILD) test
-
-test-browser: deps
-	$(BUILD) --main Test.Main --to ./test/app.js
-
 
 .PHONY: clean
 clean:
-	rm -rf "./output"
-
-.PHONY: cleanbower
-cleanbower:
-	rm -rf "./bower_components"
-
-.PHONY: cleannpm
-cleannpm:
-	rm -rf "./node_modules"
-
-.PHONY: cleanall
-cleanall:
 	rm -rf ./output \
 	       ./node_modules \
-	       ./bower_components \
+         ./.psc-package \
+         $(OUT)
 
 npm   = ./node_modules
-bower = ./bower_components
+pp = ./.psc-package
 
 $(npm):
 	npm install
-$(bower):
-	bower install
-deps: $(npm) $(bower)
+$(pp): $(npm)
+	psc-package install
+
+.PHONY: deps
+deps: $(npm) $(pp)
