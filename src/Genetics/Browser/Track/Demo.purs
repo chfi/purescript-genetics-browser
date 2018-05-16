@@ -10,7 +10,7 @@ import Control.Monad.Aff (Aff, error, throwError)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Except (runExcept)
-import Data.Argonaut (Json, _Array)
+-- import Data.Argonaut (Json, _Array)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
@@ -147,26 +147,26 @@ geneRenderer = inj (SProxy :: SProxy "single") { draw: bedDraw, horPlace, verPla
           in inj (SProxy :: SProxy "range") $ map f position
 
 
-fetchJsonChunks :: String
-                -> Aff _ (Producer (Array Json) (Aff _) Unit)
-fetchJsonChunks url = do
-  json <- _.response <$> Affjax.get url
+-- fetchJsonChunks :: String
+--                 -> Aff _ (Producer (Array Json) (Aff _) Unit)
+-- fetchJsonChunks url = do
+--   json <- _.response <$> Affjax.get url
 
-  case json ^? _Array of
-    Nothing -> throwError $ error "Parse error: JSON is not an array"
-    Just ls -> pure $ chunkProducer 512 ls
+  -- case json ^? _Array of
+  --   Nothing -> throwError $ error "Parse error: JSON is not an array"
+  --   Just ls -> pure $ chunkProducer 512 ls
 
 
-featureProd :: ∀ r1 r2.
-               String
-            -> (Json -> Maybe { feature :: { chrId :: ChrId | r1 } | r2 })
-            -> Aff _
-                 (Producer
-                 (Map ChrId (Array { feature :: { chrId :: ChrId | r1 } | r2 }))
-                 (Aff _) Unit)
-featureProd url parse = do
-  prod <- fetchJsonChunks url
-  pure $ prod $~ (transform $ groupToMap _.feature.chrId <<< filterMap parse)
+-- featureProd :: ∀ r1 r2.
+--                String
+--             -> (Json -> Maybe { feature :: { chrId :: ChrId | r1 } | r2 })
+--             -> Aff _
+--                  (Producer
+--                  (Map ChrId (Array { feature :: { chrId :: ChrId | r1 } | r2 }))
+--                  (Aff _) Unit)
+-- featureProd url parse = do
+--   prod <- fetchJsonChunks url
+--   pure $ prod $~ (transform $ groupToMap _.feature.chrId <<< filterMap parse)
 
 
 

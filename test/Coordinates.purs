@@ -6,7 +6,6 @@ import Prelude
 
 import Data.BigInt as BigInt
 import Data.Pair (Pair(..))
-import Data.Ratio ((%))
 import Test.QuickCheck (Result, withHelp, (/==), (===))
 import Test.QuickCheck.Gen (Gen, chooseInt)
 import Test.Spec (Spec, describe, it)
@@ -82,7 +81,7 @@ spec = do
     -- it "Is possible to map from canvas coordinates to local and global coordinates" do
 
 
-    it "shiftIntervalBy" do
+    it "translate one pair relative to its size" do
 
       -- TODO quickcheck this
       let p' = BigInt.fromInt <$> Pair 1     100000

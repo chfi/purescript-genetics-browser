@@ -2,7 +2,7 @@
 
 A working demo of the genome browser can be found [here](https://chfi.github.io/genetics-browser-example/track/).
 
-You need npm, and the Purescript compiler and build tools. The latter
+You need npm 5, as well as the Purescript compiler and build tools. The latter
 can be installed with npm:
 
 ```shell
