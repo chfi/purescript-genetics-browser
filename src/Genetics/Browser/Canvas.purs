@@ -1,7 +1,7 @@
 -- | This module provides a HTML5 canvas interface for the genetics browser,
 -- | which wraps and optimizes all rendering calls
 
-module Genetics.Browser.Track.UI.Canvas where
+module Genetics.Browser.Canvas where
 
 
 import Prelude

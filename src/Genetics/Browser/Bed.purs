@@ -1,4 +1,4 @@
-module Genetics.Browser.Track.Bed where
+module Genetics.Browser.Bed where
 
 import Prelude
 

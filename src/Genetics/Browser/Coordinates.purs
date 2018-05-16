@@ -1,4 +1,4 @@
-module Genetics.Browser.Types.Coordinates where
+module Genetics.Browser.Coordinates where
 
 import Prelude
 

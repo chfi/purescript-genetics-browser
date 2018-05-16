@@ -1,4 +1,4 @@
-module Genetics.Browser.Track.Demo where
+module Genetics.Browser.Demo where
 
 import Prelude
 
@@ -44,11 +44,11 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser.Track.Backend (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, chrLabelsUI, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, mkIcon, renderFixedUI, renderTrack, sigLevelRuler, trackLegend)
-import Genetics.Browser.Track.Bed (ParsedLine, chunkProducer, fetchBed)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, Label, LabelPlace(LLeft, LCenter), UISlotGravity(UIRight, UILeft), _Dimensions, _Track, uiSlots)
+import Genetics.Browser (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, chrLabelsUI, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, mkIcon, renderFixedUI, renderTrack, sigLevelRuler, trackLegend)
+import Genetics.Browser.Bed (ParsedLine, chunkProducer, fetchBed)
+import Genetics.Browser.Canvas (BrowserCanvas, Label, LabelPlace(LLeft, LCenter), UISlotGravity(UIRight, UILeft), _Dimensions, _Track, uiSlots)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing

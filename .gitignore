@@ -3,5 +3,5 @@
 /output/
 /.psc*
 /.psa*
-/dist/**/app.js
-/dist/track/data/
+/dist/app.js
+/dist/data/

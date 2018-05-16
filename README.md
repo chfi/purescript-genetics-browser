@@ -10,13 +10,13 @@ npm install -g purescript@"== 0.11.7" pulp psc-package
 
 ```
 
-The browser can then be built using make, into the example folder at `./dist/track/app.js`:
+The browser can then be built using make, into the example folder at `./dist/app.js`:
 
 ``` shell
 make build
 ```
 
-That produces `./dist/track/app.js`. Opening `./dist/track/index.html`
+That produces `./dist/app.js`. Opening `./dist/index.html`
 should now display the genome browser.
 
 The output path can be changed with the OUT option:

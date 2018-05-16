@@ -1,4 +1,4 @@
-module Genetics.Browser.Track.Backend where
+module Genetics.Browser where
 
 import Prelude
 
@@ -23,10 +23,10 @@ import Data.Pair (Pair(..))
 import Data.Symbol (SProxy(SProxy))
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj, onMatch)
-import Genetics.Browser.Track.UI.Canvas (BrowserCanvas, Label, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), _Dimensions, _Track)
-import Genetics.Browser.Track.UI.Canvas (uiSlots) as Canvas
+import Genetics.Browser.Canvas (BrowserCanvas, Label, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), _Dimensions, _Track)
+import Genetics.Browser.Canvas (uiSlots) as Canvas
 import Genetics.Browser.Types (Bp, ChrId)
-import Genetics.Browser.Types.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, scaledSegments, scaledSegments', viewScale)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, scaledSegments, scaledSegments', viewScale)
 import Graphics.Canvas (Dimensions) as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
