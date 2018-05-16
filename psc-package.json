@@ -3,6 +3,9 @@
   "set": "genetics-browser",
   "source": "https://github.com/chfi/package-sets.git",
   "depends": [
+    "spec-quickcheck",
+    "quickcheck",
+    "spec",
     "record-extra",
     "debug",
     "psci-support",

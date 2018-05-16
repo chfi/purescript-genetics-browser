@@ -5,12 +5,12 @@ import Prelude
 import Control.Monad.Eff (Eff)
 -- import Jack (jackMain)
 import Test.Coordinates as Coordinates
-import Test.Cytoscape as Cytoscape
-import Test.Events as Events
-import Test.Glyph as Glyph
+-- import Test.Cytoscape as Cytoscape
+-- import Test.Events as Events
+-- import Test.Glyph as Glyph
 import Test.Spec.Reporter.Console (consoleReporter)
 import Test.Spec.Runner (run)
-import Test.Track as Track
+-- import Test.Track as Track
 
 
 main :: Eff _ Unit
@@ -27,4 +27,4 @@ main = do
     Coordinates.spec
 
 
-  Glyph.svgCanvasTest
+  -- Glyph.svgCanvasTest
