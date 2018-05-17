@@ -3,11 +3,12 @@ module Genetics.Browser.Types where
 import Prelude
 
 import Data.Foreign.Class (class Decode, class Encode)
-import Data.Lens (iso)
+import Data.Lens (Getter', iso, to)
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Types (Iso')
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.Number.Format as Num
 import Data.String as String
 import Math as Math
 
@@ -32,7 +33,7 @@ derive newtype instance encodeBp :: Encode Bp
 derive newtype instance decodeBp :: Decode Bp
 
 instance showBp :: Show Bp where
-  show (Bp n) = show n <> "Bp"
+  show (Bp n) = Num.toStringWith (Num.fixed 0) n <> " Bp"
 
 
 _Bp :: Iso' Bp Number
@@ -113,7 +114,9 @@ instance ordChrId :: Ord ChrId where
 
 derive newtype instance encodeChrId :: Encode ChrId
 derive newtype instance decodeChrId :: Decode ChrId
-derive newtype instance showChrId :: Show ChrId
+
+instance showChrId :: Show ChrId where
+  show (ChrId i) = i
 
 _ChrId :: Iso' ChrId String
 _ChrId = _Newtype
@@ -145,3 +148,13 @@ _NegLog10 :: Iso' Number NegLog10
 _NegLog10 = iso to from
   where to   p = wrap $ (-((Math.log p) / Math.ln10))
         from (NegLog10 p) = 10.0 `Math.pow` (-p)
+
+
+_prec :: Int -> Getter' Number String
+_prec i = to $ Num.toStringWith (Num.precision i)
+
+_fixed :: Int -> Getter' Number String
+_fixed i = to $ Num.toStringWith (Num.fixed i)
+
+_exp :: Int -> Getter' Number String
+_exp i = to $ Num.toStringWith (Num.exponential i)

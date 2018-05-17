@@ -30,13 +30,15 @@ import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
-import Data.Lens ((^.))
+import Data.Lens (re, (^.))
 import Data.Lens as Lens
+import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (over, unwrap, wrap)
+import Data.Number.Format as Num
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Record.Extra (eqRecord)
@@ -46,10 +48,10 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser (Peak, RenderedTrack, pixelSegments)
-import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, annotationsForScale, demoBrowser, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, wheelZoom)
-import Genetics.Browser.Types (ChrId(ChrId), _NegLog10)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, translateViewBy, viewScale)
+import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, annotationsForScale, demoBrowser, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
+import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -359,8 +361,7 @@ snpHTML {position, feature} = wrapWith "div" contents
             [ "SNP: "    <> feature.name
             , "Chr: "    <> show feature.chrId
             , "Pos: "    <> show (Pair.fst position)
-            , "Score: "  <> show feature.score
-            , "-log10: " <> show (unwrap $ (feature.score ^. _NegLog10))
+            , "-log10: " <> feature.score ^. _NegLog10 <<< _Newtype <<< _prec 4
             ]
 
 
@@ -394,9 +395,7 @@ annotationHTML disp {feature} = wrapWith "div" contents
 
         contents = foldMap (wrapWith "p")
           $ [ name
-            , "Pos: " <> show (feature.pos)
             , url
-            , "Other data: "
             ] <> (filterMap disp
                   $ Array.fromFoldable feature.rest)
 
@@ -404,6 +403,14 @@ annotationHTML disp {feature} = wrapWith "div" contents
 annotationHTMLAll :: Annotation () -> String
 annotationHTMLAll =
   annotationHTML (pure <<< showAnnotationField)
+
+
+annotationHTMLDefault :: Annotation () -> String
+annotationHTMLDefault = annotationHTML \x -> pure case x of
+  {field: "p_lrt", value} ->
+     "p_lrt: " <> (unsafeCoerce value) ^. _NegLog10 <<< _Newtype <<< _prec 4
+  fv -> showAnnotationField fv
+
 
 -- | Example HTML generator that only shows the "anno" field
 annotationHTMLAnnoOnly :: Annotation () -> String
@@ -538,7 +545,7 @@ runBrowser config bc = launchAff $ do
                 cmdInfoBox $ IBoxSetX $ Int.round p.x
                 cmdInfoBox $ IBoxSetContents
                   $ snpHTML g
-                  <> foldMap (peakHTML annotationHTMLAll) (annotAround annoPeaks g)
+                  <> foldMap (peakHTML annotationHTMLDefault) (annotAround annoPeaks g)
 
 
     browserOnClick bc
