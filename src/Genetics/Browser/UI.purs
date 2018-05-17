@@ -13,6 +13,8 @@ import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Exception (error, throw)
 import DOM.Classy.HTMLElement (appendChild, setId) as DOM
 import DOM.Classy.ParentNode (toParentNode)
+import DOM.Event.KeyboardEvent (key) as DOM
+import DOM.Event.Types (KeyboardEvent)
 import DOM.HTML (window) as DOM
 import DOM.HTML.Types (htmlDocumentToDocument) as DOM
 import DOM.HTML.Window (document) as DOM
@@ -30,7 +32,7 @@ import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
-import Data.Lens (re, (^.))
+import Data.Lens ((^.))
 import Data.Lens as Lens
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Map (Map)
@@ -38,7 +40,6 @@ import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (over, unwrap, wrap)
-import Data.Number.Format as Num
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Record.Extra (eqRecord)
@@ -68,6 +69,11 @@ foreign import buttonEvent :: ∀ e.
                               String
                            -> Eff e Unit
                            -> Eff e Unit
+
+foreign import keydownEvent :: ∀ e.
+                                Element
+                             -> (KeyboardEvent -> Eff e Unit)
+                             -> Eff e Unit
 
 -- | Set callback to run after the window has resized (see UI.js for
 -- | time waited), providing it with the new window size.
@@ -251,6 +257,18 @@ btnUI mods cb = do
   buttonEvent "scrollRight" $ cb $ ScrollView       mods.scrollMod
   buttonEvent "zoomOut"     $ cb $ ZoomView $ 1.0 + mods.zoomMod
   buttonEvent "zoomIn"      $ cb $ ZoomView $ 1.0 - mods.zoomMod
+
+
+keyUI :: ∀ r.
+         Element
+      -> { scrollMod :: Number | r }
+      -> (UpdateView -> Eff _ Unit)
+      -> Eff _ Unit
+keyUI el mods cb = keydownEvent el f
+  where f ke = case DOM.key ke of
+          "ArrowLeft"  -> cb $ ScrollView (-mods.scrollMod)
+          "ArrowRight" -> cb $ ScrollView   mods.scrollMod
+          _ -> pure unit
 
 
 
@@ -499,7 +517,12 @@ runBrowser config bc = launchAff $ do
     resizeEvent \d ->
       launchAff_ $ browser.queueCommand $ inj _docResize d
 
-    btnUI { scrollMod: 0.05, zoomMod: 0.1 } browser.queueUpdateView
+    let mods = { scrollMod: 0.05, zoomMod: 0.1 }
+
+    btnUI mods browser.queueUpdateView
+
+    keyUI (unsafeCoerce $ (unwrap bc).staticOverlay)
+          mods browser.queueUpdateView
 
     dragScroll bc \ {x,y} ->
        when (Math.abs x >= one) $ launchAff_ do

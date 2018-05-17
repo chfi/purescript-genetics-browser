@@ -1,14 +1,25 @@
 "use strict";
 
 exports.buttonEvent = function(id) {
-    return function(cb) {
-        return function() {
-            var el = document.getElementById(id);
-            el.addEventListener('click', function(ev) {
-                cb();
-            });
-        }
-    };
+  return function(cb) {
+    return function() {
+      var el = document.getElementById(id);
+      el.addEventListener('click', function(ev) {
+        cb();
+      });
+    }
+  };
+};
+
+
+exports.keydownEvent = function(el) {
+  return function(cb) {
+    return function() {
+      window.addEventListener('keydown', function(ev) {
+        cb(ev)();
+      });
+    }
+  };
 };
 
 
