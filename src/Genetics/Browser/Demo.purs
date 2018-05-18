@@ -5,12 +5,10 @@ import Prelude
 import Color (Color, black)
 import Color.Scheme.Clrs (blue, red)
 import Color.Scheme.X11 (darkblue, darkgrey, lightgrey)
-import Control.Coroutine (Producer, transform, ($~))
 import Control.Monad.Aff (Aff, error, throwError)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Except (runExcept)
--- import Data.Argonaut (Json, _Array)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
@@ -44,11 +42,11 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, chrLabelsUI, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, mkIcon, renderFixedUI, renderTrack, sigLevelRuler, trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, sigLevelRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, chunkProducer, fetchBed)
 import Genetics.Browser.Canvas (BrowserCanvas, Label, LabelPlace(LLeft, LCenter), UISlotGravity(UIRight, UILeft), _Dimensions, _Track, uiSlots)
-import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
+import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
@@ -147,26 +145,6 @@ geneRenderer = inj (SProxy :: SProxy "single") { draw: bedDraw, horPlace, verPla
           in inj (SProxy :: SProxy "range") $ map f position
 
 
--- fetchJsonChunks :: String
---                 -> Aff _ (Producer (Array Json) (Aff _) Unit)
--- fetchJsonChunks url = do
---   json <- _.response <$> Affjax.get url
-
-  -- case json ^? _Array of
-  --   Nothing -> throwError $ error "Parse error: JSON is not an array"
-  --   Just ls -> pure $ chunkProducer 512 ls
-
-
--- featureProd :: ∀ r1 r2.
---                String
---             -> (Json -> Maybe { feature :: { chrId :: ChrId | r1 } | r2 })
---             -> Aff _
---                  (Producer
---                  (Map ChrId (Array { feature :: { chrId :: ChrId | r1 } | r2 }))
---                  (Aff _) Unit)
--- featureProd url parse = do
---   prod <- fetchJsonChunks url
---   pure $ prod $~ (transform $ groupToMap _.feature.chrId <<< filterMap parse)
 
 
 
@@ -368,21 +346,36 @@ peaks :: ∀ rS.
       -> Array (Peak Bp Number (SNP rS))
 peaks r snps = unfoldr (peak1 r) snps
 
+type DemoLegendConfig =
+  { radius    :: Number
+  , outline   :: Color
+  , snpColor  :: Color
+  , geneColor :: Color }
 
+defaultDemoLegend :: DemoLegendConfig
+defaultDemoLegend =
+  { radius:    5.5
+  , outline:   black
+  , snpColor:  blue
+  , geneColor: red }
 
-annotationLegendEntry :: ∀ r. Annotation r -> LegendEntry
-annotationLegendEntry a =
-  case a.feature.gene of
-    Nothing -> mkIcon blue "SNP name"
-    Just gn -> mkIcon red "Gene name"
+annotationLegendEntry :: ∀ r. DemoLegendConfig -> Annotation r -> LegendEntry
+annotationLegendEntry conf a =
+  let mkIcon color = outlined (outlineColor conf.outline <> lineWidth 2.0)
+                  <> filled (fillColor color)
+                   $ circle 0.0 0.0 conf.radius
+  in case a.feature.gene of
+       Nothing -> { text: "SNP name",  icon: mkIcon conf.snpColor  }
+       Just gn -> { text: "Gene name", icon: mkIcon conf.geneColor }
 
 
 annotationLegendTest :: ∀ f r.
                    Foldable f
                 => Functor f
-                => Map ChrId (f (Annotation r))
+                => DemoLegendConfig
+                -> Map ChrId (f (Annotation r))
                 -> Array LegendEntry
-annotationLegendTest fs = trackLegend annotationLegendEntry as
+annotationLegendTest config fs = trackLegend (annotationLegendEntry config) as
   where as = Array.concat
              $ Array.fromFoldable
              $ Array.fromFoldable <$> Map.values fs
@@ -419,15 +412,14 @@ filterSig {sig} = map (filter
   (\snp -> snp.feature.score <= (NegLog10 sig ^. re _NegLog10)))
 
 
-snpsUI :: ∀ r.
-          { min :: Number, max :: Number, sig :: Number, color :: Color | r }
+snpsUI :: VScale
        -> UISlotGravity
        -> BrowserCanvas
        -> Drawing
 snpsUI vscale = renderFixedUI (drawVScaleInSlot vscale)
 
 annotationsUI :: ∀ r.
-                 { entries :: Array LegendEntry | r }
+                 LegendConfig r
               -> UISlotGravity
               -> BrowserCanvas
               -> Drawing
@@ -512,11 +504,12 @@ annotationsForScale cSys snps annots =
 renderAnnotationPeaks :: ∀ r r1 r2.
                          CoordSys ChrId BigInt
                       -> { min :: Number, max :: Number | r1 }
+                      -> DemoLegendConfig
                       -> Map ChrId (Array (Peak Bp Number (Annotation r2)))
                       -> Canvas.Dimensions
                       -> Map ChrId (Pair Number)
                       -> { drawings :: _, labels :: _ }
-renderAnnotationPeaks cSys vScale annoPks cdim =
+renderAnnotationPeaks cSys vScale conf annoPks cdim =
   let
 
       curAnnotPeaks :: Map ChrId (Pair Number)
@@ -561,7 +554,7 @@ renderAnnotationPeaks cSys vScale annoPks cdim =
 
               icons = Drawing.translate 0.0 (-tailPixels)
                       $ foldr (\a d -> Drawing.translate 0.0 (-iconYOffset)
-                                     $ (annotationLegendEntry a).icon <> d)
+                                     $ (annotationLegendEntry conf a).icon <> d)
                           mempty aPeak.elements
 
               tail = if Array.null aPeak.elements
@@ -605,16 +598,17 @@ renderAnnotation :: ∀ r r1 r2.
                     CoordSys _ _
                  -> Map ChrId (Array (SNP ()))
                  -> { min :: Number, max :: Number | r }
+                 -> DemoLegendConfig
                  -> Canvas.Dimensions
                  -> Map ChrId (Array (Annotation r2))
                  -> Map ChrId (Pair Number)
                  -> RenderedTrack (Annotation r2)
-renderAnnotation cSys sigSnps vScale cdim allAnnots =
+renderAnnotation cSys sigSnps vScale conf cdim allAnnots =
   let features = fold allAnnots
       annoPeaks = annotationsForScale cSys sigSnps allAnnots
 
   in \segs -> let {drawings, labels} =
-                    renderAnnotationPeaks cSys vScale (annoPeaks segs) cdim segs
+                    renderAnnotationPeaks cSys vScale conf (annoPeaks segs) cdim segs
               in { features, overlaps: mempty
                  , drawings, labels }
 
@@ -633,27 +627,27 @@ demoBrowser :: ∀ r.
                , fixedUI    :: Drawing }
 demoBrowser cSys config trackData =
   let
-      vscale =
-        build (insert (SProxy :: SProxy "color") black)
-          $ config.score
+      vscale = defaultVScaleConfig config.score
 
       sigSnps = filterSig config.score trackData.snps
-      entries = annotationLegendTest trackData.annotations
+      legend = defaultLegendConfig
+               $ (annotationLegendTest defaultDemoLegend)
+                  trackData.annotations
 
       snps =
         renderTrack cSys (renderSNPs vscale) trackData.snps
 
       annotations =
-        renderTrack cSys (renderAnnotation cSys sigSnps vscale) trackData.annotations
+        renderTrack cSys (renderAnnotation cSys sigSnps vscale defaultDemoLegend) trackData.annotations
 
-      relativeUI = chrLabelsUI cSys
+      relativeUI = chrLabelsUI cSys {fontSize: 12}
 
 
   in \bc v ->
     let trackDim = bc ^. _Track <<< _Dimensions
         slots = uiSlots bc
-        fixedUI = (snpsUI vscale UILeft bc)
-                <> (annotationsUI {entries} UIRight bc)
+        fixedUI =  (snpsUI        vscale UILeft  bc)
+                <> (annotationsUI legend UIRight bc)
                 <> (Drawing.translate slots.left.size.width slots.top.size.height
                     $ sigLevelRuler vscale red trackDim)
 

@@ -50,7 +50,7 @@ import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser (Peak, RenderedTrack, pixelSegments)
 import Genetics.Browser.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, wheelZoom)
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, pixelsView, scaleViewBy, translateViewBy, viewScale)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, annotationsForScale, demoBrowser, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Global.Unsafe (unsafeStringify)
@@ -145,7 +145,7 @@ initializeBrowser cSys mainBrowser initView bc = do
         toRender <- drawCachedBrowser canvas csView
 
         let currentScale = viewScale (canvas ^. _Track <<< _Dimensions) csView
-            (Pair offset _) = pixelsView currentScale csView
+            offset = scaleToScreen  currentScale (Pair.fst $ unwrap $ csView)
 
                           -- offset the click by the current canvas translation
         _ <- AVar.tryTakeVar lastOverlapsVar
@@ -195,10 +195,10 @@ instance monoidUpdateView :: Monoid UpdateView where
 updateViewFold :: UpdateView
                -> CoordSysView
                -> CoordSysView
-updateViewFold uv iv = case uv of
-  ZoomView   x -> iv `scaleViewBy`     x
-  ScrollView x -> iv `translateViewBy` x
-  ModView f    -> over CoordSysView f iv
+updateViewFold uv = over CoordSysView case uv of
+  ZoomView   x -> (_ `scalePairBy`     x)
+  ScrollView x -> (_ `translatePairBy` x)
+  ModView f    -> f
 
 
 queueCmd :: ∀ a. AVar a -> a -> Eff _ Unit

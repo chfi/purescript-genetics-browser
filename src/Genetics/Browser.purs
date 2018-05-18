@@ -3,7 +3,6 @@ module Genetics.Browser where
 import Prelude
 
 import Color (Color, black, white)
-import Color.Scheme.Clrs (red)
 import Data.Array ((..))
 import Data.Array as Array
 import Data.BigInt (BigInt)
@@ -20,13 +19,13 @@ import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (unwrap, wrap)
 import Data.Number.Format as Num
 import Data.Pair (Pair(..))
+import Data.Record.Builder (build, insert)
 import Data.Symbol (SProxy(SProxy))
-import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj, onMatch)
 import Genetics.Browser.Canvas (BrowserCanvas, Label, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), _Dimensions, _Track)
 import Genetics.Browser.Canvas (uiSlots) as Canvas
-import Genetics.Browser.Types (Bp, ChrId)
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, scaledSegments, scaledSegments', viewScale)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, scaledSegments, viewScale)
+import Genetics.Browser.Types (Bp, ChrId, _exp)
 import Graphics.Canvas (Dimensions) as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
@@ -89,17 +88,18 @@ sigLevelRuler {min, max, sig} color f = outlined outline rulerDrawing <> label
         y = thickness + f.height - (normY * f.height)
         rulerDrawing = Drawing.path [{x: 0.0, y}, {x: f.width, y}]
 
-        expSig = 10.0 `pow` (-sig)
-        text  = "P = " <> (Num.toStringWith (Num.exponential 1) expSig)
+        text  = "P = " <> (10.0 `pow` -sig) ^. _exp 1
 
         font' = font sansSerif 16 mempty
-        label = Drawing.text font' (f.width+4.0) (y-6.0) (fillColor red) text
+        label = Drawing.text font' (f.width+4.0) (y-6.0) (fillColor color) text
 
 
-chrLabelTrack :: CoordSys ChrId BigInt
+chrLabelTrack :: ∀ r.
+                 { fontSize :: Int | r }
+              -> CoordSys ChrId BigInt
               -> Map ChrId (Array NormalizedGlyph)
-chrLabelTrack cs =
-  let font' = font sansSerif 12 mempty
+chrLabelTrack {fontSize} cs =
+  let font' = font sansSerif fontSize mempty
 
       chrText :: ChrId -> Drawing
       chrText chr =
@@ -137,19 +137,26 @@ type VScaleRow r = ( min :: Number
                    | r )
 
 type VScale = { color :: Color
+              , hPad :: Number
+              , numSteps :: Int
               | VScaleRow () }
 
-drawVScaleInSlot :: ∀ r.
-                    { color :: Color | VScaleRow r }
+defaultVScaleConfig :: Record (VScaleRow ())
+                    -> VScale
+defaultVScaleConfig =
+  build (insert (SProxy :: SProxy "color")    black
+     >>> insert (SProxy :: SProxy "hPad")     0.125
+     >>> insert (SProxy :: SProxy "numSteps") 3)
+
+drawVScaleInSlot :: VScale
                  -> UISlot
                  -> Drawing
 drawVScaleInSlot vscale {offset, size} =
   let
-      -- these should be configurable
-      hPad = size.width / 8.0
-      numSteps = 3
-      -- as well as the font sizes, linewidths, etc...
-      -- and also the left vs right horizontal padding
+      -- TODO expose linewidth config
+      -- TODO expose offsets in config
+      hPad = size.width * vscale.hPad
+      numSteps = vscale.numSteps
 
       x = 7.0 * hPad
 
@@ -165,7 +172,7 @@ drawVScaleInSlot vscale {offset, size} =
           <> foldMap (\i -> hBar 8.0 (i * size.height)) spokes
 
       unitLabel =
-        Drawing.translate (size.width * 0.5 - hPad) (size.height * 0.72)
+        Drawing.translate (size.width * 0.4 - hPad) (size.height * 0.72)
         $ Drawing.rotate (- Math.pi / 2.0)
         $ Drawing.text (font sansSerif 18 mempty)
             0.0 0.0 (fillColor black) "-log10 (P value)"
@@ -190,15 +197,6 @@ type LegendEntry = { text :: String, icon :: Drawing }
 type Legend = { entries :: Array LegendEntry }
 
 
-
-mkIcon :: Color -> String -> LegendEntry
-mkIcon c text =
-  let sh = circle 0.0 0.0 5.5
-      icon = outlined (outlineColor black <> lineWidth 2.0) sh <>
-             filled (fillColor c) sh
-  in {text, icon}
-
-
 drawLegendItem :: LegendEntry
                -> Drawing
 drawLegendItem {text, icon} =
@@ -207,22 +205,31 @@ drawLegendItem {text, icon} =
   in icon <> t
 
 
+type LegendConfig r =
+  { entries :: Array LegendEntry
+  , hPad :: Number, vPad :: Number
+  , fontSize :: Int | r }
+
+defaultLegendConfig :: Array LegendEntry -> LegendConfig ()
+defaultLegendConfig entries =
+  { entries
+  , hPad: 0.2, vPad: 0.2
+  , fontSize: 12 }
+
+
+
 drawLegendInSlot :: ∀ r.
-                    { entries :: Array LegendEntry | r }
+                    LegendConfig r
                  -> UISlot
-                 -- -> { offset :: Point, size :: { width :: Number, height :: Number } }
                  -> Drawing
-drawLegendInSlot {entries} {offset, size} =
+drawLegendInSlot c@{entries} {offset, size} =
   let
-      -- these should be configurable
-      hPad = size.width  / 5.0
-      vPad = size.height / 5.0
-      -- as well as the font sizes, linewidths, etc...
-      -- and also the left vs right horizontal padding
+      hPad = size.width  * c.hPad
+      vPad = size.height * c.vPad
 
       x = hPad
 
-      font' = font sansSerif 12 mempty
+      font' = font sansSerif c.fontSize mempty
 
       drawEntry :: Number -> { text :: String, icon :: Drawing } -> Drawing
       drawEntry y {text, icon} =
@@ -230,7 +237,6 @@ drawLegendInSlot {entries} {offset, size} =
           $ icon <> Drawing.text font' 12.0 0.0 (fillColor black) text
 
       d = (size.height - 2.0*vPad) / length entries
-      -- ds' = foldl (\d' e -> Drawing.translate 0.0 vPad $ (drawEntry e <> d')) entries mempty
       ds = mapWithIndex (\i ic -> drawEntry (vPad*(Int.toNumber (i+1) )) ic) entries
   in fold ds
 
@@ -316,8 +322,7 @@ withPixelSegments :: forall r m.
                   -> (ChrId -> Pair Number -> m)
                   -> m
 withPixelSegments cs cdim bView =
-  let scale = { screenWidth: cdim.width
-              , viewWidth: pairSize bView }
+  let scale = viewScale cdim (wrap bView)
   in flip foldMapWithIndex (scaledSegments cs scale)
 
 
@@ -348,7 +353,7 @@ pixelSegments cSys canvas csView =
   let trackDim = canvas ^. _Track <<< _Dimensions
       segmentPadding = 12.0 -- TODO this should be configurable
   in aroundPair (-segmentPadding)
-       <$> scaledSegments' cSys (viewScale trackDim csView)
+       <$> scaledSegments cSys (viewScale trackDim csView)
 
 
 renderTrack :: ∀ a b.
@@ -408,11 +413,13 @@ renderRelativeUI cSys uiGlyphs canvas =
   in \v -> drawTrackUI (unwrap v) $ renderUIElement uiGlyphs
 
 
-chrLabelsUI :: CoordSys ChrId BigInt
+chrLabelsUI :: ∀ r.
+               CoordSys ChrId BigInt
+            -> { fontSize :: Int | r }
             -> BrowserCanvas
             -> CoordSysView
             -> Drawing
-chrLabelsUI cSys = renderRelativeUI cSys (chrLabelTrack cSys)
+chrLabelsUI cSys c = renderRelativeUI cSys (chrLabelTrack c cSys)
 
 
 type Peak x y r = { covers :: Pair x

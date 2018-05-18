@@ -249,54 +249,20 @@ type Scale = { screenWidth :: Number, viewWidth :: BigInt }
 -- | that is currently visible, scale a point in the coordinate system
 -- | to the screen.
 -- | Always uses zero as the origin -- points scaled with this must still be translated!
-scaleToScreen :: Scale
+scaleToScreen :: ViewScale
               -> BigInt
               -> Number
-scaleToScreen {screenWidth, viewWidth} x =
-  BigInt.toNumber x * (screenWidth / (BigInt.toNumber viewWidth))
-
-scaleToScreen' :: ViewScale
-               -> BigInt
-               -> Number
-scaleToScreen' (ViewScale {pixelWidth, coordWidth}) x =
+scaleToScreen (ViewScale {pixelWidth, coordWidth}) x =
   BigInt.toNumber x * (pixelWidth / (BigInt.toNumber coordWidth))
 
-
--- | Given the width of the display in pixels, and how much of the coordinate system
--- | that is currently visible, scale a point given in pixels from the left-hand edge
--- | to browser units from the beginning of the browser.
--- | Always uses zero as the origin -- points scaled with this must still be translated!
-scaleToGlobal :: Scale
-              -> Number
-              -> BigInt
-scaleToGlobal {screenWidth, viewWidth} x =
-  BigInt.fromNumber $ x * ((BigInt.toNumber viewWidth) / screenWidth)
-
-scaleToGlobal' :: ViewScale
-              -> Number
-              -> BigInt
-scaleToGlobal' (ViewScale {pixelWidth, coordWidth}) x =
-  BigInt.fromNumber $ x * ((BigInt.toNumber coordWidth) / pixelWidth)
-
-
-pixelsView :: ViewScale -> CoordSysView -> Pair Number
-pixelsView vs (CoordSysView (Pair l r)) =
-  let f = scaleToScreen' vs
-  in Pair (f l) (f r)
 
 -- | Given a coordinate system and browser scale,
 -- | return the browser segments scaled to canvas coordinates.
 scaledSegments :: forall i.
                   CoordSys i BigInt
-               -> Scale
-               -> Segments i Number
-scaledSegments cs scale = (map <<< map) (scaleToScreen scale) $ cs ^. _Segments
-
-scaledSegments' :: forall i.
-                  CoordSys i BigInt
                -> ViewScale
                -> Segments i Number
-scaledSegments' cs scale = (map <<< map) (scaleToScreen' scale) $ cs ^. _Segments
+scaledSegments cs scale = (map <<< map) (scaleToScreen scale) $ cs ^. _Segments
 
 
 -- | Helper functions for translating and scaling pairs.
@@ -310,11 +276,6 @@ translatePairBy :: Pair BigInt
 translatePairBy p x = (_ + delta) <$> p
   where delta = BigInt.fromNumber $ x * (BigInt.toNumber $ pairSize p)
 
-translateViewBy :: CoordSysView
-                -> Number
-                -> CoordSysView
-translateViewBy (CoordSysView p) x = CoordSysView $ translatePairBy p x
-
 
 -- | Scale an Int pair by changing its length to be `x` times the pair size.
 scalePairBy :: Pair BigInt
@@ -325,13 +286,6 @@ scalePairBy p x = result
         p'@(Pair l' r') = BigInt.toNumber <$> p
         delta = ((pairSize p' * x') - (pairSize p')) / 2.0
         result = BigInt.fromNumber <$> Pair (l' - delta) (r' + delta)
-
-
-scaleViewBy :: CoordSysView
-            -> Number
-            -> CoordSysView
-scaleViewBy (CoordSysView p) x = CoordSysView $ scalePairBy p x
-
 
 
 lerp :: ∀ a.
