@@ -9,6 +9,7 @@ import Control.Monad.Aff (Aff, error, throwError)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Except (runExcept)
+import Control.Monad.Reader (class MonadReader)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
@@ -626,6 +627,61 @@ demoBrowser :: ∀ r.
                , relativeUI :: Drawing
                , fixedUI    :: Drawing }
 demoBrowser cSys config trackData =
+  let
+      vscale = defaultVScaleConfig config.score
+
+      sigSnps = filterSig config.score trackData.snps
+      legend = defaultLegendConfig
+               $ (annotationLegendTest defaultDemoLegend)
+                  trackData.annotations
+
+      snps =
+        renderTrack cSys (renderSNPs vscale) trackData.snps
+
+      annotations =
+        renderTrack cSys (renderAnnotation cSys sigSnps vscale defaultDemoLegend) trackData.annotations
+
+      relativeUI = chrLabelsUI cSys {fontSize: 12}
+
+
+  in \bc v ->
+    let trackDim = bc ^. _Track <<< _Dimensions
+        slots = uiSlots bc
+        fixedUI =  (snpsUI        vscale UILeft  bc)
+                <> (annotationsUI legend UIRight bc)
+                <> (Drawing.translate slots.left.size.width slots.top.size.height
+                    $ sigLevelRuler vscale red trackDim)
+
+    in { tracks: { snps: snps bc v
+                 , annotations: annotations bc v }
+       , relativeUI: relativeUI bc v
+       , fixedUI }
+
+
+
+type BrowserConfig =
+  { chrLabelsUI :: { fontSize :: Int }
+  , legend :: DemoLegendConfig
+  , vscale :: VScale
+  , threshold :: { min :: Number, max :: Number, sig :: Number }
+  }
+
+
+demoBrowser' :: ∀ m r.
+                MonadReader BrowserConfig m
+            => CoordSys ChrId BigInt
+            -- -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
+            -> { snps        :: Map ChrId (Array _)
+               , annotations :: Map ChrId (Array _)
+               , genes       :: Map ChrId (Array _) }
+            -> BrowserCanvas
+            -> CoordSysView
+            -> m { tracks ::
+                    { snps        :: RenderedTrack (SNP _)
+                    , annotations :: RenderedTrack (Annotation _) }
+                 , relativeUI :: Drawing
+                 , fixedUI    :: Drawing }
+demoBrowser' cSys config trackData = do
   let
       vscale = defaultVScaleConfig config.score
 
