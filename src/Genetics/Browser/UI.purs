@@ -553,7 +553,7 @@ runBrowser config bc = launchAff $ do
           v  <- browser.getView
           bc <- browser.getBrowserCanvas
 
-          let segs = pixelSegments cSys bc v
+          let segs = pixelSegments { segmentPadding: 12.0 } cSys bc v
               annoPeaks = annotationsForScale cSys sigSnps
                             trackData.annotations segs
 

@@ -6,6 +6,7 @@ NAMESPACE = GGB
 OUT = ./dist/app.js
 MODULE  = Genetics.Browser.UI
 
+.PHONY: $(OUT)
 $(OUT): deps
 	$(BUNDLE) $(MODULE)  --to $(OUT)
 

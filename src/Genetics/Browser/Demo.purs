@@ -9,7 +9,7 @@ import Control.Monad.Aff (Aff, error, throwError)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Except (runExcept)
-import Control.Monad.Reader (class MonadReader)
+import Control.Monad.Reader (class MonadReader, ask)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
@@ -144,8 +144,6 @@ geneRenderer = inj (SProxy :: SProxy "single") { draw: bedDraw, horPlace, verPla
   where horPlace {position, frameSize} =
           let f p = Normalized (unwrap $ p / frameSize)
           in inj (SProxy :: SProxy "range") $ map f position
-
-
 
 
 
@@ -635,11 +633,13 @@ demoBrowser cSys config trackData =
                $ (annotationLegendTest defaultDemoLegend)
                   trackData.annotations
 
+      conf = { segmentPadding: 12.0 }
+
       snps =
-        renderTrack cSys (renderSNPs vscale) trackData.snps
+        renderTrack conf cSys (renderSNPs vscale) trackData.snps
 
       annotations =
-        renderTrack cSys (renderAnnotation cSys sigSnps vscale defaultDemoLegend) trackData.annotations
+        renderTrack conf cSys (renderAnnotation cSys sigSnps vscale defaultDemoLegend) trackData.annotations
 
       relativeUI = chrLabelsUI cSys {fontSize: 12}
 
@@ -662,52 +662,55 @@ demoBrowser cSys config trackData =
 type BrowserConfig =
   { chrLabelsUI :: { fontSize :: Int }
   , legend :: DemoLegendConfig
-  , vscale :: VScale
+  -- , vscale :: VScale
   , threshold :: { min :: Number, max :: Number, sig :: Number }
   }
 
 
 demoBrowser' :: ∀ m r.
                 MonadReader BrowserConfig m
-            => CoordSys ChrId BigInt
-            -- -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
-            -> { snps        :: Map ChrId (Array _)
-               , annotations :: Map ChrId (Array _)
-               , genes       :: Map ChrId (Array _) }
-            -> BrowserCanvas
-            -> CoordSysView
-            -> m { tracks ::
-                    { snps        :: RenderedTrack (SNP _)
-                    , annotations :: RenderedTrack (Annotation _) }
-                 , relativeUI :: Drawing
-                 , fixedUI    :: Drawing }
-demoBrowser' cSys config trackData = do
+             => CoordSys ChrId BigInt
+             -- -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
+             -> { snps        :: Map ChrId (Array _)
+                , annotations :: Map ChrId (Array _)
+                , genes       :: Map ChrId (Array _) }
+             -> m (BrowserCanvas
+                   -> CoordSysView
+                   -> { tracks ::
+                           { snps        :: RenderedTrack (SNP _)
+                           , annotations :: RenderedTrack (Annotation _) }
+                      , relativeUI :: Drawing
+                      , fixedUI    :: Drawing })
+demoBrowser' cSys trackData = do
+  -- let
+  vscale <- defaultVScaleConfig <<< _.threshold <$> ask
+
   let
-      vscale = defaultVScaleConfig config.score
+      sigSnps :: _
+      sigSnps = filterSig vscale trackData.snps
 
-      sigSnps = filterSig config.score trackData.snps
       legend = defaultLegendConfig
-               $ (annotationLegendTest defaultDemoLegend)
-                  trackData.annotations
+                 $ (annotationLegendTest defaultDemoLegend)
+                    trackData.annotations
 
-      snps =
-        renderTrack cSys (renderSNPs vscale) trackData.snps
+  -- snps <-
+  --       renderTrack cSys (renderSNPs vscale) trackData.snps
 
-      annotations =
-        renderTrack cSys (renderAnnotation cSys sigSnps vscale defaultDemoLegend) trackData.annotations
+  -- annotations <-
+  --       renderTrack cSys (renderAnnotation cSys sigSnps vscale defaultDemoLegend) trackData.annotations
 
-      relativeUI = chrLabelsUI cSys {fontSize: 12}
+  -- relativeUI <- chrLabelsUI cSys {fontSize: 12}
 
+  pure \bc v -> unsafeCoerce unit
 
-  in \bc v ->
-    let trackDim = bc ^. _Track <<< _Dimensions
-        slots = uiSlots bc
-        fixedUI =  (snpsUI        vscale UILeft  bc)
-                <> (annotationsUI legend UIRight bc)
-                <> (Drawing.translate slots.left.size.width slots.top.size.height
-                    $ sigLevelRuler vscale red trackDim)
-
-    in { tracks: { snps: snps bc v
-                 , annotations: annotations bc v }
-       , relativeUI: relativeUI bc v
-       , fixedUI }
+  -- pure \bc v ->
+  --   let trackDim = bc ^. _Track <<< _Dimensions
+  --       slots = uiSlots bc
+  --       fixedUI =  (snpsUI        vscale UILeft  bc)
+  --               <> (annotationsUI legend UIRight bc)
+  --               <> (Drawing.translate slots.left.size.width slots.top.size.height
+  --                   $ sigLevelRuler vscale red trackDim)
+  --   in { tracks: { snps: snps bc v
+  --                , annotations: annotations bc v }
+  --      , relativeUI: relativeUI bc v
+  --      , fixedUI }

@@ -3,6 +3,8 @@ module Genetics.Browser where
 import Prelude
 
 import Color (Color, black, white)
+import Control.Monad.Eff (Eff)
+import Control.Monad.Reader (class MonadReader, ask)
 import Data.Array ((..))
 import Data.Array as Array
 import Data.BigInt (BigInt)
@@ -20,7 +22,7 @@ import Data.Newtype (unwrap, wrap)
 import Data.Number.Format as Num
 import Data.Pair (Pair(..))
 import Data.Record.Builder (build, insert)
-import Data.Symbol (SProxy(SProxy))
+import Data.Symbol (class IsSymbol, SProxy(SProxy))
 import Data.Variant (Variant, case_, inj, onMatch)
 import Genetics.Browser.Canvas (BrowserCanvas, Label, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), _Dimensions, _Track)
 import Genetics.Browser.Canvas (uiSlots) as Canvas
@@ -32,6 +34,7 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math (pow)
 import Math as Math
+import Unsafe.Coerce (unsafeCoerce)
 
 
 type Feature a = { position  :: Pair Bp
@@ -147,6 +150,19 @@ defaultVScaleConfig =
   build (insert (SProxy :: SProxy "color")    black
      >>> insert (SProxy :: SProxy "hPad")     0.125
      >>> insert (SProxy :: SProxy "numSteps") 3)
+
+
+-- type Config (n :: Symbol) a r = forall m. MonadReader ({ n :: a | r}) m
+
+
+defaultVScaleConfig' :: forall m.
+                        MonadReader (Record (VScaleRow ())) m
+                     => m VScale
+defaultVScaleConfig' = do
+  a <- ask
+  pure $ build (insert (SProxy :: SProxy "color")    black
+     >>> insert (SProxy :: SProxy "hPad")     0.125
+     >>> insert (SProxy :: SProxy "numSteps") 3) a
 
 drawVScaleInSlot :: VScale
                  -> UISlot
@@ -345,27 +361,60 @@ type Renderer a =
   -> RenderedTrack a
 
 
-pixelSegments :: CoordSys _ _
+pixelSegments :: ∀ r.
+                 { segmentPadding :: Number | r }
+              -> CoordSys _ _
               -> BrowserCanvas
               -> CoordSysView
-              -> _
-pixelSegments cSys canvas csView =
+              -> Map _ _
+pixelSegments conf cSys canvas csView =
   let trackDim = canvas ^. _Track <<< _Dimensions
-      segmentPadding = 12.0 -- TODO this should be configurable
-  in aroundPair (-segmentPadding)
+      -- segmentPadding = 12.0 -- TODO this should be configurable
+  in aroundPair (-conf.segmentPadding)
        <$> scaledSegments cSys (viewScale trackDim csView)
 
 
 renderTrack :: ∀ a b.
-               CoordSys ChrId _
+               _
+            -> CoordSys ChrId _
             -> Renderer a
             -> Map ChrId (Array a)
             -> BrowserCanvas
             -> CoordSysView
             -> RenderedTrack a
-renderTrack cSys renderer trackData canvas =
+renderTrack conf cSys renderer trackData canvas =
   let trackDim = canvas ^. _Track <<< _Dimensions
-  in renderer trackDim trackData <<< pixelSegments cSys canvas
+  in renderer trackDim trackData <<< pixelSegments conf cSys canvas
+
+
+type Configable e a b =
+  { value :: Eff e b
+  , getConfig :: Eff e a
+  , modConfig :: (a -> a) -> Eff e Unit }
+
+type Renderer' e a b =
+     a
+  -> Eff e (Configable e a (Canvas.Dimensions
+                          -> Map ChrId (Array a)
+                          -> Map ChrId (Pair Number)
+                          -> RenderedTrack a))
+
+renderTrackLive :: forall r r' l m a b.
+                   RowCons l a r r'
+                => IsSymbol l
+                => MonadReader {|r'} m
+                => CoordSys ChrId _
+                -> SProxy l
+                -> Renderer' _ a b
+                -> Map ChrId (Array b)
+                -> Eff _ (Configable _ a (
+                             BrowserCanvas
+                             -> CoordSysView
+                             -> RenderedTrack b))
+renderTrackLive cSys _ renderer trackData = unsafeCoerce unit
+  -- let trackDim = canvas ^. _Track <<< _Dimensions
+  -- in renderer trackDim trackData <<< pixelSegments cSys canvas
+
 
 renderFixedUI :: forall a b.
                  (UISlot -> Drawing)
