@@ -5,7 +5,7 @@ import Prelude
 import Color (Color, rotateHue)
 import Control.Alt ((<|>))
 import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Ref (REF)
+import Control.Monad.Eff.Ref (REF, Ref)
 import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Eff.Unsafe (unsafeCoerceEff)
 import Control.Monad.Reader (class MonadReader, ask)
@@ -165,6 +165,49 @@ instance rcSeqRecordCons
          pure $ Record.insert n a tail
 
 
+-- | don't export constructor
+data Cached a b = C'ed (Ref a) (Ref b) (a -> b)
+
+cache :: forall a b.
+         (a -> b)
+      -> a
+      -> Eff _ (Cached a b)
+cache f i = do
+  let o = f i
+  inRef  <- Ref.newRef i
+  outRef <- Ref.newRef o
+  pure $ C'ed inRef outRef f
+
+readIn :: forall a b.
+          Cached a b -> Eff _ a
+readIn (C'ed i _ _) = Ref.readRef i
+
+readOut :: forall a b.
+           Cached a b -> Eff _ b
+readOut (C'ed _ o _) = Ref.readRef o
+
+modIn :: forall a b.
+         (a -> a) -> Cached a b -> Eff _ (Cached a b)
+modIn g c@(C'ed i o f) = do
+  input <- g <$> Ref.readRef i
+  let output = f input
+  Ref.writeRef i input
+  Ref.writeRef o output
+  pure c
+
+-- mapIn :: forall a b c.
+--          (c -> a) -> c -> Cached a b -> Eff _ (Cached c b)
+-- mapIn g (C'ed iR oR f) = do
+--   let h = f <<< g
+
+--   i <- Ref.readRef iR
+--   let i' = g i
+
+--   inRef  <- Ref.newRef $ i'
+--   outRef <- Ref.newRef $ f i'
+--   pure $ C'ed inRef
+
+
 -- class RCApplyRecord
 --   ( li :: RowList )
 --   ( lf :: RowList )
@@ -242,10 +285,6 @@ instance rcSeqRecordCons
 --                   -> Record rf
 --                   -> Eff (ref :: REF) (Record ro)
 
-doThing funs confs = do
-  theA <- reactiveConfig' funs.theA confs.theA
-  theB <- reactiveConfig' funs.theB confs.theB
-  pure { theA, theB }
 
 
 
