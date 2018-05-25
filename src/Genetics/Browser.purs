@@ -4,6 +4,8 @@ import Prelude
 
 import Color (Color, black, white)
 import Control.Monad.Eff (Eff)
+import Control.Monad.Eff.Class (class MonadEff, liftEff)
+import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Reader (class MonadReader, ask)
 import Data.Array ((..))
 import Data.Array as Array
@@ -21,9 +23,12 @@ import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (unwrap, wrap)
 import Data.Number.Format as Num
 import Data.Pair (Pair(..))
+import Data.Record as Record
 import Data.Record.Builder (build, insert)
-import Data.Symbol (class IsSymbol, SProxy(SProxy))
+import Data.Record.Unsafe as Record
+import Data.Symbol (class IsSymbol, SProxy(SProxy), reflectSymbol)
 import Data.Variant (Variant, case_, inj, onMatch)
+import Genetics.Browser.Cached (Cached, cache)
 import Genetics.Browser.Canvas (BrowserCanvas, Label, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), _Dimensions, _Track)
 import Genetics.Browser.Canvas (uiSlots) as Canvas
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, scaledSegments, viewScale)
@@ -34,6 +39,7 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math (pow)
 import Math as Math
+import Type.Prelude (class RowLacks)
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -387,17 +393,6 @@ renderTrack conf cSys renderer trackData canvas =
   in renderer trackDim trackData <<< pixelSegments conf cSys canvas
 
 
-type Configable e a b =
-  { value :: Eff e b
-  , getConfig :: Eff e a
-  , modConfig :: (a -> a) -> Eff e Unit }
-
-type Renderer' e a b =
-     a
-  -> Eff e (Configable e a (Canvas.Dimensions
-                          -> Map ChrId (Array a)
-                          -> Map ChrId (Pair Number)
-                          -> RenderedTrack a))
 
 renderTrackLive :: forall r r' l m a b.
                    RowCons l a r r'
@@ -405,15 +400,48 @@ renderTrackLive :: forall r r' l m a b.
                 => MonadReader {|r'} m
                 => CoordSys ChrId _
                 -> SProxy l
-                -> Renderer' _ a b
+                -> (a -> Renderer b)
+                -> a
                 -> Map ChrId (Array b)
-                -> Eff _ (Configable _ a (
-                             BrowserCanvas
+                -> Eff _ (Cached a
+                             (BrowserCanvas
                              -> CoordSysView
                              -> RenderedTrack b))
-renderTrackLive cSys _ renderer trackData = unsafeCoerce unit
-  -- let trackDim = canvas ^. _Track <<< _Dimensions
-  -- in renderer trackDim trackData <<< pixelSegments cSys canvas
+renderTrackLive cSys _ renderer init trackData = do
+  let f :: a -> BrowserCanvas -> CoordSysView -> RenderedTrack b
+      f a bc v = let trackDim = bc ^. _Track <<< _Dimensions
+                 in renderer a trackDim trackData
+                    $ pixelSegments {segmentPadding: 12.0} cSys bc v
+  cache f init
+
+
+renderTrackLive' :: forall r0 r1 l m a b.
+                    RowCons l a r0 r1
+                 => RowLacks l r0
+                 => IsSymbol l
+                 => MonadReader { segmentPadding :: Number | r1 } m
+                 => CoordSys ChrId _
+                 -> SProxy l
+                 -> (a -> Renderer b)
+                 -> Map ChrId (Array b)
+                 -> m (Eff _ (Cached a
+                         (BrowserCanvas
+                         -> CoordSysView
+                         -> RenderedTrack b)))
+renderTrackLive' cSys _ renderer trackData = do
+
+  conf <- ask
+
+  let f :: a -> BrowserCanvas -> CoordSysView -> RenderedTrack b
+      f a bc v = let trackDim = bc ^. _Track <<< _Dimensions
+                 in renderer a trackDim trackData
+                    $ pixelSegments conf cSys bc v
+
+      x :: a
+      x = Record.unsafeGet (reflectSymbol (SProxy :: SProxy l)) conf
+
+  pure $ cache f x
+
 
 
 renderFixedUI :: forall a b.

@@ -1,8 +1,9 @@
 module Test.Coordinates where
 
-import Genetics.Browser.Types
-import Genetics.Browser.Types.Coordinates
 import Prelude
+
+import Genetics.Browser.Types
+import Genetics.Browser.Coordinates
 
 import Data.BigInt as BigInt
 import Data.Pair (Pair(..))
