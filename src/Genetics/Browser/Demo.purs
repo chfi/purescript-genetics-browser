@@ -6,6 +6,7 @@ import Color (Color, black)
 import Color.Scheme.Clrs (blue, red)
 import Color.Scheme.X11 (darkblue, darkgrey, lightgrey)
 import Control.Monad.Aff (Aff, error, throwError)
+import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Except (runExcept)
@@ -43,7 +44,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, sigLevelRuler, trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrackLive, renderTrackLive', sigLevelRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, chunkProducer, fetchBed)
 import Genetics.Browser.Canvas (BrowserCanvas, Label, LabelPlace(LLeft, LCenter), UISlotGravity(UIRight, UILeft), _Dimensions, _Track, uiSlots)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
@@ -424,23 +425,42 @@ annotationsUI :: ∀ r.
               -> Drawing
 annotationsUI legend = renderFixedUI (drawLegendInSlot legend)
 
-renderSNPs :: ∀ r.
-              { min :: Number, max :: Number | r }
+
+type SNPConfig r
+  = ( radius :: Number
+    , color :: { outline :: Color
+               , fill    :: Color }
+    , pixelOffset :: Point
+    | r )
+
+defaultSNPConfig :: { | SNPConfig () }
+defaultSNPConfig =
+  { radius: 3.75
+  , color: { outline: darkblue, fill: darkblue }
+  , pixelOffset: {x: 0.0, y: 0.0}
+  }
+
+
+
+renderSNPs :: ∀ m r1 r2.
+              { threshold  :: { min  :: Number, max :: Number | r1 }
+              , snpsConfig :: { | SNPConfig () } | r2 }
            -> Canvas.Dimensions
            -> Map ChrId (Array (SNP ()))
            -> Map ChrId (Pair Number)
            -> RenderedTrack (SNP ())
-renderSNPs verScale cdim snps =
+renderSNPs { snpsConfig, threshold } cdim snpData =
   let features :: Array (SNP ())
-      features = fold snps
+      features = fold snpData
 
-      radius = 3.75
+      snps = snpsConfig
+      radius = snps.radius
 
       drawing =
-          let color = darkblue
-              c = circle 0.0 0.0 radius
-              out = outlined (outlineColor color) c
-              fill = filled (fillColor color) c
+          let {x,y} = snps.pixelOffset
+              c     = circle x y radius
+              out   = outlined (outlineColor snps.color.outline) c
+              fill  = filled   (fillColor    snps.color.fill)    c
           in out <> fill
 
       drawings :: Array (Tuple (SNP ()) Point) -> Array DrawingN
@@ -451,7 +471,7 @@ renderSNPs verScale cdim snps =
       npointed = (map <<< map)
         (fanout id (\s ->
            { x: featureNormX s
-           , y: wrap $ normYLogScore verScale s.feature.score })) snps
+           , y: wrap $ normYLogScore threshold s.feature.score })) snpData
 
 
       pointed :: Map ChrId (Pair Number)
@@ -626,7 +646,8 @@ demoBrowser :: ∀ r.
                , fixedUI    :: Drawing }
 demoBrowser cSys config trackData =
   let
-      vscale = defaultVScaleConfig config.score
+      threshold = config.score
+      vscale = defaultVScaleConfig threshold
 
       sigSnps = filterSig config.score trackData.snps
       legend = defaultLegendConfig
@@ -636,7 +657,7 @@ demoBrowser cSys config trackData =
       conf = { segmentPadding: 12.0 }
 
       snps =
-        renderTrack conf cSys (renderSNPs vscale) trackData.snps
+        renderTrack conf cSys (renderSNPs {threshold, snpsConfig: defaultSNPConfig}) trackData.snps
 
       annotations =
         renderTrack conf cSys (renderAnnotation cSys sigSnps vscale defaultDemoLegend) trackData.annotations
@@ -664,25 +685,27 @@ type BrowserConfig =
   , legend :: DemoLegendConfig
   -- , vscale :: VScale
   , threshold :: { min :: Number, max :: Number, sig :: Number }
+  , snpsConfig :: { | SNPConfig () }
   }
 
 
 demoBrowser' :: ∀ m r.
                 MonadReader BrowserConfig m
              => CoordSys ChrId BigInt
-             -- -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
              -> { snps        :: Map ChrId (Array _)
                 , annotations :: Map ChrId (Array _)
                 , genes       :: Map ChrId (Array _) }
-             -> m (BrowserCanvas
-                   -> CoordSysView
-                   -> { tracks ::
-                           { snps        :: RenderedTrack (SNP _)
-                           , annotations :: RenderedTrack (Annotation _) }
-                      , relativeUI :: Drawing
-                      , fixedUI    :: Drawing })
+             -> m _
+             -- -> m (BrowserCanvas
+             --       -> CoordSysView
+             --       -> { tracks ::
+             --               { snps        :: RenderedTrack (SNP _)
+             --               , annotations :: RenderedTrack (Annotation _) }
+             --          , relativeUI :: Drawing
+             --          , fixedUI    :: Drawing })
 demoBrowser' cSys trackData = do
   -- let
+  conf <- ask
   vscale <- defaultVScaleConfig <<< _.threshold <$> ask
 
   let
@@ -693,6 +716,12 @@ demoBrowser' cSys trackData = do
                  $ (annotationLegendTest defaultDemoLegend)
                     trackData.annotations
 
+      c :: _
+      c = conf
+
+  -- (snps :: _) <-
+  --   renderTrackLive' cSys (SProxy :: SProxy "snpsConfig") renderSNPs trackData.snps conf
+
   -- snps <-
   --       renderTrack cSys (renderSNPs vscale) trackData.snps
 
@@ -701,7 +730,9 @@ demoBrowser' cSys trackData = do
 
   -- relativeUI <- chrLabelsUI cSys {fontSize: 12}
 
-  pure \bc v -> unsafeCoerce unit
+
+  -- pure \bc v -> unsafeCoerce unit
+  pure $ unsafeCoerce unit
 
   -- pure \bc v ->
   --   let trackDim = bc ^. _Track <<< _Dimensions

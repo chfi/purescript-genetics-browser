@@ -23,7 +23,10 @@ import Type.Prelude (class IsSymbol, class RowLacks, SProxy(SProxy))
 -- | input and output with functions `input` and `output`.
 data Cached a b = Cached (Ref a) (Ref b) (a -> b)
 
-class (RowCons s (Cached a b) r r', RowLacks s r) <= RowCached (s :: Symbol) a b r r'
+data CachedF a b x =
+    ReadInF  (a -> x)
+  | ReadOutF (b -> x)
+  | ApplyF a x
 
 insert' :: ∀ s a r r'.
            IsSymbol s
