@@ -13,7 +13,7 @@ $(OUT): deps
 build: $(OUT)
 
 .PHONY: test
-test:
+test: deps
 	$(BUILD) test
 
 .PHONY: clean
