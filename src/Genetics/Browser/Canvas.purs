@@ -14,7 +14,7 @@ import DOM.Node.Types (Element)
 import Data.Either (Either(..))
 import Data.Foldable (any, foldl, for_)
 import Data.Int as Int
-import Data.Lens (Lens', iso, view, (^.))
+import Data.Lens (Getter', Lens', iso, lens, re, to, view, (^.))
 import Data.Lens.Iso (Iso')
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Record as Lens
@@ -26,12 +26,14 @@ import Data.Symbol (SProxy(..))
 import Data.Time.Duration (Milliseconds)
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple), uncurry)
+import Data.Variant (case_, onMatch)
+import Genetics.Browser.Layer (Component(..), Layer(..), LayerDimensions, LayerType(..), layerSlots)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
 import Graphics.Drawing (render, translate) as Drawing
-import Graphics.Drawing.Font (sansSerif)
 import Graphics.Drawing.Font (font, fontString) as Drawing
+import Graphics.Drawing.Font (sansSerif)
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -461,6 +463,9 @@ browserCanvas dimensions trackPadding el = do
                        , container: el}
 
 
+
+
+
 renderGlyphs :: TrackCanvas
              -> { drawing :: Drawing, points :: Array Point }
              -> Eff _ Unit
@@ -627,3 +632,91 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
     for_ t \s -> do
       liftEff $ renderGlyphs bc.track s
       delay d
+
+
+
+
+
+
+data LayerCanvas
+  = Static Canvas.CanvasElement
+  | Buffer BufferedCanvas
+
+
+
+_1Canvas :: Getter' LayerCanvas CanvasElement
+_1Canvas = to case _ of
+  Static c -> c
+  Buffer c -> (unwrap c).front
+
+-- _2Canvas :: Fold' LayerCanvas CanvasElement
+-- _2Canvas =
+
+
+layerCanvas :: ∀ a.
+               Layer a -> LayerDimensions -> Eff _ LayerCanvas
+layerCanvas (Layer lt _ c) lDim = do
+
+  let slots = layerSlots lDim
+
+  let {size, pos} = case c of
+        Padded _ -> let p' = lDim.padding
+                    in { size: slots.padded.size, pos: { left: p'.left, top: p'.top } }
+        _        ->    { size: slots.full.size,   pos: { left: 0.0, top: 0.0 } }
+
+  canvas <-
+    case lt of
+      Fixed     -> Static <$> createCanvas         size "fixed"
+      Scrolling -> Buffer <$> createBufferedCanvas size
+
+  setCanvasPosition pos (canvas ^. _1Canvas)
+
+  pure $ unsafeCoerce unit
+
+
+
+type LayerRenderable =
+  Variant ( fixed    :: Drawing
+          , drawings :: Array { drawing :: Drawing
+                              , points :: Array Point }
+          , labels   :: Array Label )
+
+
+
+renderLayer :: Milliseconds
+            -> LayerDimensions
+            -> LayerCanvas
+            -> Number
+            -> Layer (ComponentSlot -> LayerRenderable)
+            -> Aff _ Unit
+renderLayer d ld lc offset layer@(Layer lt lm com) = do
+
+  let slots = layerSlots ld
+
+  let fixed :: Drawing -> _
+      fixed = unsafeCoerce unit -- render the drawing to the Front canvas of the layer
+
+      drawings :: Array _ -> _
+      drawings = unsafeCoerce unit -- render, over time, copies of the drawings to the front canvas
+
+      labels :: Array Label -> _
+      labels = unsafeCoerce unit -- collide & render the labels of the drawings to the front canvas
+
+      drawSlot :: LayerRenderable -> Aff _ Unit
+      drawSlot =
+        case_ # onMatch
+          { fixed
+          , drawings
+          , labels
+          }
+
+  case com of
+    Full    a -> unsafeCoerce unit
+      -- run the contents on the full canvas
+    Padded  a -> unsafeCoerce unit
+      -- translate as necessary and run contents on canvas
+    Outside a -> unsafeCoerce unit
+      -- translate and mask as necessary and run each slot contents on the respective canvas
+
+
+  pure unit
