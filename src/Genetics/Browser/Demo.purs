@@ -632,12 +632,11 @@ renderAnnotation cSys sigSnps vScale conf cdim allAnnots =
                  , drawings, labels }
 
 
-demoBrowser :: ∀ r.
+demoBrowser :: ∀ r r2.
                CoordSys ChrId BigInt
             -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
             -> { snps        :: Map ChrId (Array _)
-               , annotations :: Map ChrId (Array _)
-               , genes       :: Map ChrId (Array _) }
+               , annotations :: Map ChrId (Array _) | r2 }
             -> BrowserCanvas
             -> CoordSysView
             -> { tracks     :: { snps        :: RenderedTrack (SNP _)
@@ -687,61 +686,3 @@ type BrowserConfig =
   , threshold :: { min :: Number, max :: Number, sig :: Number }
   , snpsConfig :: { | SNPConfig () }
   }
-
-
-demoBrowser' :: ∀ m r.
-                MonadReader BrowserConfig m
-             => CoordSys ChrId BigInt
-             -> { snps        :: Map ChrId (Array _)
-                , annotations :: Map ChrId (Array _)
-                , genes       :: Map ChrId (Array _) }
-             -> m _
-             -- -> m (BrowserCanvas
-             --       -> CoordSysView
-             --       -> { tracks ::
-             --               { snps        :: RenderedTrack (SNP _)
-             --               , annotations :: RenderedTrack (Annotation _) }
-             --          , relativeUI :: Drawing
-             --          , fixedUI    :: Drawing })
-demoBrowser' cSys trackData = do
-  -- let
-  conf <- ask
-  vscale <- defaultVScaleConfig <<< _.threshold <$> ask
-
-  let
-      sigSnps :: _
-      sigSnps = filterSig vscale trackData.snps
-
-      legend = defaultLegendConfig
-                 $ (annotationLegendTest defaultDemoLegend)
-                    trackData.annotations
-
-      c :: _
-      c = conf
-
-  -- (snps :: _) <-
-  --   renderTrackLive' cSys (SProxy :: SProxy "snpsConfig") renderSNPs trackData.snps conf
-
-  -- snps <-
-  --       renderTrack cSys (renderSNPs vscale) trackData.snps
-
-  -- annotations <-
-  --       renderTrack cSys (renderAnnotation cSys sigSnps vscale defaultDemoLegend) trackData.annotations
-
-  -- relativeUI <- chrLabelsUI cSys {fontSize: 12}
-
-
-  -- pure \bc v -> unsafeCoerce unit
-  pure $ unsafeCoerce unit
-
-  -- pure \bc v ->
-  --   let trackDim = bc ^. _Track <<< _Dimensions
-  --       slots = uiSlots bc
-  --       fixedUI =  (snpsUI        vscale UILeft  bc)
-  --               <> (annotationsUI legend UIRight bc)
-  --               <> (Drawing.translate slots.left.size.width slots.top.size.height
-  --                   $ sigLevelRuler vscale red trackDim)
-  --   in { tracks: { snps: snps bc v
-  --                , annotations: annotations bc v }
-  --      , relativeUI: relativeUI bc v
-  --      , fixedUI }

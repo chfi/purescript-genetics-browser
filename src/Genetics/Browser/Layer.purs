@@ -26,7 +26,7 @@ type Point = { x :: Number, y :: Number }
 
 data Component a =
     Full   a
-  | Padded a
+  | Padded Number a
   | Outside { top    :: a
             , right  :: a
             , bottom :: a
@@ -50,8 +50,16 @@ type ComponentSlot = { offset :: Point
 
 type CanvasComponent a = Component (ComponentSlot -> a)
 
+type LayerSlots a =
+  ( full   :: a
+  , padded :: a
+  , top    :: a
+  , right  :: a
+  , bottom :: a
+  , left   :: a )
+
 layerSlots :: LayerDimensions
-           -> _
+           -> Record (LayerSlots ComponentSlot)
 layerSlots {size,padding} =
   let p0 = { x: 0.0, y: 0.0 }
       w  = size.width
@@ -91,54 +99,9 @@ drawComponent :: ∀ a.
 drawComponent ld =
   let dims = layerSlots ld
   in case _ of
-    Full    f -> Full    $ f dims.full
-    Padded  f -> Padded  $ f dims.padded
-    Outside f -> Outside $ { top:    f.top    dims.top
-                           , right:  f.right  dims.right
-                           , bottom: f.bottom dims.bottom
-                           , left:   f.left   dims.left }
-
-
-runLayer :: Layer (Canvas.Context2D -> Eff _ Unit)
-         -> LayerDimensions
-         -> Canvas.Context2D
-         -> Eff _ Unit
-runLayer (Layer lt lm c) dim ctx = do
-  let slots = layerSlots dim
-  case c of
-    Full    f -> withComponent f lm ctx slots.full
-    Padded  f -> withComponent f lm ctx slots.padded
-    Outside f -> do
-      withComponent f.top    lm ctx slots.top
-      withComponent f.right  lm ctx slots.right
-      withComponent f.bottom lm ctx slots.bottom
-      withComponent f.left   lm ctx slots.left
-
-  pure unit
-
-
-withComponent :: (Canvas.Context2D -> Eff _ Unit)
-              -> LayerMask
-              -> Canvas.Context2D
-              -> ComponentSlot
-              -> Eff _ Unit
-withComponent eff mask ctx {offset, size} = Canvas.withContext ctx do
-
-  _ <- Canvas.transform
-         { m11: 1.0, m21: 0.0, m31: offset.x
-         , m12: 0.0, m22: 1.0, m32: offset.y } ctx
-
-  case mask of
-    NoMask -> pure unit
-    Masked -> do
-
-      _ <- Canvas.beginPath ctx
-      _ <- Canvas.moveTo ctx 0.0        0.0
-      _ <- Canvas.lineTo ctx size.width 0.0
-      _ <- Canvas.lineTo ctx size.width size.height
-      _ <- Canvas.lineTo ctx 0.0        size.height
-      _ <- Canvas.lineTo ctx 0.0        0.0
-      _ <- Canvas.clip ctx
-      void $ Canvas.closePath ctx
-
-  eff ctx
+    Full     f -> Full     $ f dims.full
+    Padded p f -> Padded p $ f dims.padded
+    Outside  f -> Outside  $ { top:    f.top    dims.top
+                             , right:  f.right  dims.right
+                             , bottom: f.bottom dims.bottom
+                             , left:   f.left   dims.left }
