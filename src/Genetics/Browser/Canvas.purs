@@ -12,22 +12,23 @@ import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
 import DOM.Node.Types (Element)
 import Data.Either (Either(..))
-import Data.Foldable (any, foldl, for_)
+import Data.Foldable (any, fold, foldl, for_)
 import Data.Int as Int
-import Data.Lens (Getter', Lens', iso, lens, re, to, view, (^.))
+import Data.Lens (Getter', Lens', Prism', Traversal', iso, lens, lens', prism', re, to, united, view, (^.), (^?))
 import Data.Lens.Iso (Iso')
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Record as Lens
+import Data.List (List)
 import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
-import Data.Monoid (mempty)
+import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Symbol (SProxy(..))
 import Data.Time.Duration (Milliseconds)
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple (Tuple(Tuple), uncurry)
-import Data.Variant (case_, onMatch)
-import Genetics.Browser.Layer (Component(..), Layer(..), LayerDimensions, LayerType(..), layerSlots)
+import Data.Variant (Variant, case_, onMatch)
+import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerDimensions, LayerSlots, LayerType(..), LayerPadding, layerSlots)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -144,6 +145,15 @@ scrollCanvas :: BufferedCanvas
 scrollCanvas (BufferedCanvas bc) = runEffFn3 scrollCanvasImpl bc.back bc.front
 
 
+scrollCanvas' :: BrowserContainer
+              -> Point
+              -> Eff _ Unit
+scrollCanvas' (BrowserContainer {layers}) pt =
+  for_ layers $ \lc -> case lc ^? _LayerCanvas <<< _Buffer of
+    Nothing -> pure unit
+    Just bc -> scrollCanvas bc pt
+
+
 foreign import canvasDragImpl :: ∀ eff.
                                  CanvasElement
                               -> ( { during :: Nullable Point
@@ -180,6 +190,16 @@ dragScroll (BrowserCanvas bc) cb = canvasDrag f bc.staticOverlay
                 scrollCanvas (_.canvas $ unwrap bc.track) p'
                 scrollCanvas bc.trackOverlay p'
 
+dragScroll' :: BrowserContainer
+            -> (Point -> Eff _ Unit)
+            -> Eff _ Unit
+dragScroll' bc@(BrowserContainer { element }) cb =
+  canvasDrag f (unsafeCoerce element) -- actually safe
+  where f = case _ of
+              Left  p    -> cb p
+              Right {x} -> do
+                let p' = {x: -x, y: 0.0}
+                scrollCanvas' bc p'
 
 
 -- | Takes a BrowserCanvas and a callback function that is called with each
@@ -196,6 +216,17 @@ wheelZoom (BrowserCanvas bc) cb =
 clearCanvas :: Context2D -> Canvas.Dimensions -> Eff _ Unit
 clearCanvas ctx {width, height} =
   void $ Canvas.clearRect ctx { x: 0.0, y: 0.0, w: width, h: height }
+
+
+blankLayer :: LayerContainer
+           -> Eff _ Unit
+blankLayer (LayerContainer ld lc) =
+  case lc of
+    Buffer bc -> blankBuffer bc
+    Static el -> do
+      setCanvasTranslation {x: zero, y: zero} el
+      ctx <- Canvas.getContext2D el
+      clearCanvas ctx ld.size
 
 
 -- TODO browser background color shouldn't be hardcoded
@@ -348,6 +379,13 @@ newtype BrowserCanvas =
 
 
 derive instance newtypeBrowserCanvas :: Newtype BrowserCanvas _
+
+newtype BrowserContainer =
+  BrowserContainer { layers     :: List LayerContainer
+                   , padding    :: LayerPadding      -- ?
+                   , dimensions :: Canvas.Dimensions -- ?
+                   , element    :: Element }
+
 
 _Track :: Lens' BrowserCanvas TrackCanvas
 _Track = _Newtype <<< Lens.prop (SProxy :: SProxy "track")
@@ -636,40 +674,58 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
 
 
 
+data LayerContainer =
+    LayerContainer LayerDimensions LayerCanvas
 
-
-data LayerCanvas
-  = Static Canvas.CanvasElement
+data LayerCanvas =
+    Static Canvas.CanvasElement
   | Buffer BufferedCanvas
 
 
 
-_1Canvas :: Getter' LayerCanvas CanvasElement
-_1Canvas = to case _ of
+_LayerCanvas :: Lens' LayerContainer LayerCanvas
+_LayerCanvas = lens
+         (\(LayerContainer _ ct)    -> ct)
+         (\(LayerContainer ld _) ct -> LayerContainer ld ct)
+
+_FrontCanvas :: Getter' LayerCanvas CanvasElement
+_FrontCanvas = to case _ of
   Static c -> c
   Buffer c -> (unwrap c).front
 
--- _2Canvas :: Fold' LayerCanvas CanvasElement
--- _2Canvas =
+_Buffer :: Prism' LayerCanvas BufferedCanvas
+_Buffer = prism' Buffer from
+  where from (Static _) = Nothing
+        from (Buffer b) = Just b
+
+_Static :: Prism' LayerCanvas CanvasElement
+_Static = prism' Static $ case _ of
+  Static el -> Just el
+  Buffer _  -> Nothing
+
+_LayerBuffer :: Traversal' LayerContainer BufferedCanvas
+_LayerBuffer = _LayerCanvas <<< _Buffer
 
 
-layerCanvas :: ∀ a.
-               Layer a -> LayerDimensions -> Eff _ LayerCanvas
-layerCanvas (Layer lt _ c) lDim = do
+
+
+layerContainer :: ∀ a.
+               Layer a -> LayerDimensions -> Eff _ LayerContainer
+layerContainer (Layer lt _ c) lDim = do
 
   let slots = layerSlots lDim
 
   let {size, pos} = case c of
-        Padded _ -> let p' = lDim.padding
-                    in { size: slots.padded.size, pos: { left: p'.left, top: p'.top } }
-        _        ->    { size: slots.full.size,   pos: { left: 0.0, top: 0.0 } }
+        Padded _ _ -> let p' = lDim.padding
+                      in { size: slots.padded.size, pos: { left: p'.left, top: p'.top } }
+        _        ->      { size: slots.full.size,   pos: { left: 0.0, top: 0.0 } }
 
   canvas <-
     case lt of
       Fixed     -> Static <$> createCanvas         size "fixed"
       Scrolling -> Buffer <$> createBufferedCanvas size
 
-  setCanvasPosition pos (canvas ^. _1Canvas)
+  setCanvasPosition pos (canvas ^. _FrontCanvas)
 
   pure $ unsafeCoerce unit
 
@@ -683,40 +739,41 @@ type LayerRenderable =
 
 
 
-renderLayer :: Milliseconds
-            -> LayerDimensions
-            -> LayerCanvas
-            -> Number
-            -> Layer (ComponentSlot -> LayerRenderable)
-            -> Aff _ Unit
-renderLayer d ld lc offset layer@(Layer lt lm com) = do
-
+runLayer' :: ∀ m.
+             Monoid m
+          => Layer (ComponentSlot -> m)
+          -> LayerContainer
+          -> m
+runLayer' layer@(Layer lt lm com) c@(LayerContainer ld ct) =
   let slots = layerSlots ld
+  in case com of
+      Full     f -> f slots.full
+      Padded r f -> f slots.padded
+      Outside  f -> fold [ f.top    slots.top
+                         , f.right  slots.right
+                         , f.bottom slots.bottom
+                         , f.left   slots.left ]
 
-  let fixed :: Drawing -> _
-      fixed = unsafeCoerce unit -- render the drawing to the Front canvas of the layer
 
-      drawings :: Array _ -> _
-      drawings = unsafeCoerce unit -- render, over time, copies of the drawings to the front canvas
-
-      labels :: Array Label -> _
-      labels = unsafeCoerce unit -- collide & render the labels of the drawings to the front canvas
-
-      drawSlot :: LayerRenderable -> Aff _ Unit
-      drawSlot =
-        case_ # onMatch
-          { fixed
-          , drawings
-          , labels
-          }
-
+layerContext :: ∀ a.
+                Layer a
+             -> LayerContainer
+             -> Eff _ Context2D
+layerContext (Layer _ _ com) (LayerContainer ld ct) = do
+  ctx <- Canvas.getContext2D $ ct ^. _FrontCanvas
+  _ <- Canvas.transform { m11: one,  m21: zero, m31: zero
+                        , m12: zero, m22: one,  m32: zero } ctx
   case com of
-    Full    a -> unsafeCoerce unit
-      -- run the contents on the full canvas
-    Padded  a -> unsafeCoerce unit
-      -- translate as necessary and run contents on canvas
-    Outside a -> unsafeCoerce unit
-      -- translate and mask as necessary and run each slot contents on the respective canvas
-
-
-  pure unit
+    -- translate to 0.0, 0.0
+    Full     _ -> pure ctx
+    -- translate inward by the padding
+    Padded r _ -> Canvas.translate { translateX: r, translateY: r } ctx
+    Outside  _ -> do
+      -- translate to 0.0, set mask to not draw on the padded canvas
+      _ <- Canvas.beginPath ctx
+      _ <- Canvas.moveTo ctx 0.0           0.0
+      _ <- Canvas.lineTo ctx ld.size.width 0.0
+      _ <- Canvas.lineTo ctx ld.size.width ld.size.height
+      _ <- Canvas.lineTo ctx 0.0           ld.size.height
+      _ <- Canvas.lineTo ctx 0.0           0.0
+      Canvas.clip ctx
