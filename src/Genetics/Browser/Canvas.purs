@@ -9,12 +9,14 @@ import Prelude
 import Control.Monad.Aff (Aff, delay)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
+import Control.Monad.Eff.Ref (Ref)
+import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
 import DOM.Node.Types (Element)
 import Data.Either (Either(..))
 import Data.Foldable (any, fold, foldl, for_)
 import Data.Int as Int
-import Data.Lens (Getter', Lens', Prism', Traversal', iso, lens, lens', prism', re, to, united, view, (^.), (^?))
+import Data.Lens (Getter', Lens', Prism', Traversal', Traversal, iso, lens, lens', prism', re, to, united, view, (^.), (^?))
 import Data.Lens.Iso (Iso')
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Record as Lens
@@ -26,6 +28,7 @@ import Data.Nullable (Nullable, toMaybe)
 import Data.Symbol (SProxy(..))
 import Data.Time.Duration (Milliseconds)
 import Data.Traversable (traverse, traverse_)
+import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
 import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerDimensions, LayerSlots, LayerType(..), LayerPadding, layerSlots)
@@ -148,7 +151,9 @@ scrollCanvas (BufferedCanvas bc) = runEffFn3 scrollCanvasImpl bc.back bc.front
 scrollCanvas' :: BrowserContainer
               -> Point
               -> Eff _ Unit
-scrollCanvas' (BrowserContainer {layers}) pt =
+scrollCanvas' (BrowserContainer bc) pt = do
+  layers <- Ref.readRef bc.layers
+
   for_ layers $ \lc -> case lc ^? _LayerCanvas <<< _Buffer of
     Nothing -> pure unit
     Just bc -> scrollCanvas bc pt
@@ -193,13 +198,13 @@ dragScroll (BrowserCanvas bc) cb = canvasDrag f bc.staticOverlay
 dragScroll' :: BrowserContainer
             -> (Point -> Eff _ Unit)
             -> Eff _ Unit
-dragScroll' bc@(BrowserContainer { element }) cb =
+dragScroll' bc'@(BrowserContainer {element}) cb =
   canvasDrag f (unsafeCoerce element) -- actually safe
   where f = case _ of
               Left  p    -> cb p
               Right {x} -> do
                 let p' = {x: -x, y: 0.0}
-                scrollCanvas' bc p'
+                scrollCanvas' bc' p'
 
 
 -- | Takes a BrowserCanvas and a callback function that is called with each
@@ -381,10 +386,10 @@ newtype BrowserCanvas =
 derive instance newtypeBrowserCanvas :: Newtype BrowserCanvas _
 
 newtype BrowserContainer =
-  BrowserContainer { layers     :: List LayerContainer
-                   , padding    :: LayerPadding      -- ?
-                   , dimensions :: Canvas.Dimensions -- ?
+  BrowserContainer { layers     :: Ref (List LayerContainer)
+                   , dimensions :: Ref LayerDimensions -- ? is this better just kept as a function?
                    , element    :: Element }
+
 
 
 _Track :: Lens' BrowserCanvas TrackCanvas
@@ -501,7 +506,64 @@ browserCanvas dimensions trackPadding el = do
                        , container: el}
 
 
+-- | Creates an *empty* BrowserContainer, to which layers can be added
+browserContainer :: Canvas.Dimensions
+                 -> LayerPadding
+                 -> Element
+                 -> Eff _ BrowserContainer
+browserContainer size padding element = do
 
+  setContainerStyle element size
+
+  dimensions <- Ref.newRef { size, padding }
+  layers     <- Ref.newRef mempty
+  -- padding    <- Ref.newRef $ unsafeCoerce unit
+
+  pure $
+    BrowserContainer
+      { layers, dimensions, element }
+
+
+-- | Set the CSS z-indices of the Layers in the browser, so their
+-- | canvases are drawn in the correct order (i.e. as the
+-- | BrowserContainer layer list is ordered)
+zIndexLayers :: BrowserContainer
+             -> Eff _ Unit
+zIndexLayers (BrowserContainer bc) = do
+  layers <- Ref.readRef bc.layers
+  void $ forWithIndex layers
+           (\i l -> setCanvasZIndex
+                      (l ^. _LayerCanvas <<< _FrontCanvas) i)
+
+
+traverseLayers :: ∀ a.
+                  (LayerContainer -> Eff _ a)
+               -> BrowserContainer
+               -> Eff _ (List a)
+traverseLayers f bc = do
+  layers <- getLayers bc
+  traverse f layers
+
+
+
+getLayers :: BrowserContainer
+          -> Eff _ (List LayerContainer)
+getLayers (BrowserContainer bc) =
+  Ref.readRef bc.layers
+
+appendLayer :: BrowserContainer
+            -> LayerContainer
+            -> Eff _ Unit
+appendLayer bc@(BrowserContainer {element}) l@(LayerContainer _ cEl)  = do
+  layers <- getLayers bc
+  appendCanvasElem element (cEl ^. _FrontCanvas)
+  zIndexLayers bc
+
+
+addLayers :: BrowserContainer
+          -> List LayerContainer
+          -> Eff _ Unit
+addLayers bc = traverse_ (appendLayer bc)
 
 
 renderGlyphs :: TrackCanvas
@@ -710,8 +772,10 @@ _LayerBuffer = _LayerCanvas <<< _Buffer
 
 
 layerContainer :: ∀ a.
-               Layer a -> LayerDimensions -> Eff _ LayerContainer
-layerContainer (Layer lt _ c) lDim = do
+                  LayerDimensions
+               -> Layer a
+               -> Eff _ LayerContainer
+layerContainer lDim (Layer lt _ c) = do
 
   let slots = layerSlots lDim
 
@@ -727,7 +791,7 @@ layerContainer (Layer lt _ c) lDim = do
 
   setCanvasPosition pos (canvas ^. _FrontCanvas)
 
-  pure $ unsafeCoerce unit
+  pure $ LayerContainer lDim canvas
 
 
 
