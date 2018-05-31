@@ -8,19 +8,20 @@ import Prelude
 
 import Control.Monad.Aff (Aff, delay)
 import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Ref (Ref)
+import Control.Monad.Eff.Class (class MonadEff, liftEff)
+import Control.Monad.Eff.Ref (REF, Ref)
 import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
 import DOM.Node.Types (Element)
 import Data.Either (Either(..))
 import Data.Foldable (any, fold, foldl, for_)
 import Data.Int as Int
-import Data.Lens (Getter', Lens', Prism', Traversal', Traversal, iso, lens, lens', prism', re, to, united, view, (^.), (^?))
+import Data.Lens (Getter', Lens', Prism', Traversal, Traversal', iso, lens, lens', prism', re, to, united, view, (^.), (^?))
 import Data.Lens.Iso (Iso')
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Record as Lens
 import Data.List (List)
+import Data.List as List
 import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (class Newtype, unwrap)
@@ -31,7 +32,8 @@ import Data.Traversable (traverse, traverse_)
 import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
-import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerDimensions, LayerSlots, LayerType(..), LayerPadding, layerSlots)
+import Debug.Trace as Debug
+import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerDimensions, LayerMask(..), LayerPadding, LayerSlots, LayerType(..), layerSlots)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -217,6 +219,13 @@ wheelZoom (BrowserCanvas bc) cb =
   canvasWheelCBImpl bc.staticOverlay cb
 
 
+wheelZoom' :: BrowserContainer
+          -> (Number -> Eff _ Unit)
+          -> Eff _ Unit
+wheelZoom' bc cb = Debug.trace "unimplemented!" \_ -> pure unit
+  -- canvasWheelCBImpl bc.staticOverlay cb
+
+
 -- | Helper function for erasing the contents of a canvas context given its dimensions
 clearCanvas :: Context2D -> Canvas.Dimensions -> Eff _ Unit
 clearCanvas ctx {width, height} =
@@ -232,6 +241,8 @@ blankLayer (LayerContainer ld lc) =
       setCanvasTranslation {x: zero, y: zero} el
       ctx <- Canvas.getContext2D el
       clearCanvas ctx ld.size
+
+
 
 
 -- TODO browser background color shouldn't be hardcoded
@@ -285,6 +296,14 @@ drawToBuffer :: BufferedCanvas
 drawToBuffer (BufferedCanvas {back}) f = do
   ctx <- Canvas.getContext2D back
   f ctx
+
+drawToLayer :: LayerContainer
+            -> (Context2D -> Eff _ Unit)
+            -> Eff _ Unit
+drawToLayer (LayerContainer ld lc) f =
+  case lc of
+    Static c -> f =<< Canvas.getContext2D c
+    Buffer b -> drawToBuffer b f
 
 blankBuffer :: BufferedCanvas
             -> Eff _ Unit
@@ -391,6 +410,13 @@ newtype BrowserContainer =
                    , element    :: Element }
 
 
+getDimensions :: ∀ m.
+                 MonadEff _ m
+              => BrowserContainer
+              -> m LayerDimensions
+getDimensions (BrowserContainer {dimensions}) =
+  liftEff $ Ref.readRef dimensions
+
 
 _Track :: Lens' BrowserCanvas TrackCanvas
 _Track = _Newtype <<< Lens.prop (SProxy :: SProxy "track")
@@ -460,6 +486,19 @@ setBrowserCanvasSize dim (BrowserCanvas bc) = do
             , track = track }
 
 
+setBrowserContainerSize :: Canvas.Dimensions
+                        -> BrowserContainer
+                        -> Eff _ Unit
+setBrowserContainerSize dim bc'@(BrowserContainer bc) = do
+  -- set the container
+  setContainerStyle bc.element dim
+  -- set each layer
+  _ <- traverseLayers (\l@(LayerContainer ld lc) -> resizeLayer (ld { size = dim }) l) bc'
+  -- layers <- getLayers bc
+  -- traverse f layers
+  pure unit
+
+
 
 -- | Creates a `BrowserCanvas` and appends it to the provided element.
 -- | Resizes the container element to fit.
@@ -517,7 +556,6 @@ browserContainer size padding element = do
 
   dimensions <- Ref.newRef { size, padding }
   layers     <- Ref.newRef mempty
-  -- padding    <- Ref.newRef $ unsafeCoerce unit
 
   pure $
     BrowserContainer
@@ -536,20 +574,37 @@ zIndexLayers (BrowserContainer bc) = do
                       (l ^. _LayerCanvas <<< _FrontCanvas) i)
 
 
-traverseLayers :: ∀ a.
-                  (LayerContainer -> Eff _ a)
+traverseLayers :: ∀ m a.
+                  MonadEff _ m
+               => (LayerContainer -> m a)
                -> BrowserContainer
-               -> Eff _ (List a)
+               -> m (List a)
 traverseLayers f bc = do
   layers <- getLayers bc
   traverse f layers
 
 
 
-getLayers :: BrowserContainer
-          -> Eff _ (List LayerContainer)
+getLayers :: ∀ m.
+             MonadEff _ m
+          => BrowserContainer
+          -> m (List LayerContainer)
 getLayers (BrowserContainer bc) =
-  Ref.readRef bc.layers
+  liftEff $ Ref.readRef bc.layers
+
+
+resizeLayer :: ∀ m.
+               MonadEff _ m
+            => LayerDimensions
+            -> LayerContainer
+            -> m LayerContainer
+resizeLayer ld' (LayerContainer ld lc) = liftEff do
+  case lc of
+    Static e -> void $ Canvas.setCanvasDimensions ld.size e
+    Buffer b -> setBufferedCanvasSize ld.size b
+
+  pure $ LayerContainer ld' lc
+
 
 appendLayer :: BrowserContainer
             -> LayerContainer
@@ -564,6 +619,17 @@ addLayers :: BrowserContainer
           -> List LayerContainer
           -> Eff _ Unit
 addLayers bc = traverse_ (appendLayer bc)
+
+deleteLayers :: BrowserContainer
+             -> Eff _ Unit
+deleteLayers (BrowserContainer bc) = do
+  Ref.writeRef bc.layers mempty
+  -- TODO update the DOM appropriately,
+  -- by just removing the children of bc.element??? or be more specific
+
+  -- maybe expose a function (BrowserContainer -> (LayerContainer -> Eff _ a) -> Eff _ (List a))
+  -- so we can effectfully traverse all the layers.
+  -- sounds useful at least~~
 
 
 renderGlyphs :: TrackCanvas
@@ -677,6 +743,49 @@ type Renderable r = { drawings :: Array { drawing :: Drawing
                     , labels :: Array Label | r }
 
 
+renderBrowser' :: BrowserContainer
+               -> Milliseconds
+               -> Number
+               -> List (Layer ({|LayerSlots ComponentSlot} -> LayerRenderable))
+               -> Aff _ Unit
+renderBrowser' bc d offset lrs = do
+  layers <- getLayers bc
+
+  let aa :: List LayerContainer
+      aa = layers
+
+
+      fun :: _ -> Layer (Record _ -> LayerRenderable) -> Aff _ _
+      fun lct@(LayerContainer ld lc) l@(Layer ltype lmask c) = do
+
+        ctx <- layerContext l lct
+        let slots = layerSlots ld
+
+        let fixed    :: Drawing -> Aff _ Unit
+            fixed d  = liftEff do
+              clearCanvas ctx ?later
+              Drawing.render ctx d
+            drawings :: Array _ -> Aff _ Unit
+            drawings = traverse_ \d -> pure unit
+            labels   :: Array _ -> Aff _ Unit
+            labels   = traverse_ \l -> pure unit
+
+
+            drawLayer :: LayerRenderable -> Aff _ Unit
+            drawLayer = case_ # onMatch { fixed, drawings, labels }
+
+        traverse_ drawLayer $ map (_ $ slots) c
+
+        pure unit
+
+  -- TODO these lists should be named and lined up properly -- and validated!
+  xxx <- List.zipWithA fun layers lrs
+
+  let x :: List _
+      x = xxx
+  pure unit
+
+
 renderBrowser :: ∀ a b c.
                  Milliseconds
               -> BrowserCanvas
@@ -736,6 +845,10 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
 
 
 
+-- TODO it doesn't make sense for LayerContainers to contain the
+-- actual size of the element, since that can change externally.
+-- however, the LayerPadding should be consistent/only changed by the
+-- layer, and so should stay in the LayerContainer.
 data LayerContainer =
     LayerContainer LayerDimensions LayerCanvas
 
@@ -819,20 +932,34 @@ runLayer' layer@(Layer lt lm com) c@(LayerContainer ld ct) =
                          , f.left   slots.left ]
 
 
-layerContext :: ∀ a.
-                Layer a
+layerContext :: ∀ m a.
+                MonadEff _ m
+             => Layer a
              -> LayerContainer
-             -> Eff _ Context2D
-layerContext (Layer _ _ com) (LayerContainer ld ct) = do
+             -> m Context2D
+layerContext (Layer _ lmask com) (LayerContainer ld ct) = liftEff do
   ctx <- Canvas.getContext2D $ ct ^. _FrontCanvas
   _ <- Canvas.transform { m11: one,  m21: zero, m31: zero
                         , m12: zero, m22: one,  m32: zero } ctx
+
+  -- let whenMasked = when (lmask == Masked)
+
   case com of
     -- translate to 0.0, 0.0
-    Full     _ -> pure ctx
+    Full     _ -> do
+      -- whenMasked do
+      --   pure unit
+
+      pure ctx
     -- translate inward by the padding
-    Padded r _ -> Canvas.translate { translateX: r, translateY: r } ctx
+    Padded r _ -> do
+      -- whenMasked do
+      --   pure unit
+      Canvas.translate { translateX: r, translateY: r } ctx
     Outside  _ -> do
+
+      -- whenMasked do
+      --   pure unit
       -- translate to 0.0, set mask to not draw on the padded canvas
       _ <- Canvas.beginPath ctx
       _ <- Canvas.moveTo ctx 0.0           0.0
