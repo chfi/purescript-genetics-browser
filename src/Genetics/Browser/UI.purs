@@ -49,7 +49,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser (Peak, RenderedTrack, pixelSegments)
-import Genetics.Browser.Canvas (BrowserCanvas, TrackPadding, _Dimensions, _Track, browserCanvas, browserOnClick, debugBrowserCanvas, dragScroll, renderBrowser, setBrowserCanvasSize, setElementStyle, wheelZoom)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), TrackPadding, _Dimensions, _Track, browserCanvas, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, dragScroll', getDimensions, renderBrowser, renderBrowser', setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, wheelZoom')
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, annotationsForScale, demoBrowser, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
@@ -87,7 +87,7 @@ foreign import resizeEvent :: ∀ e.
 -- | provides an interface to the running browser instance.
 type BrowserInterface e a
   = { getView          :: Aff e CoordSysView
-    , getBrowserCanvas :: Aff e BrowserCanvas
+    , getBrowserCanvas :: Aff e BrowserContainer
     , lastOverlaps     :: Aff e (Number -> Point -> a)
     , queueCommand     :: Variant UICmdR -> Aff e Unit
     , queueUpdateView  :: UpdateView -> Eff e Unit
@@ -96,13 +96,13 @@ type BrowserInterface e a
 -- | Creates the browser using the provided initial data, returning
 -- | a BrowserInterface for reading state & sending commands to it
 initializeBrowser :: CoordSys _ _
-                  -> (BrowserCanvas -> CoordSysView
+                  -> (BrowserContainer -> CoordSysView
                       -> { tracks :: { snps :: RenderedTrack (SNP ())
                                      , annotations :: RenderedTrack (Annotation ()) }
                          , relativeUI :: Drawing
                          , fixedUI :: Drawing })
                   -> CoordSysView
-                  -> BrowserCanvas
+                  -> BrowserContainer
                   -> Aff _ (BrowserInterface _ ({snps :: Array (SNP ())}))
 initializeBrowser cSys mainBrowser initView bc = do
 
@@ -129,9 +129,10 @@ initializeBrowser cSys mainBrowser initView bc = do
         case_ # V.on _render (\_ -> pure unit)
               # V.on _docResize (\ {width} -> do
                       canvas <- AVar.takeVar bcVar
-                      let {height} = canvas ^. _Dimensions
-                      canvas' <- liftEff $ setBrowserCanvasSize {width, height} canvas
-                      AVar.putVar canvas' bcVar
+                      {height} <- _.size <$> getDimensions canvas
+                      -- let {height} = dims.size
+                      _ <- liftEff $ setBrowserContainerSize {width, height} canvas
+                      AVar.putVar canvas bcVar
                       queueCommand $ inj _render unit
                       mainLoop)
               $ uiCmd
@@ -144,7 +145,8 @@ initializeBrowser cSys mainBrowser initView bc = do
         canvas <- getBrowserCanvas
         toRender <- drawCachedBrowser canvas csView
 
-        let currentScale = viewScale (canvas ^. _Track <<< _Dimensions) csView
+        currentDims <- getDimensions canvas
+        let currentScale = viewScale currentDims.size csView
             offset = scaleToScreen  currentScale (Pair.fst $ unwrap $ csView)
 
                           -- offset the click by the current canvas translation
@@ -152,9 +154,13 @@ initializeBrowser cSys mainBrowser initView bc = do
         AVar.putVar (\n r -> let r' = {x: r.x + offset, y: r.y }
                              in { snps: toRender.tracks.snps.overlaps n r' }) lastOverlapsVar
 
+        let toRender' :: _
+            toRender' = unsafeCoerce unit
+
         -- fork a new renderFiber
         renderFiber <- forkAff
-                       $ renderBrowser (wrap 2.0) canvas offset toRender
+                       -- $ renderBrowser (wrap 2.0) canvas offset toRender
+                       $ renderBrowser' canvas (wrap 2.0) offset toRender'
         AVar.putVar renderFiber renderFiberVar
 
         mainLoop
@@ -299,13 +305,13 @@ debugView s = do
 
 browserCache
   :: ∀ a b.
-     (BrowserCanvas
+     (BrowserContainer
       -> CoordSysView
       -> { tracks :: { snps :: a
                      , annotations :: b }
          , relativeUI :: Drawing
          , fixedUI :: Drawing })
-     -> Aff _ (BrowserCanvas
+     -> Aff _ (BrowserContainer
                -> CoordSysView
                -> Aff _ ({ tracks :: { snps :: a
                                      , annotations :: b }
@@ -320,7 +326,8 @@ browserCache f = do
 
   pure \bc csv -> do
 
-    let newBCDim = bc ^. _Dimensions
+    newBCDim <- _.size <$> getDimensions bc
+    -- let newBCDim = bc ^. _Dimensions
     oldBCDim <- AVar.tryTakeVar bcDim
     AVar.putVar newBCDim bcDim
 
@@ -490,7 +497,7 @@ initInfoBox = do
   pure $ updateInfoBox el
 
 
-runBrowser :: Conf -> BrowserCanvas -> Eff _ _
+runBrowser :: Conf -> BrowserContainer -> Eff _ _
 runBrowser config bc = launchAff $ do
 
   let clickRadius = 1.0
@@ -508,7 +515,8 @@ runBrowser config bc = launchAff $ do
     <*> foldMap (getSNPs        cSys) config.urls.snps
     <*> foldMap (getAnnotations cSys) config.urls.annotations
 
-  let mainBrowser = demoBrowser cSys config trackData
+  let mainBrowser = unsafeCoerce $ demoBrowser cSys config trackData
+
 
   browser <-
     initializeBrowser cSys mainBrowser (wrap $ Pair zero (cSys^._TotalSize)) bc
@@ -521,21 +529,23 @@ runBrowser config bc = launchAff $ do
 
     btnUI mods browser.queueUpdateView
 
-    keyUI (unsafeCoerce $ (unwrap bc).staticOverlay)
-          mods browser.queueUpdateView
+    -- keyUI (unsafeCoerce $ (unwrap bc).staticOverlay)
+    --       mods browser.queueUpdateView
 
-    dragScroll bc \ {x,y} ->
-       when (Math.abs x >= one) $ launchAff_ do
-         trackDims <- Lens.view (_Track <<< _Dimensions)
-                      <$> browser.getBrowserCanvas
+    -- dragScroll' bc \ {x,y} ->
+    --    when (Math.abs x >= one) $ launchAff_ do
+    --      trackDims <- Lens.view (_Track <<< _Dimensions)
+    --                   <$> browser.getBrowserCanvas
 
-         liftEff $ browser.queueUpdateView
-                 $ ScrollView $ (-x) / trackDims.width
+    --      liftEff $ browser.queueUpdateView
+    --              $ ScrollView $ (-x) / trackDims.width
 
     let scrollZoomScale = 0.06
-    wheelZoom bc \dY ->
+    wheelZoom' bc \dY ->
        browser.queueUpdateView
          $ ZoomView $ 1.0 + scrollZoomScale * dY
+
+    pure unit
 
   liftEff do
     let overlayDebug :: _
@@ -553,7 +563,8 @@ runBrowser config bc = launchAff $ do
           v  <- browser.getView
           bc <- browser.getBrowserCanvas
 
-          let segs = pixelSegments { segmentPadding: 12.0 } cSys bc v
+          -- let segs = pixelSegments { segmentPadding: 12.0 } cSys bc v
+          let segs = unsafeCoerce unit
               annoPeaks = annotationsForScale cSys sigSnps
                             trackData.annotations segs
 
@@ -571,10 +582,14 @@ runBrowser config bc = launchAff $ do
                   <> foldMap (peakHTML annotationHTMLDefault) (annotAround annoPeaks g)
 
 
-    browserOnClick bc
+    {-
+    ?browserOnClick bc
       { overlay: \_ -> pure unit
       -- { overlay: overlayDebug
       , track:   glyphClick }
+    -}
+
+    pure unit
 
   pure unit
 
@@ -612,9 +627,9 @@ main rawConfig = do
 
           {width} <- windowInnerSize
           let dimensions = { width, height: c.browserHeight }
-          bc <- browserCanvas dimensions c.trackPadding el
+          bc <- browserContainer dimensions c.trackPadding el
 
-          debugBrowserCanvas "debugBC" bc
+          -- debugBrowserCanvas "debugBC" bc
 
           log $ unsafeStringify c
           void $ runBrowser c bc
