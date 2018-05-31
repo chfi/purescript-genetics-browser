@@ -3,11 +3,11 @@ module Genetics.Browser.Layer where
 import Prelude
 
 import Control.Monad.Eff (Eff)
-import Data.Foldable (class Foldable)
+import Data.Foldable (class Foldable, foldlDefault, foldrDefault)
 import Data.Generic.Rep (class Generic)
 import Data.Monoid (class Monoid)
 import Data.Newtype (class Newtype)
-import Data.Traversable (class Traversable, traverse_)
+import Data.Traversable (class Traversable, sequenceDefault, traverse_)
 import Graphics.Canvas as Canvas
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -21,6 +21,9 @@ data LayerType =
   | Scrolling
 
 data LayerMask = NoMask | Masked
+
+derive instance eqLayerMask :: Eq LayerMask
+
 
 type Point = { x :: Number, y :: Number }
 
@@ -38,6 +41,29 @@ derive instance ordComponent :: Ord a => Ord (Component a)
 derive instance functorComponent :: Functor Component
 derive instance genericComponent :: Generic (Component a) _
 
+instance foldableComponent :: Foldable Component where
+  foldMap :: ∀ a m. Monoid m => (a -> m) -> Component a -> m
+  foldMap f = case _ of
+    Full     a -> f a
+    Padded _ a -> f a
+    Outside as -> f as.top <> f as.right <> f as.bottom <> f as.left
+
+  foldr f i c = foldrDefault f i c
+  foldl f i c = foldlDefault f i c
+
+instance traverseComponent :: Traversable Component where
+  traverse :: ∀ a b m. Applicative m => (a -> m b) -> Component a -> m (Component b)
+  traverse f = case _ of
+    Full     a -> Full <$> f a
+    Padded r a -> Padded r <$> f a
+    Outside as ->
+      (\t r b l -> Outside {top: t, right: r, bottom: b, left: l})
+      <$> f as.top
+      <*> f as.right
+      <*> f as.bottom
+      <*> f as.left
+
+  sequence t = sequenceDefault t
 
 data Layer a = Layer LayerType LayerMask (Component a)
 
