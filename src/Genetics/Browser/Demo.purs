@@ -44,10 +44,11 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrackLive, renderTrackLive', sigLevelRuler, trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', renderTrackLive, renderTrackLive', sigLevelRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, chunkProducer, fetchBed)
-import Genetics.Browser.Canvas (BrowserCanvas, Label, LabelPlace(LLeft, LCenter), UISlotGravity(UIRight, UILeft), _Dimensions, _Track, uiSlots)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, LabelPlace(LLeft, LCenter), LayerRenderable, UISlotGravity(UIRight, UILeft), _Dimensions, _Track, _drawings, getDimensions, uiSlots)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
+import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerSlots)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
@@ -501,6 +502,69 @@ renderSNPs { snpsConfig, threshold } cdim snpData =
 
 
 
+renderSNPs' :: ∀ m r1 r2 r3.
+              { threshold  :: { min  :: Number, max :: Number | r1 }
+              , snpsConfig :: { | SNPConfig () } | r2 }
+           -- -> Canvas.Dimensions
+           -> Map ChrId (Array (SNP ()))
+           -> Map ChrId (Pair Number)
+           -> Canvas.Dimensions
+           -> LayerRenderable
+renderSNPs' { snpsConfig, threshold } snpData =
+  let features :: Array (SNP ())
+      features = fold snpData
+
+      snps = snpsConfig
+      radius = snps.radius
+
+      drawing =
+          let {x,y} = snps.pixelOffset
+              c     = circle x y radius
+              out   = outlined (outlineColor snps.color.outline) c
+              fill  = filled   (fillColor    snps.color.fill)    c
+          in out <> fill
+
+      drawings :: Array (Tuple (SNP ()) Point) -> Array DrawingN
+      drawings pts = let (Tuple _ points) = Array.unzip pts
+                     in [{ drawing, points }]
+
+      npointed :: Map ChrId (Array (Tuple (SNP ()) NPoint))
+      npointed = (map <<< map)
+        (fanout id (\s ->
+           { x: featureNormX s
+           , y: wrap $ normYLogScore threshold s.feature.score })) snpData
+
+
+      pointed :: _
+              -> Map ChrId (Pair Number)
+              -> Array (Tuple (SNP ()) Point)
+      pointed size = foldMapWithIndex scaleSegs
+        where rescale seg@(Pair offset _) npoint =
+                  { x: offset + (pairSize seg) * (unwrap npoint.x)
+                  , y: size.height * (one - unwrap npoint.y) }
+
+              scaleSegs chrId seg = foldMap (map <<< map $ rescale seg)
+                                      $ Map.lookup chrId npointed
+
+      overlaps :: Array (Tuple (SNP ()) Point)
+               -> Number -> Point
+               -> Array (SNP ())
+      overlaps pts radius' pt = filterMap covers pts
+        where covers :: Tuple (SNP ()) Point -> Maybe (SNP ())
+              covers (Tuple f fPt)
+                | dist fPt pt <= radius + radius'   = Just f
+                | otherwise = Nothing
+
+  in \seg size ->
+        let pts = pointed size seg
+        in inj _drawings $ drawings pts
+        -- in { features
+        --    , drawings: drawings pts
+        --    , labels: mempty
+        --    , overlaps: overlaps pts }
+
+
+
 annotationsForScale :: ∀ r1 r2 i c.
                        CoordSys i c
                     -> Map ChrId (Array (SNP r1))
@@ -686,3 +750,56 @@ type BrowserConfig =
   , threshold :: { min :: Number, max :: Number, sig :: Number }
   , snpsConfig :: { | SNPConfig () }
   }
+
+
+
+demoBrowser' :: ∀ r r2.
+                CoordSys ChrId BigInt
+             -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
+             -> { snps        :: Map ChrId (Array _)
+                , annotations :: Map ChrId (Array _) | r2 }
+             -> BrowserContainer
+             -> CoordSysView
+             -> Eff _ (List (Layer (ComponentSlot -> LayerRenderable)))
+demoBrowser' cSys config trackData =
+  let threshold = config.score
+      vscale = defaultVScaleConfig threshold
+
+
+      sigSnps = filterSig config.score trackData.snps
+      legend = defaultLegendConfig
+               $ (annotationLegendTest defaultDemoLegend)
+                  trackData.annotations
+
+      conf = { segmentPadding: 12.0 }
+
+      snps :: ∀ r3.
+              { size :: Canvas.Dimensions | r3 }
+           -> CoordSysView
+           -> Layer (Canvas.Dimensions -> LayerRenderable)
+      snps slot v =
+        renderTrack' conf cSys
+          (Full $ renderSNPs' {threshold, snpsConfig: defaultSNPConfig})
+          trackData.snps slot.size v
+
+      -- annotations =
+      --   renderTrack conf cSys (renderAnnotation cSys sigSnps vscale defaultDemoLegend) trackData.annotations
+
+      -- relativeUI = chrLabelsUI cSys {fontSize: 12}
+
+
+  in \bc v -> do
+    dims <- getDimensions bc
+    pure mempty
+
+        -- trackDim = bc ^. _Track <<< _Dimensions
+        -- slots = uiSlots bc
+        -- fixedUI =  (snpsUI        vscale UILeft  bc)
+        --         <> (annotationsUI legend UIRight bc)
+        --         <> (Drawing.translate slots.left.size.width slots.top.size.height
+        --             $ sigLevelRuler vscale red trackDim)
+
+    -- in { tracks: { snps: snps bc v
+    --              , annotations: annotations bc v }
+    --    , relativeUI: relativeUI bc v
+    --    , fixedUI }
