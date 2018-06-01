@@ -234,13 +234,13 @@ clearCanvas ctx {width, height} =
 
 blankLayer :: LayerContainer
            -> Eff _ Unit
-blankLayer (LayerContainer ld lc) =
-  case lc of
+blankLayer (LayerContainer lc) =
+  case lc.canvas of
     Buffer bc -> blankBuffer bc
     Static el -> do
       setCanvasTranslation {x: zero, y: zero} el
       ctx <- Canvas.getContext2D el
-      clearCanvas ctx ld.size
+      clearCanvas ctx lc.dimensions.size
 
 
 
@@ -300,8 +300,8 @@ drawToBuffer (BufferedCanvas {back}) f = do
 drawToLayer :: LayerContainer
             -> (Context2D -> Eff _ Unit)
             -> Eff _ Unit
-drawToLayer (LayerContainer ld lc) f =
-  case lc of
+drawToLayer (LayerContainer lc) f =
+  case lc.canvas of
     Static c -> f =<< Canvas.getContext2D c
     Buffer b -> drawToBuffer b f
 
@@ -356,9 +356,6 @@ trackTotalDimensions d = { width:  d.width  + extra
                          , height: d.height + extra }
   where extra = 2.0 * trackInnerPad
 
--- TODO calculate based on glyph bounding boxes
-glyphBufferSize :: Canvas.Dimensions
-glyphBufferSize = { width: 15.0, height: 300.0 }
 
 trackCanvas :: Canvas.Dimensions
             -> Eff _ TrackCanvas
@@ -405,9 +402,15 @@ newtype BrowserCanvas =
 derive instance newtypeBrowserCanvas :: Newtype BrowserCanvas _
 
 newtype BrowserContainer =
-  BrowserContainer { layers     :: Ref (List LayerContainer)
-                   , dimensions :: Ref LayerDimensions -- ? is this better just kept as a function?
-                   , element    :: Element }
+  BrowserContainer { layers      :: Ref (List LayerContainer)
+                   , dimensions  :: Ref LayerDimensions -- ? is this better just kept as a function?
+                   , element     :: Element
+                   , glyphBuffer :: CanvasElement}
+
+
+derive instance newtypeBrowserContainer :: Newtype BrowserContainer _
+
+
 
 
 getDimensions :: ∀ m.
@@ -493,7 +496,7 @@ setBrowserContainerSize dim bc'@(BrowserContainer bc) = do
   -- set the container
   setContainerStyle bc.element dim
   -- set each layer
-  _ <- traverseLayers (\l@(LayerContainer ld lc) -> resizeLayer (ld { size = dim }) l) bc'
+  _ <- traverseLayers (\l@(LayerContainer lc) -> resizeLayer (lc.dimensions { size = dim }) l) bc'
   -- layers <- getLayers bc
   -- traverse f layers
   pure unit
@@ -545,6 +548,10 @@ browserCanvas dimensions trackPadding el = do
                        , container: el}
 
 
+-- TODO calculate based on glyph bounding boxes
+glyphBufferSize :: Canvas.Dimensions
+glyphBufferSize = { width: 15.0, height: 300.0 }
+
 -- | Creates an *empty* BrowserContainer, to which layers can be added
 browserContainer :: Canvas.Dimensions
                  -> LayerPadding
@@ -554,12 +561,14 @@ browserContainer size padding element = do
 
   setContainerStyle element size
 
+  glyphBuffer <- createCanvas glyphBufferSize "glyphBuffer"
+
   dimensions <- Ref.newRef { size, padding }
   layers     <- Ref.newRef mempty
 
   pure $
     BrowserContainer
-      { layers, dimensions, element }
+      { layers, dimensions, element, glyphBuffer }
 
 
 -- | Set the CSS z-indices of the Layers in the browser, so their
@@ -598,20 +607,20 @@ resizeLayer :: ∀ m.
             => LayerDimensions
             -> LayerContainer
             -> m LayerContainer
-resizeLayer ld' (LayerContainer ld lc) = liftEff do
-  case lc of
-    Static e -> void $ Canvas.setCanvasDimensions ld.size e
-    Buffer b -> setBufferedCanvasSize ld.size b
+resizeLayer ld' (LayerContainer lc) = liftEff do
+  case lc.canvas of
+    Static e -> void $ Canvas.setCanvasDimensions lc.dimensions.size e
+    Buffer b -> setBufferedCanvasSize lc.dimensions.size b
 
-  pure $ LayerContainer ld' lc
+  pure $ LayerContainer (lc { dimensions = ld' })
 
 
 appendLayer :: BrowserContainer
             -> LayerContainer
             -> Eff _ Unit
-appendLayer bc@(BrowserContainer {element}) l@(LayerContainer _ cEl)  = do
+appendLayer bc@(BrowserContainer {element}) l@(LayerContainer lc)  = do
   layers <- getLayers bc
-  appendCanvasElem element (cEl ^. _FrontCanvas)
+  appendCanvasElem element (lc.canvas ^. _FrontCanvas)
   zIndexLayers bc
 
 
@@ -651,6 +660,30 @@ renderGlyphs (TrackCanvas tc) {drawing, points} = do
 
   runEffFn4 drawCopies tc.glyphBuffer glyphBufferSize ctx points
 
+
+renderGlyphs' :: CanvasElement
+              -- -> LayerContainer
+              -> Canvas.Context2D
+              -> { drawing :: Drawing, points :: Array Point }
+              -> Eff _ Unit
+renderGlyphs' glyphBuffer ctx {drawing, points} = do
+  glyphCtx <- Canvas.getContext2D glyphBuffer
+
+  -- ctx <- getBufferedContext tc.canvas
+
+  -- ctx <-
+
+  let w = glyphBufferSize.width
+      h = glyphBufferSize.height
+      x0 = w / 2.0
+      y0 = h / 2.0
+
+  clearCanvas glyphCtx glyphBufferSize
+
+  Drawing.render glyphCtx
+    $ Drawing.translate x0 y0 drawing
+
+  runEffFn4 drawCopies glyphBuffer glyphBufferSize ctx points
 
 
 type Label = { text :: String, point :: Point, gravity :: LabelPlace }
@@ -756,19 +789,37 @@ renderBrowser' bc d offset lrs = do
 
 
       fun :: _ -> Layer (Record _ -> LayerRenderable) -> Aff _ _
-      fun lct@(LayerContainer ld lc) l@(Layer ltype lmask c) = do
+      fun lct@(LayerContainer lc) l@(Layer ltype lmask c) = do
 
         ctx <- layerContext l lct
-        let slots = layerSlots ld
+        let slots = layerSlots lc.dimensions
+
+        _ <- liftEff case c of
+          Full     a -> clearCanvas ctx slots.full.size
+          Padded r a -> do
+            let slot = { width:  slots.padded.size.width  + r * 2.0
+                       , height: slots.padded.size.height + r * 2.0 }
+            clearCanvas ctx slot
+          Outside as -> do
+            clearCanvas ctx slots.top.size
+            clearCanvas ctx slots.right.size
+            clearCanvas ctx slots.bottom.size
+            clearCanvas ctx slots.left.size
 
         let fixed    :: Drawing -> Aff _ Unit
             fixed d  = liftEff do
-              clearCanvas ctx ?later
               Drawing.render ctx d
+
             drawings :: Array _ -> Aff _ Unit
-            drawings = traverse_ \d -> pure unit
+            drawings ds = do
+              for_ ds \s -> do
+                liftEff $ renderGlyphs' (unwrap bc).glyphBuffer ctx s
+                delay d
+
             labels   :: Array _ -> Aff _ Unit
-            labels   = traverse_ \l -> pure unit
+            labels ls = do
+              -- TODO
+              pure unit
 
 
             drawLayer :: LayerRenderable -> Aff _ Unit
@@ -779,11 +830,7 @@ renderBrowser' bc d offset lrs = do
         pure unit
 
   -- TODO these lists should be named and lined up properly -- and validated!
-  xxx <- List.zipWithA fun layers lrs
-
-  let x :: List _
-      x = xxx
-  pure unit
+  void $ List.zipWithA fun layers lrs
 
 
 renderBrowser :: ∀ a b c.
@@ -849,8 +896,9 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
 -- actual size of the element, since that can change externally.
 -- however, the LayerPadding should be consistent/only changed by the
 -- layer, and so should stay in the LayerContainer.
-data LayerContainer =
-    LayerContainer LayerDimensions LayerCanvas
+newtype LayerContainer =
+  LayerContainer { dimensions  :: LayerDimensions
+                 , canvas      :: LayerCanvas }
 
 data LayerCanvas =
     Static Canvas.CanvasElement
@@ -860,8 +908,8 @@ data LayerCanvas =
 
 _LayerCanvas :: Lens' LayerContainer LayerCanvas
 _LayerCanvas = lens
-         (\(LayerContainer _ ct)    -> ct)
-         (\(LayerContainer ld _) ct -> LayerContainer ld ct)
+         (\(LayerContainer lc)    -> lc.canvas)
+         (\(LayerContainer lc) ct -> LayerContainer $ lc { canvas = ct })
 
 _FrontCanvas :: Getter' LayerCanvas CanvasElement
 _FrontCanvas = to case _ of
@@ -904,7 +952,7 @@ layerContainer lDim (Layer lt _ c) = do
 
   setCanvasPosition pos (canvas ^. _FrontCanvas)
 
-  pure $ LayerContainer lDim canvas
+  pure $ LayerContainer { dimensions: lDim, canvas }
 
 
 
@@ -914,6 +962,15 @@ type LayerRenderable =
                               , points :: Array Point }
           , labels   :: Array Label )
 
+_fixed :: SProxy "fixed"
+_fixed = SProxy
+
+_drawings :: SProxy "drawings"
+_drawings = SProxy
+
+_labels :: SProxy "labels"
+_labels = SProxy
+
 
 
 runLayer' :: ∀ m.
@@ -921,8 +978,8 @@ runLayer' :: ∀ m.
           => Layer (ComponentSlot -> m)
           -> LayerContainer
           -> m
-runLayer' layer@(Layer lt lm com) c@(LayerContainer ld ct) =
-  let slots = layerSlots ld
+runLayer' layer@(Layer lt lm com) c@(LayerContainer lc) =
+  let slots = layerSlots lc.dimensions
   in case com of
       Full     f -> f slots.full
       Padded r f -> f slots.padded
@@ -937,12 +994,12 @@ layerContext :: ∀ m a.
              => Layer a
              -> LayerContainer
              -> m Context2D
-layerContext (Layer _ lmask com) (LayerContainer ld ct) = liftEff do
-  ctx <- Canvas.getContext2D $ ct ^. _FrontCanvas
+layerContext (Layer _ lmask com) (LayerContainer lc) = liftEff do
+  ctx <- Canvas.getContext2D $ lc.canvas ^. _FrontCanvas
   _ <- Canvas.transform { m11: one,  m21: zero, m31: zero
                         , m12: zero, m22: one,  m32: zero } ctx
 
-  -- let whenMasked = when (lmask == Masked)
+  let whenMasked = when (lmask == Masked)
 
   case com of
     -- translate to 0.0, 0.0
@@ -958,13 +1015,18 @@ layerContext (Layer _ lmask com) (LayerContainer ld ct) = liftEff do
       Canvas.translate { translateX: r, translateY: r } ctx
     Outside  _ -> do
 
-      -- whenMasked do
-      --   pure unit
+      let size = lc.dimensions.size
+
+      whenMasked do
       -- translate to 0.0, set mask to not draw on the padded canvas
-      _ <- Canvas.beginPath ctx
-      _ <- Canvas.moveTo ctx 0.0           0.0
-      _ <- Canvas.lineTo ctx ld.size.width 0.0
-      _ <- Canvas.lineTo ctx ld.size.width ld.size.height
-      _ <- Canvas.lineTo ctx 0.0           ld.size.height
-      _ <- Canvas.lineTo ctx 0.0           0.0
-      Canvas.clip ctx
+        _ <- Canvas.beginPath ctx
+        _ <- Canvas.moveTo ctx 0.0        0.0
+        _ <- Canvas.lineTo ctx size.width 0.0
+        _ <- Canvas.lineTo ctx size.width size.height
+        _ <- Canvas.lineTo ctx 0.0        size.height
+        _ <- Canvas.lineTo ctx 0.0        0.0
+        void $ Canvas.clip ctx
+
+      pure ctx
+
+
