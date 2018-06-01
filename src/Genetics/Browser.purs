@@ -29,9 +29,10 @@ import Data.Record.Unsafe as Record
 import Data.Symbol (class IsSymbol, SProxy(SProxy), reflectSymbol)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Genetics.Browser.Cached (Cached, cache)
-import Genetics.Browser.Canvas (BrowserCanvas, Label, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), _Dimensions, _Track)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, LayerRenderable, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), _Dimensions, _Track)
 import Genetics.Browser.Canvas (uiSlots) as Canvas
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, scaledSegments, viewScale)
+import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerType(..))
 import Genetics.Browser.Types (Bp, ChrId, _exp)
 import Graphics.Canvas (Dimensions) as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
@@ -366,6 +367,11 @@ type Renderer a =
   -> Map ChrId (Pair Number)
   -> RenderedTrack a
 
+type Renderer' a = Map ChrId (Array a)
+                -> Map ChrId (Pair Number)
+                -> Canvas.Dimensions
+                -> LayerRenderable
+
 
 pixelSegments :: ∀ r.
                  { segmentPadding :: Number | r }
@@ -380,6 +386,18 @@ pixelSegments conf cSys canvas csView =
        <$> scaledSegments cSys (viewScale trackDim csView)
 
 
+
+pixelSegments' :: ∀ r.
+                 { segmentPadding :: Number | r }
+              -> CoordSys _ _
+              -> Canvas.Dimensions
+              -> CoordSysView
+              -> Map _ _
+pixelSegments' conf cSys trackDim csView =
+  aroundPair (-conf.segmentPadding)
+       <$> scaledSegments cSys (viewScale trackDim csView)
+
+
 renderTrack :: ∀ a b.
                _
             -> CoordSys ChrId _
@@ -391,6 +409,30 @@ renderTrack :: ∀ a b.
 renderTrack conf cSys renderer trackData canvas =
   let trackDim = canvas ^. _Track <<< _Dimensions
   in renderer trackDim trackData <<< pixelSegments conf cSys canvas
+
+renderTrack' :: ∀ a.
+               _
+            -> CoordSys ChrId _
+            -> Component (Renderer' a)
+            -> Map ChrId (Array a)
+            -> Canvas.Dimensions
+            -> CoordSysView
+            -> Layer (Canvas.Dimensions -> LayerRenderable)
+renderTrack' conf cSys com trackData dim csview =
+  let
+      segs :: Map ChrId (Pair Number)
+      segs = pixelSegments' conf cSys dim csview
+
+  in case com of
+        Full     r -> Layer Scrolling NoMask
+                      $ Full     $ r trackData segs
+        Padded p r -> Layer Scrolling NoMask
+                      $ Padded p $ r trackData segs
+        Outside rs -> Layer Scrolling NoMask
+                      $ Outside { top:    rs.top    trackData segs
+                                , right:  rs.right  trackData segs
+                                , bottom: rs.bottom trackData segs
+                                , left:   rs.left   trackData segs }
 
 
 
