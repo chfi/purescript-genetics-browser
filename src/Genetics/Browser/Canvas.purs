@@ -12,6 +12,8 @@ import Control.Monad.Eff.Class (class MonadEff, liftEff)
 import Control.Monad.Eff.Ref (REF, Ref)
 import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
+import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
+import Control.Monad.Trans.Class (lift)
 import DOM.Node.Types (Element)
 import Data.Either (Either(..))
 import Data.Foldable (any, fold, foldl, for_)
@@ -22,6 +24,8 @@ import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Record as Lens
 import Data.List (List)
 import Data.List as List
+import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
 import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (class Newtype, unwrap)
@@ -29,7 +33,7 @@ import Data.Nullable (Nullable, toMaybe)
 import Data.Symbol (SProxy(..))
 import Data.Time.Duration (Milliseconds)
 import Data.Traversable (traverse, traverse_)
-import Data.TraversableWithIndex (forWithIndex)
+import Data.TraversableWithIndex (forWithIndex, traverseWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
 import Debug.Trace as Debug
@@ -402,7 +406,7 @@ newtype BrowserCanvas =
 derive instance newtypeBrowserCanvas :: Newtype BrowserCanvas _
 
 newtype BrowserContainer =
-  BrowserContainer { layers      :: Ref (List LayerContainer)
+  BrowserContainer { layers      :: Ref (Map String LayerContainer)
                    , dimensions  :: Ref LayerDimensions -- ? is this better just kept as a function?
                    , element     :: Element
                    , glyphBuffer :: CanvasElement}
@@ -587,17 +591,16 @@ traverseLayers :: ∀ m a.
                   MonadEff _ m
                => (LayerContainer -> m a)
                -> BrowserContainer
-               -> m (List a)
+               -> m (Map String a)
 traverseLayers f bc = do
   layers <- getLayers bc
   traverse f layers
 
 
-
 getLayers :: ∀ m.
              MonadEff _ m
           => BrowserContainer
-          -> m (List LayerContainer)
+          -> m (Map String LayerContainer)
 getLayers (BrowserContainer bc) =
   liftEff $ Ref.readRef bc.layers
 
@@ -669,9 +672,6 @@ renderGlyphs' :: CanvasElement
 renderGlyphs' glyphBuffer ctx {drawing, points} = do
   glyphCtx <- Canvas.getContext2D glyphBuffer
 
-  -- ctx <- getBufferedContext tc.canvas
-
-  -- ctx <-
 
   let w = glyphBufferSize.width
       h = glyphBufferSize.height
@@ -779,9 +779,10 @@ type Renderable r = { drawings :: Array { drawing :: Drawing
 renderBrowser' :: BrowserContainer
                -> Milliseconds
                -> Number
-               -> List (Layer ({|LayerSlots ComponentSlot} -> LayerRenderable))
+               -> Map String (List (Layer (_ -> LayerRenderable)))
+               -- -> List (Layer ({|LayerSlots ComponentSlot} -> LayerRenderable))
                -> Aff _ Unit
-renderBrowser' bc d offset lrs = do
+renderBrowser' bc d offset layers lrs = do
   layers <- getLayers bc
 
   let aa :: List LayerContainer
@@ -821,7 +822,6 @@ renderBrowser' bc d offset lrs = do
               -- TODO
               pure unit
 
-
             drawLayer :: LayerRenderable -> Aff _ Unit
             drawLayer = case_ # onMatch { fixed, drawings, labels }
 
@@ -829,8 +829,19 @@ renderBrowser' bc d offset lrs = do
 
         pure unit
 
-  -- TODO these lists should be named and lined up properly -- and validated!
-  void $ List.zipWithA fun layers lrs
+      lookup' :: ∀ a. String -> Map String a -> MaybeT (Aff _) a
+      lookup' k m = MaybeT $ pure $ Map.lookup k m
+
+  for_ (Map.keys layers) \name -> do
+    -- 1. get the layercontainer by name
+    ?getLayerContainer
+    -- 2. get the list of stuff to render, by layer name
+    ?getLayerRenderable
+    -- 3. render the stuff
+
+    -- 4. pair layercontainer with the rendered stuff, using provided z-ordering list
+
+    pure unit
 
 
 renderBrowser :: ∀ a b c.
@@ -1028,5 +1039,3 @@ layerContext (Layer _ lmask com) (LayerContainer lc) = liftEff do
         void $ Canvas.clip ctx
 
       pure ctx
-
-
