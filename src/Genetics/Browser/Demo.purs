@@ -760,7 +760,7 @@ demoBrowser' :: ∀ r r2.
                 , annotations :: Map ChrId (Array _) | r2 }
              -> BrowserContainer
              -> CoordSysView
-             -> Eff _ (List (Layer (ComponentSlot -> LayerRenderable)))
+             -> Eff _ (List (Layer (_ -> LayerRenderable)))
 demoBrowser' cSys config trackData =
   let threshold = config.score
       vscale = defaultVScaleConfig threshold
@@ -782,24 +782,6 @@ demoBrowser' cSys config trackData =
           (Full $ renderSNPs' {threshold, snpsConfig: defaultSNPConfig})
           trackData.snps slot.size v
 
-      -- annotations =
-      --   renderTrack conf cSys (renderAnnotation cSys sigSnps vscale defaultDemoLegend) trackData.annotations
-
-      -- relativeUI = chrLabelsUI cSys {fontSize: 12}
-
-
   in \bc v -> do
     dims <- getDimensions bc
-    pure mempty
-
-        -- trackDim = bc ^. _Track <<< _Dimensions
-        -- slots = uiSlots bc
-        -- fixedUI =  (snpsUI        vscale UILeft  bc)
-        --         <> (annotationsUI legend UIRight bc)
-        --         <> (Drawing.translate slots.left.size.width slots.top.size.height
-        --             $ sigLevelRuler vscale red trackDim)
-
-    -- in { tracks: { snps: snps bc v
-    --              , annotations: annotations bc v }
-    --    , relativeUI: relativeUI bc v
-    --    , fixedUI }
+    pure $ pure $ snps dims v
