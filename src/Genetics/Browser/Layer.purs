@@ -3,12 +3,14 @@ module Genetics.Browser.Layer where
 import Prelude
 
 import Control.Monad.Eff (Eff)
+import Control.Monad.Eff.Class (class MonadEff, liftEff)
 import Data.Foldable (class Foldable, foldlDefault, foldrDefault)
 import Data.Generic.Rep (class Generic)
 import Data.Lens (Getter', to, (^.))
 import Data.Monoid (class Monoid)
 import Data.Newtype (class Newtype)
 import Data.Traversable (class Traversable, sequenceDefault, traverse_)
+import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -83,9 +85,9 @@ type LayerSlots a =
   , bottom :: a
   , left   :: a )
 
-layerSlots :: BrowserDimensions
-           -> Record (LayerSlots ComponentSlot)
-layerSlots {size,padding} =
+browserSlots :: BrowserDimensions
+             -> Record (LayerSlots ComponentSlot)
+browserSlots {size,padding} =
   let p0 = { x: 0.0, y: 0.0 }
       w  = size.width
       h  = size.height
@@ -115,3 +117,41 @@ layerSlots {size,padding} =
                        , height: h - padding.top - padding.bottom
                        } }
   in { full, padded, top, right, bottom, left }
+
+
+-- | Provided a component slot (contents irrelevant), and the
+-- | dimensions & padding of the browser, `slotContext` provides a
+-- | canvas context that has been translated to the relevant slot
+slotContext :: ∀ m a.
+                MonadEff _ m
+             => Component a
+             -> BrowserDimensions
+             -> CanvasElement
+             -> m Context2D
+slotContext com dims el = liftEff do
+
+  ctx <- Canvas.getContext2D el
+  _ <- Canvas.transform { m11: one,  m21: zero, m31: zero
+                        , m12: zero, m22: one,  m32: zero } ctx
+
+  let slots = browserSlots dims
+
+  -- TODO handle masking etc.
+  case com of
+    Full     _ -> pure ctx
+    Padded r _ ->
+      -- the `r` padding is *not* part of the BrowserDimensions; it's just cosmetic
+      Canvas.translate { translateX: slots.padded.offset.x + r
+                       , translateY: slots.padded.offset.y + r } ctx
+    CTop     _ ->
+      Canvas.translate { translateX: slots.top.offset.x
+                       , translateY: slots.top.offset.y } ctx
+    CRight   _ ->
+      Canvas.translate { translateX: slots.right.offset.x
+                       , translateY: slots.right.offset.y } ctx
+    CBottom  _ ->
+      Canvas.translate { translateX: slots.bottom.offset.x
+                       , translateY: slots.bottom.offset.y } ctx
+    CLeft    _ ->
+      Canvas.translate { translateX: slots.left.offset.x
+                       , translateY: slots.left.offset.y } ctx

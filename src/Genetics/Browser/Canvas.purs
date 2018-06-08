@@ -37,13 +37,14 @@ import Data.TraversableWithIndex (forWithIndex, traverseWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
 import Debug.Trace as Debug
-import Genetics.Browser.Layer (BrowserDimensions, Component(..), ComponentSlot, Layer(..), LayerMask(..), BrowserPadding, LayerSlots, LayerType(..), _Component, layerSlots)
+import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerSlots, LayerType(..), _Component, browserSlots, slotContext)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
 import Graphics.Drawing (render, translate) as Drawing
 import Graphics.Drawing.Font (font, fontString) as Drawing
 import Graphics.Drawing.Font (sansSerif)
+import Partial.Unsafe (unsafeCrashWith)
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -160,7 +161,7 @@ scrollCanvas' :: BrowserContainer
 scrollCanvas' (BrowserContainer bc) pt = do
   layers <- Ref.readRef bc.layers
 
-  for_ layers $ \lc -> case lc ^? _LayerCanvas <<< _Buffer of
+  for_ layers $ \lc -> case lc ^? _Buffer of
     Nothing -> pure unit
     Just bc -> scrollCanvas bc pt
 
@@ -236,15 +237,17 @@ clearCanvas ctx {width, height} =
   void $ Canvas.clearRect ctx { x: 0.0, y: 0.0, w: width, h: height }
 
 
-blankLayer :: LayerContainer
+blankLayer :: Warn "TODO: TEST!"
+           => LayerCanvas
            -> Eff _ Unit
-blankLayer (LayerContainer lc) =
-  case lc.canvas of
-    Buffer bc -> blankBuffer bc
-    Static el -> do
+blankLayer = case _ of
+  Buffer bc -> blankBuffer bc
+  Static el -> do
+    ctx <- Canvas.getContext2D el
+    Canvas.withContext ctx do
       setCanvasTranslation {x: zero, y: zero} el
-      ctx <- Canvas.getContext2D el
-      clearCanvas ctx lc.dimensions.size
+      dims <- Canvas.getCanvasDimensions el
+      clearCanvas ctx dims
 
 
 
@@ -301,11 +304,12 @@ drawToBuffer (BufferedCanvas {back}) f = do
   ctx <- Canvas.getContext2D back
   f ctx
 
-drawToLayer :: LayerContainer
+drawToLayer :: Warn "TODO: TEST!"
+            => LayerCanvas
             -> (Context2D -> Eff _ Unit)
             -> Eff _ Unit
-drawToLayer (LayerContainer lc) f =
-  case lc.canvas of
+drawToLayer lc f =
+  case lc of
     Static c -> f =<< Canvas.getContext2D c
     Buffer b -> drawToBuffer b f
 
@@ -406,8 +410,8 @@ newtype BrowserCanvas =
 derive instance newtypeBrowserCanvas :: Newtype BrowserCanvas _
 
 newtype BrowserContainer =
-  BrowserContainer { layers      :: Ref (Map String LayerContainer)
-                   , dimensions  :: Ref LayerDimensions -- ? is this better just kept as a function?
+  BrowserContainer { layers      :: Ref (Map String LayerCanvas)
+                   , dimensions  :: Ref BrowserDimensions
                    , element     :: Element
                    , glyphBuffer :: CanvasElement}
 
@@ -420,7 +424,7 @@ derive instance newtypeBrowserContainer :: Newtype BrowserContainer _
 getDimensions :: ∀ m.
                  MonadEff _ m
               => BrowserContainer
-              -> m LayerDimensions
+              -> m BrowserDimensions
 getDimensions (BrowserContainer {dimensions}) =
   liftEff $ Ref.readRef dimensions
 
@@ -457,7 +461,8 @@ type UISlots = { left   :: UISlot
                , bottom :: UISlot }
 
 
-uiSlots :: BrowserCanvas
+uiSlots :: Warn "deprecated"
+        => BrowserCanvas
         -> UISlots
 uiSlots (BrowserCanvas bc) =
   let track   = subtractPadding bc.dimensions bc.trackPadding
@@ -497,12 +502,8 @@ setBrowserContainerSize :: Canvas.Dimensions
                         -> BrowserContainer
                         -> Eff _ Unit
 setBrowserContainerSize dim bc'@(BrowserContainer bc) = do
-  -- set the container
   setContainerStyle bc.element dim
-  -- set each layer
-  _ <- traverseLayers (\l@(LayerContainer lc) -> resizeLayer (lc.dimensions { size = dim }) l) bc'
-  -- layers <- getLayers bc
-  -- traverse f layers
+  _ <- traverseLayers (resizeLayer dim) bc'
   pure unit
 
 
@@ -578,18 +579,18 @@ browserContainer size padding element = do
 -- | Set the CSS z-indices of the Layers in the browser, so their
 -- | canvases are drawn in the correct order (i.e. as the
 -- | BrowserContainer layer list is ordered)
-zIndexLayers :: BrowserContainer
+zIndexLayers :: Warn "unimplemented!"
+             => BrowserContainer
              -> Eff _ Unit
-zIndexLayers (BrowserContainer bc) = do
-  layers <- Ref.readRef bc.layers
-  void $ forWithIndex layers
-           (\i l -> setCanvasZIndex
-                      (l ^. _LayerCanvas <<< _FrontCanvas) i)
+zIndexLayers (BrowserContainer bc) = unsafeCoerce unit
+  -- layers <- Ref.readRef bc.layers
+  -- void $ forWithIndex layers
+  --          (\i l -> setCanvasZIndex (l ^. _FrontCanvas) i)
 
 
 traverseLayers :: ∀ m a.
                   MonadEff _ m
-               => (LayerContainer -> m a)
+               => (LayerCanvas -> m a)
                -> BrowserContainer
                -> m (Map String a)
 traverseLayers f bc = do
@@ -600,49 +601,44 @@ traverseLayers f bc = do
 getLayers :: ∀ m.
              MonadEff _ m
           => BrowserContainer
-          -> m (Map String LayerContainer)
+          -> m (Map String LayerCanvas)
 getLayers (BrowserContainer bc) =
   liftEff $ Ref.readRef bc.layers
 
 
 resizeLayer :: ∀ m.
                MonadEff _ m
-            => LayerDimensions
-            -> LayerContainer
-            -> m LayerContainer
-resizeLayer ld' (LayerContainer lc) = liftEff do
-  case lc.canvas of
-    Static e -> void $ Canvas.setCanvasDimensions lc.dimensions.size e
-    Buffer b -> setBufferedCanvasSize lc.dimensions.size b
+            => Canvas.Dimensions
+            -> LayerCanvas
+            -> m Unit
+resizeLayer dims lc = liftEff do
+  case lc of
+    Static e -> void $ Canvas.setCanvasDimensions dims e
+    Buffer b -> setBufferedCanvasSize dims b
 
-  pure $ LayerContainer (lc { dimensions = ld' })
-
-
-appendLayer :: BrowserContainer
-            -> LayerContainer
-            -> Eff _ Unit
-appendLayer bc@(BrowserContainer {element}) l@(LayerContainer lc)  = do
-  layers <- getLayers bc
-  appendCanvasElem element (lc.canvas ^. _FrontCanvas)
-  zIndexLayers bc
+  -- pure $ LayerContainer (lc { dimensions = ld' })
 
 
-addLayers :: BrowserContainer
-          -> List LayerContainer
-          -> Eff _ Unit
-addLayers bc = traverse_ (appendLayer bc)
+-- appendLayer :: BrowserContainer
+--             -> LayerCanvas
+--             -> Eff _ Unit
+-- appendLayer bc@(BrowserContainer {element}) l@(LayerContainer lc)  = do
+--   layers <- getLayers bc
+--   appendCanvasElem element (lc.canvas ^. _FrontCanvas)
+--   zIndexLayers bc
 
-deleteLayers :: BrowserContainer
-             -> Eff _ Unit
-deleteLayers (BrowserContainer bc) = do
-  Ref.writeRef bc.layers mempty
+
+-- addLayers :: BrowserContainer
+--           -> List LayerContainer
+--           -> Eff _ Unit
+-- addLayers bc = traverse_ (appendLayer bc)
+
+-- deleteLayers :: BrowserContainer
+--              -> Eff _ Unit
+-- deleteLayers (BrowserContainer bc) = do
+--   Ref.writeRef bc.layers mempty
   -- TODO update the DOM appropriately,
   -- by just removing the children of bc.element??? or be more specific
-
-  -- maybe expose a function (BrowserContainer -> (LayerContainer -> Eff _ a) -> Eff _ (List a))
-  -- so we can effectfully traverse all the layers.
-  -- sounds useful at least~~
-
 
 renderGlyphs :: TrackCanvas
              -> { drawing :: Drawing, points :: Array Point }
@@ -769,80 +765,9 @@ renderLabels ls ctx = do
         (box.rect.x - (box.rect.w / 2.0))
         box.rect.y
 
-
-
 type Renderable r = { drawings :: Array { drawing :: Drawing
                                         , points :: Array Point }
                     , labels :: Array Label | r }
-
-
-renderBrowser' :: BrowserContainer
-               -> Milliseconds
-               -> Number
-               -> Map String (List (Layer (_ -> LayerRenderable)))
-               -- -> List (Layer ({|LayerSlots ComponentSlot} -> LayerRenderable))
-               -> Aff _ Unit
-renderBrowser' bc d offset layers lrs = do
-  layers <- getLayers bc
-
-  let aa :: List LayerContainer
-      aa = layers
-
-
-      fun :: _ -> Layer (Record _ -> LayerRenderable) -> Aff _ _
-      fun lct@(LayerContainer lc) l@(Layer ltype lmask c) = do
-
-        ctx <- layerContext l lct
-        let slots = layerSlots lc.dimensions
-
-        _ <- liftEff case c of
-          Full     a -> clearCanvas ctx slots.full.size
-          Padded r a -> do
-            let slot = { width:  slots.padded.size.width  + r * 2.0
-                       , height: slots.padded.size.height + r * 2.0 }
-            clearCanvas ctx slot
-          Outside as -> do
-            clearCanvas ctx slots.top.size
-            clearCanvas ctx slots.right.size
-            clearCanvas ctx slots.bottom.size
-            clearCanvas ctx slots.left.size
-
-        let fixed    :: Drawing -> Aff _ Unit
-            fixed d  = liftEff do
-              Drawing.render ctx d
-
-            drawings :: Array _ -> Aff _ Unit
-            drawings ds = do
-              for_ ds \s -> do
-                liftEff $ renderGlyphs' (unwrap bc).glyphBuffer ctx s
-                delay d
-
-            labels   :: Array _ -> Aff _ Unit
-            labels ls = do
-              -- TODO
-              pure unit
-
-            drawLayer :: LayerRenderable -> Aff _ Unit
-            drawLayer = case_ # onMatch { fixed, drawings, labels }
-
-        traverse_ drawLayer $ map (_ $ slots) c
-
-        pure unit
-
-      lookup' :: ∀ a. String -> Map String a -> MaybeT (Aff _) a
-      lookup' k m = MaybeT $ pure $ Map.lookup k m
-
-  for_ (Map.keys layers) \name -> do
-    -- 1. get the layercontainer by name
-    ?getLayerContainer
-    -- 2. get the list of stuff to render, by layer name
-    ?getLayerRenderable
-    -- 3. render the stuff
-
-    -- 4. pair layercontainer with the rendered stuff, using provided z-ordering list
-
-    pure unit
-
 
 renderBrowser :: ∀ a b c.
                  Milliseconds
@@ -901,26 +826,10 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
       delay d
 
 
-
-
--- TODO it doesn't make sense for LayerContainers to contain the
--- actual size of the element, since that can change externally.
--- however, the LayerPadding should be consistent/only changed by the
--- layer, and so should stay in the LayerContainer.
-newtype LayerContainer =
-  LayerContainer { dimensions  :: LayerDimensions
-                 , canvas      :: LayerCanvas }
-
 data LayerCanvas =
     Static Canvas.CanvasElement
   | Buffer BufferedCanvas
 
-
-
-_LayerCanvas :: Lens' LayerContainer LayerCanvas
-_LayerCanvas = lens
-         (\(LayerContainer lc)    -> lc.canvas)
-         (\(LayerContainer lc) ct -> LayerContainer $ lc { canvas = ct })
 
 _FrontCanvas :: Getter' LayerCanvas CanvasElement
 _FrontCanvas = to case _ of
@@ -937,36 +846,6 @@ _Static = prism' Static $ case _ of
   Static el -> Just el
   Buffer _  -> Nothing
 
-_LayerBuffer :: Traversal' LayerContainer BufferedCanvas
-_LayerBuffer = _LayerCanvas <<< _Buffer
-
-
-
-
-layerContainer :: ∀ a.
-                  LayerDimensions
-               -> Layer a
-               -> Eff _ LayerContainer
-layerContainer lDim (Layer lt _ c) = do
-
-  let slots = layerSlots lDim
-
-  let {size, pos} = case c of
-        Padded _ _ -> let p' = lDim.padding
-                      in { size: slots.padded.size, pos: { left: p'.left, top: p'.top } }
-        _        ->      { size: slots.full.size,   pos: { left: 0.0, top: 0.0 } }
-
-  canvas <-
-    case lt of
-      Fixed     -> Static <$> createCanvas         size "fixed"
-      Scrolling -> Buffer <$> createBufferedCanvas size
-
-  setCanvasPosition pos (canvas ^. _FrontCanvas)
-
-  pure $ LayerContainer { dimensions: lDim, canvas }
-
-
-
 type LayerRenderable =
   Variant ( fixed    :: Drawing
           , drawings :: Array { drawing :: Drawing
@@ -982,60 +861,76 @@ _drawings = SProxy
 _labels :: SProxy "labels"
 _labels = SProxy
 
+-- | "ALayer" contains all the "DOM agnostic" parts required to define *any* layer;
+-- | by providing a BrowserContainer (which has a BrowserDimensions), a "physical"
+-- | canvas with all the required bits can be created, which can then be rendered
+-- | by providing a configuration!
+type ALayer config =
+  Layer (config -> Canvas.Dimensions -> List (LayerRenderable))
 
 
-runLayer' :: ∀ m.
-             Monoid m
-          => Layer (ComponentSlot -> m)
-          -> LayerContainer
-          -> m
-runLayer' layer@(Layer lt lm com) c@(LayerContainer lc) =
-  let slots = layerSlots lc.dimensions
-  in case com of
-      Full     f -> f slots.full
-      Padded r f -> f slots.padded
-      Outside  f -> fold [ f.top    slots.top
-                         , f.right  slots.right
-                         , f.bottom slots.bottom
-                         , f.left   slots.left ]
+-- | Provided a BrowserContainer, we can initialize and add a named layer.
+-- | This returns a function that can be used to render to the layer maybe idk????
+-- | If the layer already existed, overwrites it
 
+createAndAddLayer :: ∀ m c.
+                     MonadEff _ m
+                  => BrowserContainer
+                  -> String
+                  -> ALayer c
+                  -> m (Tuple String (c -> m Unit)) -- not sure about this one yet!!
+createAndAddLayer bc name layer@(Layer lt _ com) = do
 
-layerContext :: ∀ m a.
-                MonadEff _ m
-             => Layer a
-             -> LayerContainer
-             -> m Context2D
-layerContext (Layer _ lmask com) (LayerContainer lc) = liftEff do
-  ctx <- Canvas.getContext2D $ lc.canvas ^. _FrontCanvas
-  _ <- Canvas.transform { m11: one,  m21: zero, m31: zero
-                        , m12: zero, m22: one,  m32: zero } ctx
+  dims <- getDimensions bc
+  -- 1. create the layercanvas
+  let slots = browserSlots dims
 
-  let whenMasked = when (lmask == Masked)
+      {size, pos} = case com of
+        Padded _ _ -> let p' = dims.padding
+                      in { size: slots.padded.size, pos: { left: p'.left, top: p'.top } }
+        _        ->      { size: slots.full.size,   pos: { left: 0.0, top: 0.0 } }
 
-  case com of
-    -- translate to 0.0, 0.0
-    Full     _ -> do
-      -- whenMasked do
-      --   pure unit
+  canvas <- liftEff do
+    cv <- case lt of
+      Fixed     -> Static <$> createCanvas         size "fixed"
+      Scrolling -> Buffer <$> createBufferedCanvas size
+    setCanvasPosition pos (cv ^. _FrontCanvas)
+    pure cv
 
-      pure ctx
-    -- translate inward by the padding
-    Padded r _ -> do
-      -- whenMasked do
-      --   pure unit
-      Canvas.translate { translateX: r, translateY: r } ctx
-    Outside  _ -> do
+  -- 2. add the canvas to the browsercontainer
+  let layerRef :: _
+      layerRef = _.layers $ unwrap bc
+  liftEff $ Ref.modifyRef layerRef $ Map.insert name canvas
 
-      let size = lc.dimensions.size
+  -- 3. create the rendering function
+  let
+      render :: c -> m Unit
+      render c = do
+        dims <- getDimensions bc
+        let toRender :: List LayerRenderable
+            toRender = (com ^. _Component) c dims.size
 
-      whenMasked do
-      -- translate to 0.0, set mask to not draw on the padded canvas
-        _ <- Canvas.beginPath ctx
-        _ <- Canvas.moveTo ctx 0.0        0.0
-        _ <- Canvas.lineTo ctx size.width 0.0
-        _ <- Canvas.lineTo ctx size.width size.height
-        _ <- Canvas.lineTo ctx 0.0        size.height
-        _ <- Canvas.lineTo ctx 0.0        0.0
-        void $ Canvas.clip ctx
+        layers <- liftEff $ Ref.readRef layerRef
 
-      pure ctx
+        -- TODO handle exceptions!!! :|
+        el  <- case Map.lookup name layers of
+                 Nothing -> unsafeCrashWith $ "Tried to render layer '" <> name <> "', but it did not exist!"
+                 Just e  -> pure $ e ^. _FrontCanvas
+        ctx <- slotContext com dims el
+
+        -- use the List LayerRenderable to draw to the canvas
+        let
+            fixed :: Drawing -> m _
+            fixed d = liftEff $ Drawing.render ctx d
+
+            drawings :: Array _ -> m _
+            drawings ds =
+              liftEff $ for_ ds $ renderGlyphs' (_.glyphBuffer $ unwrap bc) ctx
+
+            labels :: Array _ -> m _
+            labels ls = liftEff $ renderLabels ls ctx
+
+        for_ toRender
+          $ case_ # onMatch { fixed, drawings, labels }
+
+  pure $ Tuple name render
