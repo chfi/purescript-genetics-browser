@@ -5,16 +5,64 @@ import Prelude
 import Control.Monad.Eff (Eff)
 import Data.Foldable (class Foldable, foldlDefault, foldrDefault)
 import Data.Generic.Rep (class Generic)
+import Data.Lens (Getter', to, (^.))
 import Data.Monoid (class Monoid)
 import Data.Newtype (class Newtype)
 import Data.Traversable (class Traversable, sequenceDefault, traverse_)
 import Graphics.Canvas as Canvas
 import Unsafe.Coerce (unsafeCoerce)
 
+type Point = { x :: Number, y :: Number }
 
-type LayerPadding =
+type BrowserPadding =
   { top  :: Number, bottom :: Number
   , left :: Number, right  :: Number }
+
+type BrowserDimensions =
+  { size    :: Canvas.Dimensions
+  , padding :: BrowserPadding }
+
+data Component a =
+    Full   a
+  | Padded Number a
+  | CTop a
+  | CRight a
+  | CBottom a
+  | CLeft a
+
+_Component :: ∀ a. Getter' (Component a) a
+_Component = to case _ of
+  Full     a -> a
+  Padded _ a -> a
+  CTop     a -> a
+  CRight   a -> a
+  CBottom  a -> a
+  CLeft    a -> a
+
+derive instance eqComponent :: Eq a => Eq (Component a)
+derive instance ordComponent :: Ord a => Ord (Component a)
+derive instance functorComponent :: Functor Component
+derive instance genericComponent :: Generic (Component a) _
+
+instance foldableComponent :: Foldable Component where
+  foldMap :: ∀ a m. Monoid m => (a -> m) -> Component a -> m
+  foldMap f c = f $ c ^. _Component
+  foldr f i c = foldrDefault f i c
+  foldl f i c = foldlDefault f i c
+
+instance traverseComponent :: Traversable Component where
+  traverse :: ∀ a b m. Applicative m => (a -> m b) -> Component a -> m (Component b)
+  traverse f = case _ of
+    Full     a -> Full     <$> f a
+    Padded r a -> Padded r <$> f a
+    CTop     a -> CTop     <$> f a
+    CRight   a -> CRight   <$> f a
+    CBottom  a -> CBottom  <$> f a
+    CLeft    a -> CLeft    <$> f a
+
+  sequence t = sequenceDefault t
+
+data Layer a = Layer LayerType LayerMask (Component a)
 
 data LayerType =
     Fixed
@@ -24,57 +72,8 @@ data LayerMask = NoMask | Masked
 
 derive instance eqLayerMask :: Eq LayerMask
 
-
-type Point = { x :: Number, y :: Number }
-
-data Component a =
-    Full   a
-  | Padded Number a
-  | Outside { top    :: a
-            , right  :: a
-            , bottom :: a
-            , left   :: a }
-
-
-derive instance eqComponent :: Eq a => Eq (Component a)
-derive instance ordComponent :: Ord a => Ord (Component a)
-derive instance functorComponent :: Functor Component
-derive instance genericComponent :: Generic (Component a) _
-
-instance foldableComponent :: Foldable Component where
-  foldMap :: ∀ a m. Monoid m => (a -> m) -> Component a -> m
-  foldMap f = case _ of
-    Full     a -> f a
-    Padded _ a -> f a
-    Outside as -> f as.top <> f as.right <> f as.bottom <> f as.left
-
-  foldr f i c = foldrDefault f i c
-  foldl f i c = foldlDefault f i c
-
-instance traverseComponent :: Traversable Component where
-  traverse :: ∀ a b m. Applicative m => (a -> m b) -> Component a -> m (Component b)
-  traverse f = case _ of
-    Full     a -> Full <$> f a
-    Padded r a -> Padded r <$> f a
-    Outside as ->
-      (\t r b l -> Outside {top: t, right: r, bottom: b, left: l})
-      <$> f as.top
-      <*> f as.right
-      <*> f as.bottom
-      <*> f as.left
-
-  sequence t = sequenceDefault t
-
-data Layer a = Layer LayerType LayerMask (Component a)
-
-type LayerDimensions =
-  { size    :: Canvas.Dimensions
-  , padding :: LayerPadding }
-
 type ComponentSlot = { offset :: Point
                      , size   :: Canvas.Dimensions }
-
-type CanvasComponent a = Component (ComponentSlot -> a)
 
 type LayerSlots a =
   ( full   :: a
@@ -84,7 +83,7 @@ type LayerSlots a =
   , bottom :: a
   , left   :: a )
 
-layerSlots :: LayerDimensions
+layerSlots :: BrowserDimensions
            -> Record (LayerSlots ComponentSlot)
 layerSlots {size,padding} =
   let p0 = { x: 0.0, y: 0.0 }
@@ -116,18 +115,3 @@ layerSlots {size,padding} =
                        , height: h - padding.top - padding.bottom
                        } }
   in { full, padded, top, right, bottom, left }
-
-
-drawComponent :: ∀ a.
-                 LayerDimensions
-              -> Component (ComponentSlot -> a)
-              -> Component a
-drawComponent ld =
-  let dims = layerSlots ld
-  in case _ of
-    Full     f -> Full     $ f dims.full
-    Padded p f -> Padded p $ f dims.padded
-    Outside  f -> Outside  $ { top:    f.top    dims.top
-                             , right:  f.right  dims.right
-                             , bottom: f.bottom dims.bottom
-                             , left:   f.left   dims.left }

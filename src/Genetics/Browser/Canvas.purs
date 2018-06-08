@@ -37,7 +37,7 @@ import Data.TraversableWithIndex (forWithIndex, traverseWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
 import Debug.Trace as Debug
-import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerDimensions, LayerMask(..), LayerPadding, LayerSlots, LayerType(..), layerSlots)
+import Genetics.Browser.Layer (BrowserDimensions, Component(..), ComponentSlot, Layer(..), LayerMask(..), BrowserPadding, LayerSlots, LayerType(..), _Component, layerSlots)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -558,7 +558,7 @@ glyphBufferSize = { width: 15.0, height: 300.0 }
 
 -- | Creates an *empty* BrowserContainer, to which layers can be added
 browserContainer :: Canvas.Dimensions
-                 -> LayerPadding
+                 -> BrowserPadding
                  -> Element
                  -> Eff _ BrowserContainer
 browserContainer size padding element = do

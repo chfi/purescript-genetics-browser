@@ -410,29 +410,28 @@ renderTrack conf cSys renderer trackData canvas =
   let trackDim = canvas ^. _Track <<< _Dimensions
   in renderer trackDim trackData <<< pixelSegments conf cSys canvas
 
-renderTrack' :: ∀ a.
-               _
-            -> CoordSys ChrId _
-            -> Component (Renderer' a)
-            -> Map ChrId (Array a)
-            -> Canvas.Dimensions
-            -> CoordSysView
-            -> Layer (Canvas.Dimensions -> LayerRenderable)
-renderTrack' conf cSys com trackData dim csview =
-  let
-      segs :: Map ChrId (Pair Number)
-      segs = pixelSegments' conf cSys dim csview
-
-  in case com of
-        Full     r -> Layer Scrolling NoMask
-                      $ Full     $ r trackData segs
-        Padded p r -> Layer Scrolling NoMask
-                      $ Padded p $ r trackData segs
-        Outside rs -> Layer Scrolling NoMask
-                      $ Outside { top:    rs.top    trackData segs
-                                , right:  rs.right  trackData segs
-                                , bottom: rs.bottom trackData segs
-                                , left:   rs.left   trackData segs }
+-- renderTrack' :: ∀ a.
+--                _
+--             -> CoordSys ChrId _
+--             -> Component (Renderer' a)
+--             -> Map ChrId (Array a)
+--             -> Canvas.Dimensions
+--             -> CoordSysView
+--             -> Layer (Canvas.Dimensions -> LayerRenderable)
+-- renderTrack' conf cSys com trackData dim csview =
+--   let
+--       segs :: Map ChrId (Pair Number)
+--       segs = pixelSegments' conf cSys dim csview
+--   in case com of
+--         Full     r -> Layer Scrolling NoMask
+--                       $ Full     $ r trackData segs
+--         Padded p r -> Layer Scrolling NoMask
+--                       $ Padded p $ r trackData segs
+--         Outside rs -> Layer Scrolling NoMask
+--                       $ Outside { top:    rs.top    trackData segs
+--                                 , right:  rs.right  trackData segs
+--                                 , bottom: rs.bottom trackData segs
+--                                 , left:   rs.left   trackData segs }
 
 
 
