@@ -410,6 +410,15 @@ renderTrack conf cSys renderer trackData canvas =
   let trackDim = canvas ^. _Track <<< _Dimensions
   in renderer trackDim trackData <<< pixelSegments conf cSys canvas
 
+
+renderTrack' :: ∀ a.
+               _
+            -> CoordSys ChrId _
+            -> Component (Renderer' a)
+            -> Map ChrId (Array a)
+            -> Canvas.Dimensions
+            -> CoordSysView
+            -> Layer (Canvas.Dimensions -> LayerRenderable)
 -- renderTrack' :: ∀ a.
 --                _
 --             -> CoordSys ChrId _

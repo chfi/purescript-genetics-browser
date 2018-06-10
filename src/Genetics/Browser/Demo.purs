@@ -44,11 +44,11 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', renderTrackLive, renderTrackLive', sigLevelRuler, trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrackLive, renderTrackLive', sigLevelRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, chunkProducer, fetchBed)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, LabelPlace(LLeft, LCenter), LayerRenderable, UISlotGravity(UIRight, UILeft), _Dimensions, _Track, _drawings, getDimensions, uiSlots)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, LabelPlace(LLeft, LCenter), LayerRenderable, UISlotGravity(UIRight, UILeft), _Dimensions, _Track, _drawings, createAndAddLayer, getDimensions, uiSlots)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
-import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerSlots)
+import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerSlots, LayerType(..))
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
@@ -773,15 +773,21 @@ demoBrowser' cSys config trackData =
 
       conf = { segmentPadding: 12.0 }
 
-      snps :: ∀ r3.
-              { size :: Canvas.Dimensions | r3 }
-           -> CoordSysView
-           -> Layer (Canvas.Dimensions -> LayerRenderable)
-      snps slot v =
-        renderTrack' conf cSys
-          (Full $ renderSNPs' {threshold, snpsConfig: defaultSNPConfig})
-          trackData.snps slot.size v
+      snpLayer :: Layer (_ -> Canvas.Dimensions -> List LayerRenderable)
+      snpLayer = Layer Scrolling NoMask
+                 $ Padded 5.0
+                 $ \c d -> renderSNPs
+      -- snps :: ∀ r3.
+      --         { size :: Canvas.Dimensions | r3 }
+      --      -> CoordSysView
+      --      -> Layer (Canvas.Dimensions -> LayerRenderable)
+      -- snps slot v = unsafeCoerce unit
+        -- renderTrack' conf cSys
+        --   (Full $ renderSNPs' {threshold, snpsConfig: defaultSNPConfig})
+        --   trackData.snps slot.size v
+
 
   in \bc v -> do
     dims <- getDimensions bc
+    snps <- createAndAddLayer bc "snps"
     pure $ pure $ snps dims v

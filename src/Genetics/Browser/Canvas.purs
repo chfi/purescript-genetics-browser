@@ -16,7 +16,7 @@ import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Control.Monad.Trans.Class (lift)
 import DOM.Node.Types (Element)
 import Data.Either (Either(..))
-import Data.Foldable (any, fold, foldl, for_)
+import Data.Foldable (all, any, fold, foldl, for_)
 import Data.Int as Int
 import Data.Lens (Getter', Lens', Prism', Traversal, Traversal', iso, lens, lens', prism', re, to, united, view, (^.), (^?))
 import Data.Lens.Iso (Iso')
@@ -37,6 +37,7 @@ import Data.TraversableWithIndex (forWithIndex, traverseWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
 import Debug.Trace as Debug
+import Genetics.Browser.Coordinates (CoordSysView(..))
 import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerSlots, LayerType(..), _Component, browserSlots, slotContext)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
@@ -579,13 +580,23 @@ browserContainer size padding element = do
 -- | Set the CSS z-indices of the Layers in the browser, so their
 -- | canvases are drawn in the correct order (i.e. as the
 -- | BrowserContainer layer list is ordered)
-zIndexLayers :: Warn "unimplemented!"
+zIndexLayers :: ∀ m.
+                MonadEff _ m
+             => Warn "Test this!"
              => BrowserContainer
-             -> Eff _ Unit
-zIndexLayers (BrowserContainer bc) = unsafeCoerce unit
-  -- layers <- Ref.readRef bc.layers
-  -- void $ forWithIndex layers
-  --          (\i l -> setCanvasZIndex (l ^. _FrontCanvas) i)
+             -> List String
+             -> m Unit
+zIndexLayers (BrowserContainer bc) order = liftEff do
+  layers <- Ref.readRef bc.layers
+  let layerNames = Map.keys layers
+  -- if order does not have the same layer names as the BrowserContainer, fail
+  if List.null (List.difference order layerNames)
+    then do
+      void $ forWithIndex order \i ln ->
+        traverse_ (\l -> setCanvasZIndex (l ^. _FrontCanvas) i)
+          $ Map.lookup ln layers
+    else
+      unsafeCrashWith "Called `zIndexLayers` with an order that did not contain all layers"
 
 
 traverseLayers :: ∀ m a.
@@ -866,7 +877,7 @@ _labels = SProxy
 -- | canvas with all the required bits can be created, which can then be rendered
 -- | by providing a configuration!
 type ALayer config =
-  Layer (config -> Canvas.Dimensions -> List (LayerRenderable))
+  Layer (config -> Canvas.Dimensions -> CoordSysView -> List (LayerRenderable))
 
 
 -- | Provided a BrowserContainer, we can initialize and add a named layer.
@@ -878,7 +889,8 @@ createAndAddLayer :: ∀ m c.
                   => BrowserContainer
                   -> String
                   -> ALayer c
-                  -> m (Tuple String (c -> m Unit)) -- not sure about this one yet!!
+                  -> m (Tuple String
+                        (c -> Canvas.Dimensions -> CoordSysView -> m Unit)) -- not sure about this one yet!!
 createAndAddLayer bc name layer@(Layer lt _ com) = do
 
   dims <- getDimensions bc

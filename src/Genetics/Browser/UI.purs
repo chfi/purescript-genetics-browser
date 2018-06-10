@@ -50,7 +50,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser (Peak, RenderedTrack, pixelSegments)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), TrackPadding, LayerRenderable, _Dimensions, _Track, browserCanvas, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, dragScroll', getDimensions, renderBrowser, renderBrowser', setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, wheelZoom')
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), TrackPadding, LayerRenderable, _Dimensions, _Track, browserCanvas, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, dragScroll', getDimensions, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, wheelZoom')
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, annotationsForScale, demoBrowser, demoBrowser', filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Layer(..))
@@ -160,9 +160,9 @@ initializeBrowser cSys mainBrowser initView bc = do
             toRender' = unsafeCoerce unit
 
         -- fork a new renderFiber
-        renderFiber <- forkAff
+        renderFiber <- forkAff $ unsafeCoerce unit
                        -- $ renderBrowser (wrap 2.0) canvas offset toRender
-                       $ renderBrowser' canvas (wrap 2.0) offset toRender'
+                       -- $ renderBrowser' canvas (wrap 2.0) offset toRender'
         AVar.putVar renderFiber renderFiberVar
 
         mainLoop
@@ -257,9 +257,9 @@ initializeBrowser' cSys mainBrowser initView bc = do
             toRender' = unsafeCoerce unit
 
         -- fork a new renderFiber
-        renderFiber <- forkAff
+        renderFiber <- forkAff $ unsafeCoerce unit
                        -- $ renderBrowser (wrap 2.0) canvas offset toRender
-                       $ renderBrowser' canvas (wrap 2.0) offset toRender'
+                       -- $ renderBrowser' canvas (wrap 2.0) offset toRender'
         AVar.putVar renderFiber renderFiberVar
 
         mainLoop
