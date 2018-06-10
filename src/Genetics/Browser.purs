@@ -16,6 +16,7 @@ import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
 import Data.Lens ((^.))
+import Data.List (List)
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe)
@@ -40,6 +41,7 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math (pow)
 import Math as Math
+import Partial.Unsafe (unsafeCrashWith)
 import Type.Prelude (class RowLacks)
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -370,7 +372,7 @@ type Renderer a =
 type Renderer' a = Map ChrId (Array a)
                 -> Map ChrId (Pair Number)
                 -> Canvas.Dimensions
-                -> LayerRenderable
+                -> List LayerRenderable
 
 
 pixelSegments :: ∀ r.
@@ -411,37 +413,22 @@ renderTrack conf cSys renderer trackData canvas =
   in renderer trackDim trackData <<< pixelSegments conf cSys canvas
 
 
-renderTrack' :: ∀ a.
-               _
-            -> CoordSys ChrId _
-            -> Component (Renderer' a)
-            -> Map ChrId (Array a)
-            -> Canvas.Dimensions
-            -> CoordSysView
-            -> Layer (Canvas.Dimensions -> LayerRenderable)
--- renderTrack' :: ∀ a.
---                _
---             -> CoordSys ChrId _
---             -> Component (Renderer' a)
---             -> Map ChrId (Array a)
---             -> Canvas.Dimensions
---             -> CoordSysView
---             -> Layer (Canvas.Dimensions -> LayerRenderable)
--- renderTrack' conf cSys com trackData dim csview =
---   let
---       segs :: Map ChrId (Pair Number)
---       segs = pixelSegments' conf cSys dim csview
---   in case com of
---         Full     r -> Layer Scrolling NoMask
---                       $ Full     $ r trackData segs
---         Padded p r -> Layer Scrolling NoMask
---                       $ Padded p $ r trackData segs
---         Outside rs -> Layer Scrolling NoMask
---                       $ Outside { top:    rs.top    trackData segs
---                                 , right:  rs.right  trackData segs
---                                 , bottom: rs.bottom trackData segs
---                                 , left:   rs.left   trackData segs }
-
+renderTrack' :: ∀ b a r.
+                { segmentPadding :: _ | r }
+             -> CoordSys ChrId _
+             -> Component (b -> Renderer' a)
+             -> Map ChrId (Array a)
+             -> Layer ( { config :: b, view :: CoordSysView } -> Canvas.Dimensions -> List LayerRenderable)
+renderTrack' conf cSys com trackData =
+  let
+      segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
+      segs = pixelSegments' conf cSys
+  in case com of
+        Full     r -> Layer Scrolling NoMask
+                      $ Full     $ \c d -> r c.config trackData (segs d c.view) d
+        Padded p r -> Layer Scrolling NoMask
+                      $ Padded p $ \c d -> r c.config trackData (segs d c.view) d
+        _ -> unsafeCrashWith "renderTrack' does not support UI slots yet"
 
 
 renderTrackLive :: forall r r' l m a b.

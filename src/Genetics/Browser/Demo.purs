@@ -44,7 +44,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrackLive, renderTrackLive', sigLevelRuler, trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', renderTrackLive, renderTrackLive', sigLevelRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, chunkProducer, fetchBed)
 import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, LabelPlace(LLeft, LCenter), LayerRenderable, UISlotGravity(UIRight, UILeft), _Dimensions, _Track, _drawings, createAndAddLayer, getDimensions, uiSlots)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
@@ -509,7 +509,7 @@ renderSNPs' :: ∀ m r1 r2 r3.
            -> Map ChrId (Array (SNP ()))
            -> Map ChrId (Pair Number)
            -> Canvas.Dimensions
-           -> LayerRenderable
+           -> List LayerRenderable
 renderSNPs' { snpsConfig, threshold } snpData =
   let features :: Array (SNP ())
       features = fold snpData
@@ -557,7 +557,7 @@ renderSNPs' { snpsConfig, threshold } snpData =
 
   in \seg size ->
         let pts = pointed size seg
-        in inj _drawings $ drawings pts
+        in pure $ inj _drawings $ drawings pts
         -- in { features
         --    , drawings: drawings pts
         --    , labels: mempty
@@ -753,15 +753,14 @@ type BrowserConfig =
 
 
 
-demoBrowser' :: ∀ r r2.
+addDemoLayers :: ∀ r r2.
                 CoordSys ChrId BigInt
              -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
              -> { snps        :: Map ChrId (Array _)
                 , annotations :: Map ChrId (Array _) | r2 }
              -> BrowserContainer
-             -> CoordSysView
-             -> Eff _ (List (Layer (_ -> LayerRenderable)))
-demoBrowser' cSys config trackData =
+             -> Eff _ { snps :: CoordSysView -> Eff _ Unit }
+addDemoLayers cSys config trackData =
   let threshold = config.score
       vscale = defaultVScaleConfig threshold
 
@@ -773,21 +772,30 @@ demoBrowser' cSys config trackData =
 
       conf = { segmentPadding: 12.0 }
 
-      snpLayer :: Layer (_ -> Canvas.Dimensions -> List LayerRenderable)
-      snpLayer = Layer Scrolling NoMask
-                 $ Padded 5.0
-                 $ \c d -> renderSNPs
-      -- snps :: ∀ r3.
-      --         { size :: Canvas.Dimensions | r3 }
-      --      -> CoordSysView
-      --      -> Layer (Canvas.Dimensions -> LayerRenderable)
-      -- snps slot v = unsafeCoerce unit
+      snpLayer :: Layer (_ -> _ -> List LayerRenderable)
+      snpLayer = renderTrack' conf cSys
+                       (Padded 5.0 $ renderSNPs' ) trackData.snps
+      snps :: ∀ r3.
+              { size :: Canvas.Dimensions | r3 }
+           -> CoordSysView
+           -> Layer (Canvas.Dimensions -> LayerRenderable)
+      snps slot v = unsafeCoerce unit
         -- renderTrack' conf cSys
         --   (Full $ renderSNPs' {threshold, snpsConfig: defaultSNPConfig})
         --   trackData.snps slot.size v
 
 
-  in \bc v -> do
+  in \bc -> do
     dims <- getDimensions bc
-    snps <- createAndAddLayer bc "snps"
-    pure $ pure $ snps dims v
+    snps' <- createAndAddLayer bc "snps" snpLayer
+
+    let (Tuple _ renderSNPTrack) = snps'
+        aoeu :: _
+        aoeu = renderSNPTrack
+        -- aoeu = renderSNPTrack {threshold, snpsConfig: defaultSNPConfig}
+
+    pure { snps: \v -> renderSNPTrack { config: { threshold
+                                                , snpsConfig: defaultSNPConfig }
+                                      , view: v }
+         }
+    -- pure $ pure $ snps dims v

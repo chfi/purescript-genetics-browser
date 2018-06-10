@@ -877,7 +877,7 @@ _labels = SProxy
 -- | canvas with all the required bits can be created, which can then be rendered
 -- | by providing a configuration!
 type ALayer config =
-  Layer (config -> Canvas.Dimensions -> CoordSysView -> List (LayerRenderable))
+  Layer (config -> Canvas.Dimensions -> List (LayerRenderable))
 
 
 -- | Provided a BrowserContainer, we can initialize and add a named layer.
@@ -889,8 +889,7 @@ createAndAddLayer :: ∀ m c.
                   => BrowserContainer
                   -> String
                   -> ALayer c
-                  -> m (Tuple String
-                        (c -> Canvas.Dimensions -> CoordSysView -> m Unit)) -- not sure about this one yet!!
+                  -> m (Tuple String (c -> m Unit))
 createAndAddLayer bc name layer@(Layer lt _ com) = do
 
   dims <- getDimensions bc
