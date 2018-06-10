@@ -9,12 +9,14 @@ import Prelude
 import Control.Monad.Aff (Aff, delay)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff, liftEff)
+import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Ref (REF, Ref)
 import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Control.Monad.Trans.Class (lift)
 import DOM.Node.Types (Element)
+import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Foldable (all, any, fold, foldl, for_)
 import Data.Int as Int
@@ -679,7 +681,6 @@ renderGlyphs' :: CanvasElement
 renderGlyphs' glyphBuffer ctx {drawing, points} = do
   glyphCtx <- Canvas.getContext2D glyphBuffer
 
-
   let w = glyphBufferSize.width
       h = glyphBufferSize.height
       x0 = w / 2.0
@@ -908,10 +909,12 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
     setCanvasPosition pos (cv ^. _FrontCanvas)
     pure cv
 
-  -- 2. add the canvas to the browsercontainer
+  -- 2. add the canvas to the browsercontainer & DOM
   let layerRef :: _
       layerRef = _.layers $ unwrap bc
-  liftEff $ Ref.modifyRef layerRef $ Map.insert name canvas
+  liftEff do
+    Ref.modifyRef layerRef $ Map.insert name canvas
+    appendCanvasElem (unwrap bc).element $ canvas ^. _FrontCanvas
 
   -- 3. create the rendering function
   let
@@ -932,14 +935,20 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
         -- use the List LayerRenderable to draw to the canvas
         let
             fixed :: Drawing -> m _
-            fixed d = liftEff $ Drawing.render ctx d
+            fixed d = liftEff do
+              log "drawing UI!"
+              Drawing.render ctx d
 
             drawings :: Array _ -> m _
-            drawings ds =
-              liftEff $ for_ ds $ renderGlyphs' (_.glyphBuffer $ unwrap bc) ctx
+            drawings ds = liftEff do
+              log "drawing glyphs!"
+              _ <- Canvas.fillRect ctx { x: 100.0, y: 100.0, w: 200.0, h: 200.0 }
+              for_ ds $ renderGlyphs' (_.glyphBuffer $ unwrap bc) ctx
 
             labels :: Array _ -> m _
-            labels ls = liftEff $ renderLabels ls ctx
+            labels ls = liftEff do
+              log "drawing labels"
+              renderLabels ls ctx
 
         for_ toRender
           $ case_ # onMatch { fixed, drawings, labels }
