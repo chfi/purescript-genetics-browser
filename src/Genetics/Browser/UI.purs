@@ -194,7 +194,8 @@ type BrowserInterface' e
 
 
 initializeBrowser' :: CoordSys _ _
-                   -> { snps :: CoordSysView -> Eff _ Unit }
+                   -> { snps :: CoordSysView -> Eff _ Unit
+                      , annotations :: CoordSysView -> Eff _ Unit }
                   -> CoordSysView
                   -> BrowserContainer
                   -> Aff _ (BrowserInterface' _)
@@ -250,9 +251,9 @@ initializeBrowser' cSys renderFuns initView bc = do
                              -- in { snps: toRender.tracks.snps.overlaps n r' }) lastOverlapsVar
 
         -- fork a new renderFiber
-        renderFiber <- forkAff $ liftEff $ renderFuns.snps csView
-                       -- $ renderBrowser (wrap 2.0) canvas offset toRender
-                       -- $ renderBrowser' canvas (wrap 2.0) offset toRender'
+        renderFiber <- forkAff $ liftEff do
+          renderFuns.annotations csView
+          renderFuns.snps csView
         AVar.putVar renderFiber renderFiberVar
 
         mainLoop
@@ -606,8 +607,6 @@ runBrowser config bc = launchAff $ do
     <*> foldMap (getSNPs        cSys) config.urls.snps
     <*> foldMap (getAnnotations cSys) config.urls.annotations
 
-  -- let mainBrowser :: _
-  --     mainBrowser = demoBrowser cSys config trackData
 
   render <- liftEff
             $ addDemoLayers cSys config trackData bc

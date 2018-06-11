@@ -414,8 +414,8 @@ renderTrack conf cSys renderer trackData canvas =
 
 
 renderTrack' :: ∀ b a r.
-                { segmentPadding :: _ | r }
-             -> CoordSys ChrId _
+                { segmentPadding :: Number | r }
+             -> CoordSys ChrId BigInt
              -> Component (b -> Renderer' a)
              -> Map ChrId (Array a)
              -> Layer ( { config :: b, view :: CoordSysView } -> Canvas.Dimensions -> List LayerRenderable)
