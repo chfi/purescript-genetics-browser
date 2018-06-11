@@ -4,6 +4,7 @@ import Prelude
 
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff, liftEff)
+import Control.Monad.Eff.Console (log)
 import Data.Foldable (class Foldable, foldlDefault, foldrDefault)
 import Data.Generic.Rep (class Generic)
 import Data.Lens (Getter', to, (^.))
@@ -13,6 +14,11 @@ import Data.Traversable (class Traversable, sequenceDefault, traverse_)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Unsafe.Coerce (unsafeCoerce)
+
+foreign import setContextTranslation :: ∀ e.
+                                        Point
+                                     -> Context2D
+                                     -> Eff e Unit
 
 type Point = { x :: Number, y :: Number }
 
@@ -131,27 +137,30 @@ slotContext :: ∀ m a.
 slotContext com dims el = liftEff do
 
   ctx <- Canvas.getContext2D el
-  _ <- Canvas.transform { m11: one,  m21: zero, m31: zero
-                        , m12: zero, m22: one,  m32: zero } ctx
 
   let slots = browserSlots dims
 
   -- TODO handle masking etc.
   case com of
     Full     _ -> pure ctx
-    Padded r _ ->
+    Padded r _ -> do
       -- the `r` padding is *not* part of the BrowserDimensions; it's just cosmetic
-      Canvas.translate { translateX: slots.padded.offset.x + r
-                       , translateY: slots.padded.offset.y + r } ctx
-    CTop     _ ->
-      Canvas.translate { translateX: slots.top.offset.x
-                       , translateY: slots.top.offset.y } ctx
-    CRight   _ ->
-      Canvas.translate { translateX: slots.right.offset.x
-                       , translateY: slots.right.offset.y } ctx
-    CBottom  _ ->
-      Canvas.translate { translateX: slots.bottom.offset.x
-                       , translateY: slots.bottom.offset.y } ctx
-    CLeft    _ ->
-      Canvas.translate { translateX: slots.left.offset.x
-                       , translateY: slots.left.offset.y } ctx
+      setContextTranslation { x: slots.padded.offset.x + r
+                            , y: slots.padded.offset.y + r } ctx
+      pure ctx
+    CTop     _ -> do
+      setContextTranslation { x: slots.top.offset.x
+                            , y: slots.top.offset.y } ctx
+      pure ctx
+    CRight   _ -> do
+      setContextTranslation { x: slots.right.offset.x
+                            , y: slots.right.offset.y } ctx
+      pure ctx
+    CBottom  _ -> do
+      setContextTranslation { x: slots.bottom.offset.x
+                            , y: slots.bottom.offset.y } ctx
+      pure ctx
+    CLeft    _ -> do
+      setContextTranslation { x: slots.left.offset.x
+                            , y: slots.left.offset.y } ctx
+      pure ctx

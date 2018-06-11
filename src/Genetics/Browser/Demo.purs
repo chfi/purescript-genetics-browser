@@ -775,27 +775,14 @@ addDemoLayers cSys config trackData =
       snpLayer :: Layer (_ -> _ -> List LayerRenderable)
       snpLayer = renderTrack' conf cSys
                        (Padded 5.0 $ renderSNPs' ) trackData.snps
-      snps :: ∀ r3.
-              { size :: Canvas.Dimensions | r3 }
-           -> CoordSysView
-           -> Layer (Canvas.Dimensions -> LayerRenderable)
-      snps slot v = unsafeCoerce unit
-        -- renderTrack' conf cSys
-        --   (Full $ renderSNPs' {threshold, snpsConfig: defaultSNPConfig})
-        --   trackData.snps slot.size v
-
 
   in \bc -> do
     dims <- getDimensions bc
     snps' <- createAndAddLayer bc "snps" snpLayer
 
     let (Tuple _ renderSNPTrack) = snps'
-        aoeu :: _
-        aoeu = renderSNPTrack
-        -- aoeu = renderSNPTrack {threshold, snpsConfig: defaultSNPConfig}
 
     pure { snps: \v -> renderSNPTrack { config: { threshold
                                                 , snpsConfig: defaultSNPConfig }
                                       , view: v }
          }
-    -- pure $ pure $ snps dims v

@@ -18,7 +18,7 @@ import Control.Monad.Trans.Class (lift)
 import DOM.Node.Types (Element)
 import Data.Array as Array
 import Data.Either (Either(..))
-import Data.Foldable (all, any, fold, foldl, for_)
+import Data.Foldable (all, any, fold, foldl, for_, maximumBy, minimumBy)
 import Data.Int as Int
 import Data.Lens (Getter', Lens', Prism', Traversal, Traversal', iso, lens, lens', prism', re, to, united, view, (^.), (^?))
 import Data.Lens.Iso (Iso')
@@ -40,7 +40,7 @@ import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
 import Debug.Trace as Debug
 import Genetics.Browser.Coordinates (CoordSysView(..))
-import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerSlots, LayerType(..), _Component, browserSlots, slotContext)
+import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerSlots, LayerType(..), _Component, browserSlots, setContextTranslation, slotContext)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -873,12 +873,10 @@ _drawings = SProxy
 _labels :: SProxy "labels"
 _labels = SProxy
 
--- | "ALayer" contains all the "DOM agnostic" parts required to define *any* layer;
+-- | A renderable `Layer` contains all the "DOM agnostic" parts required to define *any* layer;
 -- | by providing a BrowserContainer (which has a BrowserDimensions), a "physical"
 -- | canvas with all the required bits can be created, which can then be rendered
 -- | by providing a configuration!
-type ALayer config =
-  Layer (config -> Canvas.Dimensions -> List (LayerRenderable))
 
 
 -- | Provided a BrowserContainer, we can initialize and add a named layer.
@@ -889,7 +887,7 @@ createAndAddLayer :: ∀ m c.
                      MonadEff _ m
                   => BrowserContainer
                   -> String
-                  -> ALayer c
+                  -> Layer (c -> Canvas.Dimensions -> List LayerRenderable)
                   -> m (Tuple String (c -> m Unit))
 createAndAddLayer bc name layer@(Layer lt _ com) = do
 
@@ -897,10 +895,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
   -- 1. create the layercanvas
   let slots = browserSlots dims
 
-      {size, pos} = case com of
-        Padded _ _ -> let p' = dims.padding
-                      in { size: slots.padded.size, pos: { left: p'.left, top: p'.top } }
-        _        ->      { size: slots.full.size,   pos: { left: 0.0, top: 0.0 } }
+      {size, pos} = { size: slots.full.size,   pos: { left: 0.0, top: 0.0 } }
 
   canvas <- liftEff do
     cv <- case lt of
@@ -921,8 +916,15 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
       render :: c -> m Unit
       render c = do
         dims <- getDimensions bc
-        let toRender :: List LayerRenderable
-            toRender = (com ^. _Component) c dims.size
+
+        let
+            slots' = browserSlots dims
+
+            toRender :: List LayerRenderable
+            toRender = case com of
+              Full _ -> (com ^. _Component) c slots'.full.size
+              Padded _ _ -> (com ^. _Component) c slots'.padded.size
+              _ -> (com ^. _Component) c slots'.full.size -- TODO fix the ui slots
 
         layers <- liftEff $ Ref.readRef layerRef
 
@@ -931,6 +933,11 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
                  Nothing -> unsafeCrashWith $ "Tried to render layer '" <> name <> "', but it did not exist!"
                  Just e  -> pure $ e ^. _FrontCanvas
         ctx <- slotContext com dims el
+        liftEff $ Canvas.withContext ctx do
+          setContextTranslation {x: zero, y: zero} ctx
+          void $ Canvas.clearRect ctx { x: 0.0, y: 0.0
+                                      , w: slots.full.size.width
+                                      , h: slots.full.size.height }
 
         -- use the List LayerRenderable to draw to the canvas
         let
@@ -939,10 +946,10 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
               log "drawing UI!"
               Drawing.render ctx d
 
-            drawings :: Array _ -> m _
+            drawings :: Array { drawing :: Drawing, points :: Array Point }
+                     -> m _
             drawings ds = liftEff do
-              log "drawing glyphs!"
-              _ <- Canvas.fillRect ctx { x: 100.0, y: 100.0, w: 200.0, h: 200.0 }
+              log $ "drawing glyphs: " <> show (Array.length ds)
               for_ ds $ renderGlyphs' (_.glyphBuffer $ unwrap bc) ctx
 
             labels :: Array _ -> m _

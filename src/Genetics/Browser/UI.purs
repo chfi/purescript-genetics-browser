@@ -606,17 +606,11 @@ runBrowser config bc = launchAff $ do
     <*> foldMap (getSNPs        cSys) config.urls.snps
     <*> foldMap (getAnnotations cSys) config.urls.annotations
 
-  let mainBrowser :: _
-      mainBrowser = demoBrowser cSys config trackData
-
-      -- mainBrowser' :: _
-      -- mainBrowser' = addDemoLayers cSys config trackData
+  -- let mainBrowser :: _
+  --     mainBrowser = demoBrowser cSys config trackData
 
   render <- liftEff
             $ addDemoLayers cSys config trackData bc
-
-  -- browser <-
-  --   initializeBrowser cSys mainBrowser (wrap $ Pair zero (cSys^._TotalSize)) bc
 
   browser <-
     initializeBrowser' cSys render (wrap $ Pair zero (cSys^._TotalSize)) bc
