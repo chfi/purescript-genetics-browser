@@ -10,7 +10,6 @@ import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Except (runExcept)
-import Control.Monad.Reader (class MonadReader, ask)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
@@ -44,11 +43,11 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', renderTrackLive, renderTrackLive', sigLevelRuler, trackLegend)
-import Genetics.Browser.Bed (ParsedLine, chunkProducer, fetchBed)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, LabelPlace(LLeft, LCenter), LayerRenderable, UISlotGravity(UIRight, UILeft), _Dimensions, _Track, _drawings, _labels, createAndAddLayer, getDimensions, uiSlots)
+import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', sigLevelRuler, trackLegend)
+import Genetics.Browser.Bed (ParsedLine, fetchBed)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer, Label, LabelPlace(LLeft, LCenter), LayerRenderable, UISlotGravity(UIRight, UILeft), _Dimensions, _Track, _drawings, _labels, createAndAddLayer, getDimensions, uiSlots)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
-import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerSlots, LayerType(..))
+import Genetics.Browser.Layer (Component(Padded), Layer)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)

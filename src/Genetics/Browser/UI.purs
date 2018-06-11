@@ -36,6 +36,7 @@ import Data.Lens ((^.))
 import Data.Lens as Lens
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.List (List)
+import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
@@ -50,7 +51,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser (Peak, RenderedTrack, pixelSegments)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), TrackPadding, LayerRenderable, _Dimensions, _Track, browserCanvas, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, dragScroll', getDimensions, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, wheelZoom')
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), LayerRenderable, TrackPadding, _Dimensions, _Track, browserCanvas, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, dragScroll', getDimensions, getLayers, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, wheelZoom', zIndexLayers)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addDemoLayers, annotationsForScale, demoBrowser, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Layer(..))
@@ -254,6 +255,8 @@ initializeBrowser' cSys renderFuns initView bc = do
         renderFiber <- forkAff $ liftEff do
           renderFuns.annotations csView
           renderFuns.snps csView
+          log <<< show =<< Map.keys <$> getLayers bc
+
         AVar.putVar renderFiber renderFiberVar
 
         mainLoop
@@ -613,6 +616,8 @@ runBrowser config bc = launchAff $ do
 
   browser <-
     initializeBrowser' cSys render (wrap $ Pair zero (cSys^._TotalSize)) bc
+
+  zIndexLayers bc $ List.fromFoldable ["snps", "annotations"]
 
   liftEff do
     resizeEvent \d ->

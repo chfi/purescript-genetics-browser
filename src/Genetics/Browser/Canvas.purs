@@ -10,17 +10,15 @@ import Control.Monad.Aff (Aff, delay)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff, liftEff)
 import Control.Monad.Eff.Console (log)
-import Control.Monad.Eff.Ref (REF, Ref)
+import Control.Monad.Eff.Ref (Ref)
 import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
-import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
-import Control.Monad.Trans.Class (lift)
 import DOM.Node.Types (Element)
 import Data.Array as Array
 import Data.Either (Either(..))
-import Data.Foldable (all, any, fold, foldl, for_, maximumBy, minimumBy)
+import Data.Foldable (any, foldl, for_, length)
 import Data.Int as Int
-import Data.Lens (Getter', Lens', Prism', Traversal, Traversal', iso, lens, lens', prism', re, to, united, view, (^.), (^?))
+import Data.Lens (Getter', Lens', Prism', iso, prism', to, view, (^.), (^?))
 import Data.Lens.Iso (Iso')
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Record as Lens
@@ -29,18 +27,17 @@ import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
-import Data.Monoid (class Monoid, mempty)
+import Data.Monoid (mempty)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Symbol (SProxy(..))
 import Data.Time.Duration (Milliseconds)
 import Data.Traversable (traverse, traverse_)
-import Data.TraversableWithIndex (forWithIndex, traverseWithIndex)
+import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
 import Debug.Trace as Debug
-import Genetics.Browser.Coordinates (CoordSysView(..))
-import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerSlots, LayerType(..), _Component, browserSlots, setContextTranslation, slotContext)
+import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, BrowserSlots, Component(Padded, Full), Layer(Layer), LayerType(Scrolling, Fixed), _Component, browserSlots, setContextTranslation, slotContext)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -145,6 +142,27 @@ browserOnClick (BrowserCanvas bc) {track, overlay} =
             , y: o.y - bc.trackPadding.top }
     overlay o
     track t
+
+-- | Attaches a callback to a layer by name, if it exists
+-- | The callback is a variant whose symbol describes which
+-- | browser slot the coordinates are called with
+-- | Returns `false` if the layer does not exist
+browserClick :: Warn "TODO implement me!"
+             => BrowserContainer
+             -> String
+             -> Variant (BrowserSlots (Point -> Eff _ Unit))
+             -> Eff _ Boolean
+browserClick (BrowserContainer bc) name cb = do
+  layers <- Ref.readRef bc.layers
+  case Map.lookup name layers of
+    Nothing -> pure false
+    Just l  -> do
+      -- TODO implement me
+      -- 0. precompose callback w/ `slotOffset` to transform coordinates
+      -- 1. add callback to correct layer
+      -- 2. ensure events bubble thru layers
+      pure true
+
 
 
 foreign import scrollCanvasImpl :: ∀ e.
@@ -271,10 +289,11 @@ newtype BufferedCanvas =
 derive instance newtypeBufferedCanvas :: Newtype BufferedCanvas _
 
 createBufferedCanvas :: Canvas.Dimensions
+                     -> String
                      -> Eff _ BufferedCanvas
-createBufferedCanvas dim = do
-  back  <- createCanvas dim "buffer"
-  front <- createCanvas dim "front"
+createBufferedCanvas dim name = do
+  back  <- createCanvas dim $ name <> "-buffer"
+  front <- createCanvas dim $ name
   let bc = BufferedCanvas { back, front }
   blankBuffer bc
   pure bc
@@ -371,7 +390,7 @@ trackTotalDimensions d = { width:  d.width  + extra
 trackCanvas :: Canvas.Dimensions
             -> Eff _ TrackCanvas
 trackCanvas dim = do
-  canvas <- createBufferedCanvas $ trackTotalDimensions dim
+  canvas <- createBufferedCanvas (trackTotalDimensions dim) "track"
   glyphBuffer <- createCanvas glyphBufferSize "glyphBuffer"
 
   pure $ TrackCanvas { dimensions: dim
@@ -525,7 +544,7 @@ browserCanvas dimensions trackPadding el = do
   track   <- trackCanvas trackDim
 
   trackOverlay  <- createBufferedCanvas { width: trackDim.width
-                                        , height: dimensions.height }
+                                        , height: dimensions.height } "track"
 
   staticOverlay <- createCanvas dimensions "staticOverlay"
 
@@ -591,12 +610,14 @@ zIndexLayers :: ∀ m.
 zIndexLayers (BrowserContainer bc) order = liftEff do
   layers <- Ref.readRef bc.layers
   let layerNames = Map.keys layers
+      n = length layerNames :: Int
   -- if order does not have the same layer names as the BrowserContainer, fail
   if List.null (List.difference order layerNames)
     then do
       void $ forWithIndex order \i ln ->
         traverse_ (\l -> setCanvasZIndex (l ^. _FrontCanvas) i)
           $ Map.lookup ln layers
+
     else
       unsafeCrashWith "Called `zIndexLayers` with an order that did not contain all layers"
 
@@ -629,16 +650,6 @@ resizeLayer dims lc = liftEff do
     Static e -> void $ Canvas.setCanvasDimensions dims e
     Buffer b -> setBufferedCanvasSize dims b
 
-  -- pure $ LayerContainer (lc { dimensions = ld' })
-
-
--- appendLayer :: BrowserContainer
---             -> LayerCanvas
---             -> Eff _ Unit
--- appendLayer bc@(BrowserContainer {element}) l@(LayerContainer lc)  = do
---   layers <- getLayers bc
---   appendCanvasElem element (lc.canvas ^. _FrontCanvas)
---   zIndexLayers bc
 
 
 -- addLayers :: BrowserContainer
@@ -899,8 +910,8 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 
   canvas <- liftEff do
     cv <- case lt of
-      Fixed     -> Static <$> createCanvas         size "fixed"
-      Scrolling -> Buffer <$> createBufferedCanvas size
+      Fixed     -> Static <$> createCanvas         size name
+      Scrolling -> Buffer <$> createBufferedCanvas size name
     setCanvasPosition pos (cv ^. _FrontCanvas)
     pure cv
 

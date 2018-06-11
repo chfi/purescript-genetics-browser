@@ -11,8 +11,10 @@ import Data.Lens (Getter', to, (^.))
 import Data.Monoid (class Monoid)
 import Data.Newtype (class Newtype)
 import Data.Traversable (class Traversable, sequenceDefault, traverse_)
+import Data.Variant (Variant, case_, onMatch)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
+import Type.Prelude (SProxy(..))
 import Unsafe.Coerce (unsafeCoerce)
 
 foreign import setContextTranslation :: ∀ e.
@@ -83,7 +85,7 @@ derive instance eqLayerMask :: Eq LayerMask
 type ComponentSlot = { offset :: Point
                      , size   :: Canvas.Dimensions }
 
-type LayerSlots a =
+type BrowserSlots a =
   ( full   :: a
   , padded :: a
   , top    :: a
@@ -91,8 +93,30 @@ type LayerSlots a =
   , bottom :: a
   , left   :: a )
 
+_full   = SProxy :: SProxy "full"
+_padded = SProxy :: SProxy "padded"
+_top    = SProxy :: SProxy "top"
+_right  = SProxy :: SProxy "right"
+_bottom = SProxy :: SProxy "bottom"
+_left   = SProxy :: SProxy "left"
+
+
+slotOffset :: ∀ a.
+              BrowserDimensions
+           -> Point
+           -> Variant (BrowserSlots a)
+           -> Point
+slotOffset {size, padding} p = case_ # onMatch
+  { full:   \_ -> p
+  , padded: \_ -> { x: p.x + padding.left, y: p.y + padding.top }
+  , top:    \_ -> { x: p.x + padding.left, y: p.y }
+  , right:  \_ -> { x: p.x + ( size.width - padding.right ), y: p.y }
+  , bottom: \_ -> { x: p.x + padding.left, y: p.y + ( size.height - padding.bottom ) }
+  , left:   \_ -> p
+  }
+
 browserSlots :: BrowserDimensions
-             -> Record (LayerSlots ComponentSlot)
+             -> Record (BrowserSlots ComponentSlot)
 browserSlots {size,padding} =
   let p0 = { x: 0.0, y: 0.0 }
       w  = size.width
@@ -123,6 +147,9 @@ browserSlots {size,padding} =
                        , height: h - padding.top - padding.bottom
                        } }
   in { full, padded, top, right, bottom, left }
+
+
+
 
 
 -- | Provided a component slot (contents irrelevant), and the
