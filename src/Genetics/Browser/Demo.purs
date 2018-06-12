@@ -778,8 +778,8 @@ addDemoLayers :: ∀ r r2.
              -> { snps        :: Map ChrId (Array (SNP ()))
                 , annotations :: Map ChrId (Array (Annotation ())) | r2 }
              -> BrowserContainer
-             -> Eff _ { snps :: CoordSysView -> Eff _ Unit
-                      , annotations :: CoordSysView -> Eff _ Unit }
+             -> Eff _ { snps        :: Number -> CoordSysView -> Eff _ Unit
+                      , annotations :: Number -> CoordSysView -> Eff _ Unit }
 addDemoLayers cSys config trackData =
   let threshold = config.score
       vscale = defaultVScaleConfig threshold
@@ -812,8 +812,8 @@ addDemoLayers cSys config trackData =
     let snpsConfig = defaultSNPConfig
         annotationConfig = defaultDemoAnnotationConfig
 
-    pure { snps: \v ->
-            renderSNPTrack  { config: {threshold, snpsConfig}, view: v }
-         , annotations: \v ->
-            renderAnnoTrack { config: {threshold, annotationConfig}, view: v }
+    pure { snps: \o v ->
+            renderSNPTrack  o { config: {threshold, snpsConfig}, view: v }
+         , annotations: \o v ->
+            renderAnnoTrack o { config: {threshold, annotationConfig}, view: v }
          }

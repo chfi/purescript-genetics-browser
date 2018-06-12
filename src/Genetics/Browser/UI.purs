@@ -195,8 +195,8 @@ type BrowserInterface' e
 
 
 initializeBrowser' :: CoordSys _ _
-                   -> { snps :: CoordSysView -> Eff _ Unit
-                      , annotations :: CoordSysView -> Eff _ Unit }
+                   -> { snps        :: Number -> CoordSysView -> Eff _ Unit
+                      , annotations :: Number -> CoordSysView -> Eff _ Unit }
                   -> CoordSysView
                   -> BrowserContainer
                   -> Aff _ (BrowserInterface' _)
@@ -253,9 +253,11 @@ initializeBrowser' cSys renderFuns initView bc = do
 
         -- fork a new renderFiber
         renderFiber <- forkAff $ liftEff do
-          renderFuns.annotations csView
-          renderFuns.snps csView
+          log $ "rendering with offset: " <> show offset
+          renderFuns.annotations offset csView
+          renderFuns.snps        offset csView
           log <<< show =<< Map.keys <$> getLayers bc
+
 
         AVar.putVar renderFiber renderFiberVar
 

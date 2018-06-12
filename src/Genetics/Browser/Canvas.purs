@@ -899,7 +899,7 @@ createAndAddLayer :: ∀ m c.
                   => BrowserContainer
                   -> String
                   -> Layer (c -> Canvas.Dimensions -> List LayerRenderable)
-                  -> m (Tuple String (c -> m Unit))
+                  -> m (Tuple String (Number -> c -> m Unit))
 createAndAddLayer bc name layer@(Layer lt _ com) = do
 
   dims <- getDimensions bc
@@ -924,8 +924,8 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 
   -- 3. create the rendering function
   let
-      render :: c -> m Unit
-      render c = do
+      render :: Number -> c -> m Unit
+      render offset c = do
         dims <- getDimensions bc
 
         let
@@ -949,6 +949,10 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
           void $ Canvas.clearRect ctx { x: 0.0, y: 0.0
                                       , w: slots.full.size.width
                                       , h: slots.full.size.height }
+
+        -- temporary hack to offset scrolling tracks as needed
+        _ <- liftEff $ Canvas.translate { translateX: -offset, translateY: 0.0 } ctx
+
 
         -- use the List LayerRenderable to draw to the canvas
         let
