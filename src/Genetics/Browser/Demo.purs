@@ -43,11 +43,11 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', sigLevelRuler, trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, Threshold, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, sigLevelRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer, Label, LabelPlace(LLeft, LCenter), LayerRenderable, UISlotGravity(UIRight, UILeft), _Dimensions, _Track, _drawings, _labels, createAndAddLayer, getDimensions, uiSlots)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, UISlotGravity(UIRight, UILeft), RenderableLayer, _Dimensions, _Track, _drawings, _labels, createAndAddLayer, getDimensions, uiSlots)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
-import Genetics.Browser.Layer (Component(Padded), Layer)
+import Genetics.Browser.Layer (Component(..), Layer)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
@@ -438,74 +438,14 @@ defaultSNPConfig =
   }
 
 
-
-renderSNPs :: ∀ m r1 r2.
-              { threshold  :: { min  :: Number, max :: Number | r1 }
-              , snpsConfig :: { | SNPConfig () } | r2 }
-           -> Canvas.Dimensions
-           -> Map ChrId (Array (SNP ()))
-           -> Map ChrId (Pair Number)
-           -> RenderedTrack (SNP ())
-renderSNPs { snpsConfig, threshold } cdim snpData =
-  let features :: Array (SNP ())
-      features = fold snpData
-
-      snps = snpsConfig
-      radius = snps.radius
-
-      drawing =
-          let {x,y} = snps.pixelOffset
-              c     = circle x y radius
-              out   = outlined (outlineColor snps.color.outline) c
-              fill  = filled   (fillColor    snps.color.fill)    c
-          in out <> fill
-
-      drawings :: Array (Tuple (SNP ()) Point) -> Array DrawingN
-      drawings pts = let (Tuple _ points) = Array.unzip pts
-                     in [{ drawing, points }]
-
-      npointed :: Map ChrId (Array (Tuple (SNP ()) NPoint))
-      npointed = (map <<< map)
-        (fanout id (\s ->
-           { x: featureNormX s
-           , y: wrap $ normYLogScore threshold s.feature.score })) snpData
-
-
-      pointed :: Map ChrId (Pair Number)
-              -> Array (Tuple (SNP ()) Point)
-      pointed = foldMapWithIndex scaleSegs
-        where rescale seg@(Pair offset _) npoint =
-                  { x: offset + (pairSize seg) * (unwrap npoint.x)
-                  , y: cdim.height * (one - unwrap npoint.y) }
-
-              scaleSegs chrId seg = foldMap (map <<< map $ rescale seg)
-                                      $ Map.lookup chrId npointed
-
-      overlaps :: Array (Tuple (SNP ()) Point)
-               -> Number -> Point
-               -> Array (SNP ())
-      overlaps pts radius' pt = filterMap covers pts
-        where covers :: Tuple (SNP ()) Point -> Maybe (SNP ())
-              covers (Tuple f fPt)
-                | dist fPt pt <= radius + radius'   = Just f
-                | otherwise = Nothing
-
-  in \seg -> let pts = pointed seg
-             in { features
-                , drawings: drawings pts
-                , labels: mempty
-                , overlaps: overlaps pts }
-
-
-
-renderSNPs' :: ∀ m r1 r2 r3.
+renderSNPs :: ∀ m r1 r2 r3.
               { threshold  :: { min  :: Number, max :: Number | r1 }
               , snpsConfig :: { | SNPConfig () } | r2 }
            -> Map ChrId (Array (SNP ()))
            -> Map ChrId (Pair Number)
            -> Canvas.Dimensions
            -> List Renderable
-renderSNPs' { snpsConfig, threshold } snpData =
+renderSNPs { snpsConfig, threshold } snpData =
   let features :: Array (SNP ())
       features = fold snpData
 
@@ -553,11 +493,6 @@ renderSNPs' { snpsConfig, threshold } snpData =
   in \seg size ->
         let pts = pointed size seg
         in pure $ inj _drawings $ drawings pts
-        -- in { features
-        --    , drawings: drawings pts
-        --    , labels: mempty
-        --    , overlaps: overlaps pts }
-
 
 
 annotationsForScale :: ∀ r1 r2 i c.
@@ -672,7 +607,7 @@ renderAnnotationPeaks cSys vScale conf annoPks cdim =
               in { drawings, labels }
 
 
-renderAnnotation' :: ∀ r r1 r2.
+renderAnnotation :: ∀ r r1 r2.
                     CoordSys _ _
                  -> Map ChrId (Array (SNP ()))
                  -> { threshold :: { min :: Number, max :: Number | r }
@@ -681,7 +616,7 @@ renderAnnotation' :: ∀ r r1 r2.
                  -> Map ChrId (Pair Number)
                  -> Canvas.Dimensions
                  -> List Renderable
-renderAnnotation' cSys sigSnps conf allAnnots =
+renderAnnotation cSys sigSnps conf allAnnots =
   let features = fold allAnnots
       annoPeaks = annotationsForScale cSys sigSnps allAnnots
 
@@ -694,24 +629,6 @@ renderAnnotation' cSys sigSnps conf allAnnots =
            , inj _labels   $ labels ]
 
 
-renderAnnotation :: ∀ r r1 r2.
-                     CoordSys _ _
-                  -> Map ChrId (Array (SNP ()))
-                  -> { min :: Number, max :: Number | r }
-                  -> DemoAnnotationConfig
-                  -> Canvas.Dimensions
-                  -> Map ChrId (Array (Annotation r2))
-                  -> Map ChrId (Pair Number)
-                  -> RenderedTrack (Annotation r2)
-renderAnnotation cSys sigSnps vScale conf cdim allAnnots =
-  let features = fold allAnnots
-      annoPeaks = annotationsForScale cSys sigSnps allAnnots
-
-  in \segs -> let {drawings, labels} =
-                    renderAnnotationPeaks cSys vScale conf (annoPeaks segs) cdim segs
-              in { features, overlaps: mempty
-                 , drawings, labels }
-
 
 
 
@@ -719,7 +636,7 @@ type BrowserConfig =
   { chrLabelsUI :: { fontSize :: Int }
   , legend :: DemoAnnotationConfig
   , threshold :: { min :: Number, max :: Number, sig :: Number }
-  , snpsConfig :: { | SNPConfig () }
+  , snpsConfig :: Record (SNPConfig ())
   }
 
 addDemoLayers :: ∀ r r2.
@@ -742,15 +659,21 @@ addDemoLayers cSys config trackData =
 
       conf = { segmentPadding: 12.0 }
 
-      snpLayer :: Layer (_ -> _ -> List LayerRenderable)
+      snpLayer :: RenderableLayer
+                  { config :: { threshold  :: Threshold
+                              , snpsConfig :: Record (SNPConfig ()) }
+                  , view :: CoordSysView }
       snpLayer =
-        renderTrack' conf cSys
-          (Padded 5.0 $ renderSNPs' ) trackData.snps
+        renderTrack conf cSys
+          (Padded 5.0 $ renderSNPs) trackData.snps
 
-      annotationLayer :: Layer (_ -> _ -> List LayerRenderable)
+      annotationLayer :: RenderableLayer
+                         { config :: { threshold :: Threshold
+                                     , annotationConfig :: DemoAnnotationConfig }
+                         , view :: CoordSysView }
       annotationLayer =
-        renderTrack' conf cSys
-          (Padded 5.0 $ renderAnnotation' cSys sigSnps) trackData.annotations
+        renderTrack conf cSys
+          (Padded 5.0 $ renderAnnotation cSys sigSnps) trackData.annotations
 
 
   in \bc -> do
@@ -769,7 +692,6 @@ addDemoLayers cSys config trackData =
     let snpsConfig = defaultSNPConfig
         annotationConfig = defaultDemoAnnotationConfig
 
-        fixedUI :: _
         fixedUI = do
           renderVScale 0.0 unit
           renderLegend 0.0 unit

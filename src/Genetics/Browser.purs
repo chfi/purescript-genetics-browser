@@ -148,6 +148,8 @@ type VScaleRow r = ( min :: Number
                    , sig :: Number
                    | r )
 
+type Threshold = Record (VScaleRow ())
+
 type VScale = { color :: Color
               , hPad :: Number
               , numSteps :: Int
@@ -159,20 +161,6 @@ defaultVScaleConfig =
   build (insert (SProxy :: SProxy "color")    black
      >>> insert (SProxy :: SProxy "hPad")     0.125
      >>> insert (SProxy :: SProxy "numSteps") 3)
-
-
--- type Config (n :: Symbol) a r = forall m. MonadReader ({ n :: a | r}) m
-
-
-defaultVScaleConfig' :: forall m.
-                        MonadReader (Record (VScaleRow ())) m
-                     => m VScale
-defaultVScaleConfig' = do
-  a <- ask
-  pure $ build (insert (SProxy :: SProxy "color")    black
-     >>> insert (SProxy :: SProxy "hPad")     0.125
-     >>> insert (SProxy :: SProxy "numSteps") 3) a
-
 
 
 drawVScaleInSlot :: VScale
@@ -266,7 +254,6 @@ drawLegendInSlot c@{entries} size =
       d = (size.height - 2.0*vPad) / length entries
       ds = mapWithIndex (\i ic -> drawEntry (vPad*(Int.toNumber (i+1) )) ic) entries
   in fold ds
-
 
 
 
@@ -374,112 +361,36 @@ type Renderer a =
 type Renderer' a = Map ChrId (Array a)
                 -> Map ChrId (Pair Number)
                 -> Canvas.Dimensions
-                -> List LayerRenderable
+                -> List Renderable
 
 
-pixelSegments :: ∀ r.
+pixelSegments :: ∀ r c.
                  { segmentPadding :: Number | r }
-              -> CoordSys _ _
-              -> BrowserCanvas
-              -> CoordSysView
-              -> Map _ _
-pixelSegments conf cSys canvas csView =
-  let trackDim = canvas ^. _Track <<< _Dimensions
-      -- segmentPadding = 12.0 -- TODO this should be configurable
-  in aroundPair (-conf.segmentPadding)
-       <$> scaledSegments cSys (viewScale trackDim csView)
-
-
-
-pixelSegments' :: ∀ r.
-                 { segmentPadding :: Number | r }
-              -> CoordSys _ _
+              -> CoordSys c BigInt
               -> Canvas.Dimensions
               -> CoordSysView
-              -> Map _ _
-pixelSegments' conf cSys trackDim csView =
+              -> Map c (Pair Number)
+pixelSegments conf cSys trackDim csView =
   aroundPair (-conf.segmentPadding)
        <$> scaledSegments cSys (viewScale trackDim csView)
 
 
-renderTrack :: ∀ a b.
-               _
-            -> CoordSys ChrId _
-            -> Renderer a
+renderTrack :: ∀ b a r.
+               { segmentPadding :: Number | r }
+            -> CoordSys ChrId BigInt
+            -> Component (b -> Renderer' a)
             -> Map ChrId (Array a)
-            -> BrowserCanvas
-            -> CoordSysView
-            -> RenderedTrack a
-renderTrack conf cSys renderer trackData canvas =
-  let trackDim = canvas ^. _Track <<< _Dimensions
-  in renderer trackDim trackData <<< pixelSegments conf cSys canvas
-
-
-renderTrack' :: ∀ b a r.
-                { segmentPadding :: Number | r }
-             -> CoordSys ChrId BigInt
-             -> Component (b -> Renderer' a)
-             -> Map ChrId (Array a)
-             -> Layer ( { config :: b, view :: CoordSysView } -> Canvas.Dimensions -> List LayerRenderable)
-renderTrack' conf cSys com trackData =
+            -> RenderableLayer { config :: b, view :: CoordSysView }
+renderTrack conf cSys com trackData =
   let
       segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
-      segs = pixelSegments' conf cSys
+      segs = pixelSegments conf cSys
   in case com of
         Full     r -> Layer Scrolling NoMask
                       $ Full     $ \c d -> r c.config trackData (segs d c.view) d
         Padded p r -> Layer Scrolling NoMask
                       $ Padded p $ \c d -> r c.config trackData (segs d c.view) d
         _ -> unsafeCrashWith "renderTrack' does not support UI slots yet"
-
-
-renderTrackLive :: forall r r' l m a b.
-                   RowCons l a r r'
-                => IsSymbol l
-                => MonadReader {|r'} m
-                => CoordSys ChrId _
-                -> SProxy l
-                -> (a -> Renderer b)
-                -> a
-                -> Map ChrId (Array b)
-                -> Eff _ (Cached a
-                             (BrowserCanvas
-                             -> CoordSysView
-                             -> RenderedTrack b))
-renderTrackLive cSys _ renderer init trackData = do
-  let f :: a -> BrowserCanvas -> CoordSysView -> RenderedTrack b
-      f a bc v = let trackDim = bc ^. _Track <<< _Dimensions
-                 in renderer a trackDim trackData
-                    $ pixelSegments {segmentPadding: 12.0} cSys bc v
-  cache f init
-
-
-renderTrackLive' :: forall r0 r1 l m a b.
-                    RowCons l a r0 r1
-                 => RowLacks l r0
-                 => IsSymbol l
-                 => MonadReader { segmentPadding :: Number | r1 } m
-                 => CoordSys ChrId _
-                 -> SProxy l
-                 -> (a -> Renderer b)
-                 -> Map ChrId (Array b)
-                 -> m (Eff _ (Cached a
-                         (BrowserCanvas
-                         -> CoordSysView
-                         -> RenderedTrack b)))
-renderTrackLive' cSys _ renderer trackData = do
-
-  conf <- ask
-
-  let f :: a -> BrowserCanvas -> CoordSysView -> RenderedTrack b
-      f a bc v = let trackDim = bc ^. _Track <<< _Dimensions
-                 in renderer a trackDim trackData
-                    $ pixelSegments conf cSys bc v
-
-      x :: a
-      x = Record.unsafeGet (reflectSymbol (SProxy :: SProxy l)) conf
-
-  pure $ cache f x
 
 
 renderFixedUI :: Component (Canvas.Dimensions -> Drawing)
