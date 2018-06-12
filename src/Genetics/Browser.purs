@@ -30,7 +30,7 @@ import Data.Record.Unsafe as Record
 import Data.Symbol (class IsSymbol, SProxy(SProxy), reflectSymbol)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Genetics.Browser.Cached (Cached, cache)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, LayerRenderable, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), _Dimensions, _Track)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, Renderable, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), RenderableLayer, _Dimensions, _Track, _static)
 import Genetics.Browser.Canvas (uiSlots) as Canvas
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, scaledSegments, viewScale)
 import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerType(..))
@@ -173,10 +173,12 @@ defaultVScaleConfig' = do
      >>> insert (SProxy :: SProxy "hPad")     0.125
      >>> insert (SProxy :: SProxy "numSteps") 3) a
 
+
+
 drawVScaleInSlot :: VScale
-                 -> UISlot
+                 -> Canvas.Dimensions
                  -> Drawing
-drawVScaleInSlot vscale {offset, size} =
+drawVScaleInSlot vscale size =
   let
       -- TODO expose linewidth config
       -- TODO expose offsets in config
@@ -245,9 +247,9 @@ defaultLegendConfig entries =
 
 drawLegendInSlot :: ∀ r.
                     LegendConfig r
-                 -> UISlot
+                 -> Canvas.Dimensions
                  -> Drawing
-drawLegendInSlot c@{entries} {offset, size} =
+drawLegendInSlot c@{entries} size =
   let
       hPad = size.width  * c.hPad
       vPad = size.height * c.vPad
@@ -480,28 +482,10 @@ renderTrackLive' cSys _ renderer trackData = do
   pure $ cache f x
 
 
-
-renderFixedUI :: forall a b.
-                 (UISlot -> Drawing)
-              -> UISlotGravity
-              -> BrowserCanvas
-              -> Drawing
-renderFixedUI uiDrawing slotG canvas =
-  let slots = Canvas.uiSlots canvas
-
-      slot@{offset, size} = case slotG of
-        UILeft   -> slots.left
-        UIRight  -> slots.right
-        UITop    -> slots.top
-        UIBottom -> slots.bottom
-
-      drawInSlot :: _
-      drawInSlot d =
-          (translate offset.x offset.y
-           $ filled (fillColor white)
-           $ rectangle zero zero size.width size.height)
-        <> translate offset.x offset.y d
-  in drawInSlot (uiDrawing slot)
+renderFixedUI :: Component (Canvas.Dimensions -> Drawing)
+              -> RenderableLayer Unit
+renderFixedUI com = Layer Fixed NoMask $ map f com
+  where f draw = \_ d -> pure $ inj _static (draw d)
 
 
 renderRelativeUI :: CoordSys ChrId BigInt

@@ -124,13 +124,14 @@ browserSlots {size,padding} =
       wC = w - padding.right - padding.left
       full   = { offset: p0
                , size }
-      left   = { offset: p0
+      left   = { offset: p0 { y = padding.top }
                , size: { width:  padding.left
-                       , height: h
+                       , height: h - (padding.top + padding.bottom)
                        } }
-      right  = { offset: p0 { x = w - padding.right }
+      right  = { offset: { x: w - padding.right
+                         , y: padding.top }
                , size: { width:  padding.right
-                       , height: h
+                       , height: h - (padding.top + padding.bottom)
                        } }
       top    = { offset: p0 { x = padding.left }
                , size: { width:  wC

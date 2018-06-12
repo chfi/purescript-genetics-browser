@@ -51,9 +51,9 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser (Peak, RenderedTrack, pixelSegments)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), LayerRenderable, TrackPadding, _Dimensions, _Track, browserCanvas, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, getDimensions, getLayers, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, zIndexLayers)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Renderable, TrackPadding, _Dimensions, _Track, browserCanvas, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, getDimensions, getLayers, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, zIndexLayers)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
-import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addDemoLayers, annotationsForScale, demoBrowser, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
+import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Layer(..), browserSlots)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Global.Unsafe (unsafeStringify)
@@ -196,7 +196,8 @@ type BrowserInterface' e
 
 initializeBrowser' :: CoordSys _ _
                    -> { snps        :: Number -> CoordSysView -> Eff _ Unit
-                      , annotations :: Number -> CoordSysView -> Eff _ Unit }
+                      , annotations :: Number -> CoordSysView -> Eff _ Unit
+                      , fixedUI     :: Eff _ Unit }
                   -> CoordSysView
                   -> BrowserContainer
                   -> Aff _ (BrowserInterface' _)
@@ -254,9 +255,12 @@ initializeBrowser' cSys renderFuns initView bc = do
         -- fork a new renderFiber
         renderFiber <- forkAff $ liftEff do
           log $ "rendering with offset: " <> show offset
+          log <<< show =<< Map.keys <$> getLayers bc
+
           renderFuns.annotations offset csView
           renderFuns.snps        offset csView
-          log <<< show =<< Map.keys <$> getLayers bc
+          renderFuns.fixedUI
+
 
 
         AVar.putVar renderFiber renderFiberVar

@@ -412,18 +412,15 @@ filterSig {sig} = map (filter
   (\snp -> snp.feature.score <= (NegLog10 sig ^. re _NegLog10)))
 
 
+
 snpsUI :: VScale
-       -> UISlotGravity
-       -> BrowserCanvas
-       -> Drawing
-snpsUI vscale = renderFixedUI (drawVScaleInSlot vscale)
+       -> RenderableLayer Unit
+snpsUI vscale = renderFixedUI (CLeft $ drawVScaleInSlot vscale)
 
 annotationsUI :: ∀ r.
-                 LegendConfig r
-              -> UISlotGravity
-              -> BrowserCanvas
-              -> Drawing
-annotationsUI legend = renderFixedUI (drawLegendInSlot legend)
+                LegendConfig r
+             -> RenderableLayer Unit
+annotationsUI legend = renderFixedUI (CRight $ drawLegendInSlot legend)
 
 
 type SNPConfig r
@@ -507,7 +504,7 @@ renderSNPs' :: ∀ m r1 r2 r3.
            -> Map ChrId (Array (SNP ()))
            -> Map ChrId (Pair Number)
            -> Canvas.Dimensions
-           -> List LayerRenderable
+           -> List Renderable
 renderSNPs' { snpsConfig, threshold } snpData =
   let features :: Array (SNP ())
       features = fold snpData
@@ -683,7 +680,7 @@ renderAnnotation' :: ∀ r r1 r2.
                  -> Map ChrId (Array (Annotation r2))
                  -> Map ChrId (Pair Number)
                  -> Canvas.Dimensions
-                 -> List LayerRenderable
+                 -> List Renderable
 renderAnnotation' cSys sigSnps conf allAnnots =
   let features = fold allAnnots
       annoPeaks = annotationsForScale cSys sigSnps allAnnots
@@ -718,53 +715,6 @@ renderAnnotation cSys sigSnps vScale conf cdim allAnnots =
 
 
 
-demoBrowser :: ∀ r r2.
-               CoordSys ChrId BigInt
-            -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
-            -> { snps        :: Map ChrId (Array _)
-               , annotations :: Map ChrId (Array _) | r2 }
-            -> BrowserCanvas
-            -> CoordSysView
-            -> { tracks     :: { snps        :: RenderedTrack (SNP _)
-                               , annotations :: RenderedTrack (Annotation _) }
-               , relativeUI :: Drawing
-               , fixedUI    :: Drawing }
-demoBrowser cSys config trackData =
-  let
-      threshold = config.score
-      vscale = defaultVScaleConfig threshold
-
-      sigSnps = filterSig config.score trackData.snps
-      legend = defaultLegendConfig
-               $ (annotationLegendTest defaultDemoAnnotationConfig)
-                  trackData.annotations
-
-      conf = { segmentPadding: 12.0 }
-
-      snps =
-        renderTrack conf cSys (renderSNPs {threshold, snpsConfig: defaultSNPConfig}) trackData.snps
-
-      annotations =
-        renderTrack conf cSys (renderAnnotation cSys sigSnps vscale defaultDemoAnnotationConfig) trackData.annotations
-
-      relativeUI = chrLabelsUI cSys {fontSize: 12}
-
-
-  in \bc v ->
-    let trackDim = bc ^. _Track <<< _Dimensions
-        slots = uiSlots bc
-        fixedUI =  (snpsUI        vscale UILeft  bc)
-                <> (annotationsUI legend UIRight bc)
-                <> (Drawing.translate slots.left.size.width slots.top.size.height
-                    $ sigLevelRuler vscale red trackDim)
-
-    in { tracks: { snps: snps bc v
-                 , annotations: annotations bc v }
-       , relativeUI: relativeUI bc v
-       , fixedUI }
-
-
-
 type BrowserConfig =
   { chrLabelsUI :: { fontSize :: Int }
   , legend :: DemoAnnotationConfig
@@ -779,7 +729,8 @@ addDemoLayers :: ∀ r r2.
                 , annotations :: Map ChrId (Array (Annotation ())) | r2 }
              -> BrowserContainer
              -> Eff _ { snps        :: Number -> CoordSysView -> Eff _ Unit
-                      , annotations :: Number -> CoordSysView -> Eff _ Unit }
+                      , annotations :: Number -> CoordSysView -> Eff _ Unit
+                      , fixedUI :: Eff _ Unit }
 addDemoLayers cSys config trackData =
   let threshold = config.score
       vscale = defaultVScaleConfig threshold
@@ -809,11 +760,23 @@ addDemoLayers cSys config trackData =
     (Tuple _ renderAnnoTrack) <-
       createAndAddLayer bc "annotations" annotationLayer
 
+    (Tuple _ renderVScale) <-
+      createAndAddLayer bc "vscale" $ snpsUI vscale
+
+    (Tuple _ renderLegend) <-
+      createAndAddLayer bc "legend" $ annotationsUI legend
+
     let snpsConfig = defaultSNPConfig
         annotationConfig = defaultDemoAnnotationConfig
+
+        fixedUI :: _
+        fixedUI = do
+          renderVScale 0.0 unit
+          renderLegend 0.0 unit
 
     pure { snps: \o v ->
             renderSNPTrack  o { config: {threshold, snpsConfig}, view: v }
          , annotations: \o v ->
             renderAnnoTrack o { config: {threshold, annotationConfig}, view: v }
+         , fixedUI
          }
