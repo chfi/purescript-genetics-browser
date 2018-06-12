@@ -13,12 +13,16 @@ import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Ref (Ref)
 import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
-import DOM.Node.Types (Element)
+import DOM.Classy.Node (class IsNode, fromNode)
+import DOM.Classy.Node as DOM
+import DOM.HTML.Types (HTMLCanvasElement)
+import DOM.Node.Types (Element, Node)
 import Data.Array as Array
 import Data.Either (Either(..))
+import Data.Filterable (filterMap)
 import Data.Foldable (any, foldl, for_, length)
 import Data.Int as Int
-import Data.Lens (Getter', Lens', Prism', iso, prism', to, view, (^.), (^?))
+import Data.Lens (Getter', Lens', Prism', iso, preview, prism', re, to, view, (^.), (^?))
 import Data.Lens.Iso (Iso')
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Record as Lens
@@ -26,7 +30,7 @@ import Data.List (List)
 import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
+import Data.Maybe (Maybe(Nothing, Just), fromMaybe, maybe)
 import Data.Monoid (mempty)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Nullable (Nullable, toMaybe)
@@ -170,21 +174,24 @@ foreign import scrollCanvasImpl :: ∀ e.
                                    CanvasElement CanvasElement Point
                                    Unit
 
+-- | Scroll a buffered canvas by copying its contents to its backbuffer,
+-- | then copying it back at an offset
 scrollCanvas :: BufferedCanvas
              -> Point
              -> Eff _ Unit
 scrollCanvas (BufferedCanvas bc) = runEffFn3 scrollCanvasImpl bc.back bc.front
 
-
-scrollCanvas' :: BrowserContainer
+-- | Scroll all buffered canvases in a container
+scrollBrowser :: BrowserContainer
               -> Point
               -> Eff _ Unit
-scrollCanvas' (BrowserContainer bc) pt = do
+scrollBrowser (BrowserContainer bc) pt = do
   layers <- Ref.readRef bc.layers
+  -- | Filter out all layers that don't scroll
+  let scrolling = filterMap (preview _Buffer) layers
+  -- | then... scroll them
+  for_ scrolling \bc -> scrollCanvas bc pt
 
-  for_ layers $ \lc -> case lc ^? _Buffer of
-    Nothing -> pure unit
-    Just bc -> scrollCanvas bc pt
 
 
 foreign import canvasDragImpl :: ∀ eff.
@@ -199,57 +206,40 @@ foreign import canvasWheelCBImpl :: ∀ eff.
                                  -> (Number -> Eff eff Unit)
                                  -> Eff eff Unit
 
-
-canvasDrag :: (Either Point Point -> Eff _ Unit)
-           -> CanvasElement
+-- |
+canvasDrag :: CanvasElement
+           -> (Either Point Point -> Eff _ Unit)
            -> Eff _ Unit
-canvasDrag f el =
+canvasDrag el f =
   let toEither g {during, total} = case toMaybe during of
         Just p  -> g $ Right p
         Nothing -> g $ Left $ fromMaybe {x:zero, y:zero} $ toMaybe total
   in canvasDragImpl el (toEither f)
 
 
--- | Takes a BrowserCanvas and a callback function that is called with the
+-- | Takes a BrowserContainer and a callback function that is called with the
 -- | total dragged distance when a click & drag action is completed.
-dragScroll :: BrowserCanvas
+dragScroll :: BrowserContainer
            -> (Point -> Eff _ Unit)
            -> Eff _ Unit
-dragScroll (BrowserCanvas bc) cb = canvasDrag f bc.staticOverlay
+dragScroll bc'@(BrowserContainer {element}) cb =
+  canvasDrag (unsafeCoerce element) f -- actually safe
   where f = case _ of
-              Left  p     -> cb p
+              Left  p   -> cb p
               Right {x} -> do
                 let p' = {x: -x, y: 0.0}
-                scrollCanvas (_.canvas $ unwrap bc.track) p'
-                scrollCanvas bc.trackOverlay p'
-
-dragScroll' :: BrowserContainer
-            -> (Point -> Eff _ Unit)
-            -> Eff _ Unit
-dragScroll' bc'@(BrowserContainer {element}) cb =
-  canvasDrag f (unsafeCoerce element) -- actually safe
-  where f = case _ of
-              Left  p    -> cb p
-              Right {x} -> do
-                let p' = {x: -x, y: 0.0}
-                scrollCanvas' bc' p'
+                scrollBrowser bc' p'
 
 
--- | Takes a BrowserCanvas and a callback function that is called with each
+-- | Takes a BrowserContainer and a callback function that is called with each
 -- | wheel scroll `deltaY`. Callback is provided with only the sign of `deltaY`
 -- | as to be `deltaMode` agnostic.
-wheelZoom :: BrowserCanvas
+wheelZoom :: BrowserContainer
           -> (Number -> Eff _ Unit)
           -> Eff _ Unit
-wheelZoom (BrowserCanvas bc) cb =
-  canvasWheelCBImpl bc.staticOverlay cb
-
-
-wheelZoom' :: BrowserContainer
-          -> (Number -> Eff _ Unit)
-          -> Eff _ Unit
-wheelZoom' bc cb = Debug.trace "unimplemented!" \_ -> pure unit
-  -- canvasWheelCBImpl bc.staticOverlay cb
+wheelZoom bc cb =
+  canvasWheelCBImpl
+    (unsafeCoerce $ _.element $ unwrap bc) cb
 
 
 -- | Helper function for erasing the contents of a canvas context given its dimensions

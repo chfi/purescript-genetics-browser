@@ -51,10 +51,10 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser (Peak, RenderedTrack, pixelSegments)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), LayerRenderable, TrackPadding, _Dimensions, _Track, browserCanvas, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, dragScroll', getDimensions, getLayers, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, wheelZoom', zIndexLayers)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), LayerRenderable, TrackPadding, _Dimensions, _Track, browserCanvas, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, getDimensions, getLayers, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, zIndexLayers)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addDemoLayers, annotationsForScale, demoBrowser, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
-import Genetics.Browser.Layer (Layer(..))
+import Genetics.Browser.Layer (Layer(..), browserSlots)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
@@ -632,18 +632,17 @@ runBrowser config bc = launchAff $ do
     -- keyUI (unsafeCoerce $ (unwrap bc).staticOverlay)
     --       mods browser.queueUpdateView
 
-    -- dragScroll' bc \ {x,y} ->
-    --    when (Math.abs x >= one) $ launchAff_ do
-    --      trackDims <- Lens.view (_Track <<< _Dimensions)
-    --                   <$> browser.getBrowserCanvas
+    dragScroll bc \ {x,y} ->
+      -- only do anything when scrolling at least a pixel
+      when (Math.abs x >= one) do
+        trackDims <- _.padded <<< browserSlots <$> getDimensions bc
+        browser.queueUpdateView
+         $ ScrollView $ (-x) / trackDims.size.width
 
-    --      liftEff $ browser.queueUpdateView
-    --              $ ScrollView $ (-x) / trackDims.width
-
-    -- let scrollZoomScale = 0.06
-    -- wheelZoom bc \dY ->
-    --    browser.queueUpdateView
-    --      $ ZoomView $ 1.0 + scrollZoomScale * dY
+    let scrollZoomScale = 0.06
+    wheelZoom bc \dY ->
+       browser.queueUpdateView
+         $ ZoomView $ 1.0 + scrollZoomScale * dY
 
     pure unit
 {-
