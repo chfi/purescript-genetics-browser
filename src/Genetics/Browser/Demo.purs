@@ -9,6 +9,7 @@ import Control.Monad.Aff (Aff, error, throwError)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
+import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Except (runExcept)
 import Data.Array as Array
 import Data.BigInt (BigInt)
@@ -43,14 +44,14 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, RenderedTrack, VScale, Threshold, chrLabelsUI, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, sigLevelRuler, trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, UISlotGravity(UIRight, UILeft), RenderableLayer, _Dimensions, _Track, _drawings, _labels, createAndAddLayer, getDimensions, uiSlots)
+import Genetics.Browser.Canvas (BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, _drawings, _labels, createAndAddLayer, getDimensions)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
-import Genetics.Browser.Layer (Component(..), Layer)
+import Genetics.Browser.Layer (Component(Padded, CRight, CLeft))
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
+import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
@@ -639,6 +640,11 @@ type BrowserConfig =
   , snpsConfig :: Record (SNPConfig ())
   }
 
+-- In the future, this will be handled with a type class, by the compiler
+type Overlaps r = Number -> Point -> Record r
+
+_snps = SProxy :: SProxy "snps"
+
 addDemoLayers :: ∀ r r2.
                 CoordSys ChrId BigInt
              -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
@@ -647,7 +653,8 @@ addDemoLayers :: ∀ r r2.
              -> BrowserContainer
              -> Eff _ { snps        :: Number -> CoordSysView -> Eff _ Unit
                       , annotations :: Number -> CoordSysView -> Eff _ Unit
-                      , fixedUI :: Eff _ Unit }
+                      , fixedUI  :: Eff _ Unit
+                      , overlaps :: Eff _ (Overlaps (snps :: Array (SNP ()))) }
 addDemoLayers cSys config trackData =
   let threshold = config.score
       vscale = defaultVScaleConfig threshold
@@ -680,6 +687,7 @@ addDemoLayers cSys config trackData =
     dims <- getDimensions bc
     (Tuple _ renderSNPTrack)  <-
       createAndAddLayer bc "snps" snpLayer
+
     (Tuple _ renderAnnoTrack) <-
       createAndAddLayer bc "annotations" annotationLayer
 
@@ -689,6 +697,8 @@ addDemoLayers cSys config trackData =
     (Tuple _ renderLegend) <-
       createAndAddLayer bc "legend" $ annotationsUI legend
 
+    overlapsRef <- Ref.newRef (\_ _ -> { snps: mempty })
+
     let snpsConfig = defaultSNPConfig
         annotationConfig = defaultDemoAnnotationConfig
 
@@ -696,9 +706,20 @@ addDemoLayers cSys config trackData =
           renderVScale 0.0 unit
           renderLegend 0.0 unit
 
-    pure { snps: \o v ->
-            renderSNPTrack  o { config: {threshold, snpsConfig}, view: v }
-         , annotations: \o v ->
-            renderAnnoTrack o { config: {threshold, annotationConfig}, view: v }
+        -- TODO very unfinished
+        overlaps = Ref.readRef overlapsRef
+
+        snps :: _
+        snps o v = do
+          renderSNPTrack o { config: {threshold, snpsConfig}, view: v }
+
+        annotations :: _
+        annotations o v =
+          renderAnnoTrack o { config: {threshold, annotationConfig}, view: v }
+
+
+    pure { snps
+         , annotations
          , fixedUI
+         , overlaps
          }

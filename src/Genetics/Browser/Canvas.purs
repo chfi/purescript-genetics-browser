@@ -867,14 +867,10 @@ type Renderable =
                               , points :: Array Point }
           , labels   :: Array Label )
 
-_static :: SProxy "static"
-_static = SProxy
-
-_drawings :: SProxy "drawings"
-_drawings = SProxy
-
-_labels :: SProxy "labels"
-_labels = SProxy
+_static   = SProxy :: SProxy "static"
+_drawings = SProxy :: SProxy "drawings"
+_labels   = SProxy :: SProxy "labels"
+_overlaps = SProxy :: SProxy "overlaps"
 
 type RenderableLayer c = Layer (c -> Canvas.Dimensions -> List Renderable)
 
