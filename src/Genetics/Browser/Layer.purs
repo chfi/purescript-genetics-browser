@@ -11,7 +11,7 @@ import Data.Lens (Getter', to, (^.))
 import Data.Monoid (class Monoid)
 import Data.Newtype (class Newtype)
 import Data.Traversable (class Traversable, sequenceDefault, traverse_)
-import Data.Variant (Variant, case_, onMatch)
+import Data.Variant (Variant, case_, inj, onMatch)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Type.Prelude (SProxy(..))
@@ -100,20 +100,58 @@ _right  = SProxy :: SProxy "right"
 _bottom = SProxy :: SProxy "bottom"
 _left   = SProxy :: SProxy "left"
 
+asSlot :: ∀ a. Component a -> Variant (BrowserSlots a)
+asSlot = case _ of
+  Full     a -> inj _full   a
+  Padded _ a -> inj _padded a
+  CTop     a -> inj _top    a
+  CRight   a -> inj _right  a
+  CBottom  a -> inj _bottom a
+  CLeft    a -> inj _left   a
+
 
 slotOffset :: ∀ a.
               BrowserDimensions
-           -> Point
            -> Variant (BrowserSlots a)
            -> Point
-slotOffset {size, padding} p = case_ # onMatch
-  { full:   \_ -> p
-  , padded: \_ -> { x: p.x + padding.left, y: p.y + padding.top }
-  , top:    \_ -> { x: p.x + padding.left, y: p.y }
-  , right:  \_ -> { x: p.x + ( size.width - padding.right ), y: p.y }
-  , bottom: \_ -> { x: p.x + padding.left, y: p.y + ( size.height - padding.bottom ) }
-  , left:   \_ -> p
+           -> Point
+slotOffset {size, padding} = case_ # onMatch
+  { full:   \_ -> \p -> p
+  , padded: \_ -> \p -> { x: p.x + padding.left, y: p.y + padding.top }
+  , top:    \_ -> \p -> { x: p.x + padding.left, y: p.y }
+  , right:  \_ -> \p -> { x: p.x + ( size.width - padding.right ), y: p.y }
+  , bottom: \_ -> \p -> { x: p.x + padding.left, y: p.y + ( size.height - padding.bottom ) }
+  , left:   \_ -> \p -> p
   }
+
+slotRelative :: ∀ a.
+              BrowserDimensions
+           -> Variant (BrowserSlots a)
+           -> Point
+           -> Point
+slotRelative {size, padding} = case_ # onMatch
+  { full:   \_ -> \p -> p
+  , padded: \_ -> \p -> { x: p.x - padding.left, y: p.y - padding.top }
+  , top:    \_ -> \p -> { x: p.x - padding.left, y: p.y }
+  , right:  \_ -> \p -> { x: p.x - ( size.width - padding.right ), y: p.y }
+  , bottom: \_ -> \p -> { x: p.x - padding.left, y: p.y - ( size.height - padding.bottom ) }
+  , left:   \_ -> \p -> p
+  }
+
+
+
+  -- { full:   \_ -> \p -> p
+  -- , padded: \_ -> \p -> { x: padding.left - p.x
+  --                       , y: padding.top - p.y }
+  -- , top:    \_ -> \p -> { x: padding.left - p.x
+  --                       , y: p.y }
+  -- , right:  \_ -> \p -> { x: ( size.width - padding.right ) - p.x
+  --                       , y: p.y }
+  -- , bottom: \_ -> \p -> { x: padding.left - p.x
+  --                       , y: ( size.height - padding.bottom ) - p.y }
+  -- , left:   \_ -> \p -> p
+  -- }
+
 
 browserSlots :: BrowserDimensions
              -> Record (BrowserSlots ComponentSlot)

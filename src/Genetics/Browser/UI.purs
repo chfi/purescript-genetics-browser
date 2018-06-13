@@ -51,10 +51,10 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser (Peak, RenderedTrack, pixelSegments)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Renderable, TrackPadding, _Dimensions, _Track, browserCanvas, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, getDimensions, getLayers, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, zIndexLayers)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Renderable, TrackPadding, _Dimensions, _Track, browserCanvas, browserClickHandler, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, getDimensions, getLayers, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, zIndexLayers)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
-import Genetics.Browser.Layer (Layer(..), browserSlots)
+import Genetics.Browser.Layer (Component(..), Layer(..), browserSlots)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
@@ -623,7 +623,17 @@ runBrowser config bc = launchAff $ do
   browser <-
     initializeBrowser' cSys render (wrap $ Pair zero (cSys^._TotalSize)) bc
 
-  zIndexLayers bc $ List.fromFoldable ["snps", "annotations"]
+  browserClickHandler bc
+    $ Padded 5.0 \pt -> do
+        log $ "clicked Padded (" <> show pt.x <> ", " <> show pt.y <> ")"
+
+  browserClickHandler bc
+    $ CLeft \pt -> do
+        log $ "clicked Left (" <> show pt.x <> ", " <> show pt.y <> ")"
+
+  browserClickHandler bc
+    $ CRight \pt -> do
+        log $ "clicked Right (" <> show pt.x <> ", " <> show pt.y <> ")"
 
   liftEff do
     resizeEvent \d ->

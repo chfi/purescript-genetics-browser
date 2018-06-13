@@ -59,14 +59,15 @@ exports.setCanvasTranslation = function(p) {
 };
 
 
-exports.canvasClickImpl = function(canvas, cb) {
-    var rect = canvas.getBoundingClientRect();
-    canvas.addEventListener('mousedown', function(e) {
+exports.elementClickImpl = function(el, cb) {
+    var rect = el.getBoundingClientRect();
+    el.addEventListener('mousedown', function(e) {
         var x = e.clientX - rect.left + window.scrollX;
         var y = e.clientY - rect.top  + window.scrollY;
         cb({x: x, y: y})();
     });
 };
+
 
 
 // scrolls a canvas, given a "back buffer" canvas to copy the current context to

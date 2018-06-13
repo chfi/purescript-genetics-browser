@@ -13,6 +13,7 @@ import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Ref (Ref)
 import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
+import DOM.Classy.Element (class IsElement, toElement)
 import DOM.Classy.Node (class IsNode, fromNode)
 import DOM.Classy.Node as DOM
 import DOM.HTML.Types (HTMLCanvasElement)
@@ -41,7 +42,7 @@ import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
 import Debug.Trace as Debug
-import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, BrowserSlots, Component(..), Layer(Layer), LayerType(Scrolling, Fixed), _Component, browserSlots, setContextTranslation, slotContext)
+import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, BrowserSlots, Component(..), Layer(Layer), LayerType(Scrolling, Fixed), _Component, asSlot, browserSlots, setContextTranslation, slotContext, slotOffset, slotRelative)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -123,14 +124,23 @@ foreign import setCanvasTranslation :: ∀ e.
                                     -> Eff e Unit
 
 
-foreign import canvasClickImpl :: ∀ e.
-                                  EffFn2 e
-                                  CanvasElement (Point -> Eff e Unit)
-                                  Unit
-
-
 canvasClick :: CanvasElement -> (Point -> Eff _ Unit) -> Eff _ Unit
-canvasClick = runEffFn2 canvasClickImpl
+canvasClick = elementClick <<< view _Element
+
+
+
+foreign import elementClickImpl :: ∀ e.
+                                   EffFn2 e
+                                   Element (Point -> Eff e Unit)
+                                   Unit
+
+
+elementClick :: ∀ e.
+                IsElement e
+             => e
+             -> (Point -> Eff _ Unit)
+             -> Eff _ Unit
+elementClick e = runEffFn2 elementClickImpl (toElement e)
 
 
 -- | Attaches two callbacks to the BrowserCanvas click event handler,
@@ -147,25 +157,21 @@ browserOnClick (BrowserCanvas bc) {track, overlay} =
     overlay o
     track t
 
--- | Attaches a callback to a layer by name, if it exists
--- | The callback is a variant whose symbol describes which
--- | browser slot the coordinates are called with
--- | Returns `false` if the layer does not exist
-browserClick :: Warn "TODO implement me!"
-             => BrowserContainer
-             -> String
-             -> Variant (BrowserSlots (Point -> Eff _ Unit))
-             -> Eff _ Boolean
-browserClick (BrowserContainer bc) name cb = do
-  layers <- Ref.readRef bc.layers
-  case Map.lookup name layers of
-    Nothing -> pure false
-    Just l  -> do
-      -- TODO implement me
-      -- 0. precompose callback w/ `slotOffset` to transform coordinates
-      -- 1. add callback to correct layer
-      -- 2. ensure events bubble thru layers
-      pure true
+-- | Attaches a callback to the browsercontainer, to be called when
+-- | the browser element is clicked. The callback is called with
+-- | coordinates relative to the provided component slot.
+browserClickHandler :: ∀ m.
+                       MonadEff _ m
+                    => BrowserContainer
+                    -> Component (Point -> Eff _ Unit)
+                    -> m Unit
+browserClickHandler bc com = liftEff do
+  dims <- getDimensions bc
+
+  let cb = com ^. _Component
+      translate = slotRelative dims (asSlot com)
+
+  elementClick (bc ^. _Container) (cb <<< translate)
 
 
 
