@@ -24,6 +24,7 @@ import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (unwrap, wrap)
 import Data.Number.Format as Num
 import Data.Pair (Pair(..))
+import Data.Record (get)
 import Data.Record as Record
 import Data.Record.Builder (build, insert)
 import Data.Record.Unsafe as Record
@@ -42,7 +43,7 @@ import Graphics.Drawing.Font (font, sansSerif)
 import Math (pow)
 import Math as Math
 import Partial.Unsafe (unsafeCrashWith)
-import Type.Prelude (class RowLacks)
+import Type.Prelude (class IsSymbol, class RowLacks)
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -375,12 +376,12 @@ pixelSegments conf cSys trackDim csView =
        <$> scaledSegments cSys (viewScale trackDim csView)
 
 
-renderTrack :: ∀ b a r.
-               { segmentPadding :: Number | r }
+renderTrack :: ∀ a b r1 r2.
+               { segmentPadding :: Number | r1 }
             -> CoordSys ChrId BigInt
             -> Component (b -> Renderer' a)
             -> Map ChrId (Array a)
-            -> RenderableLayer { config :: b, view :: CoordSysView }
+            -> RenderableLayer { config :: b, view :: CoordSysView | r2 }
 renderTrack conf cSys com trackData =
   let
       segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
@@ -390,6 +391,32 @@ renderTrack conf cSys com trackData =
                       $ Full     $ \c d -> r c.config trackData (segs d c.view) d
         Padded p r -> Layer Scrolling NoMask
                       $ Padded p $ \c d -> r c.config trackData (segs d c.view) d
+        _ -> unsafeCrashWith "renderTrack' does not support UI slots yet"
+
+
+renderTrack' :: ∀ a b l rC r1 r2.
+                IsSymbol l
+             => RowLacks l   r1
+             => RowCons  l b r1 ( view :: CoordSysView | r2 )
+             => { segmentPadding :: Number | rC }
+             -> CoordSys ChrId BigInt
+             -> SProxy l
+             -> Component (b -> Renderer' a)
+             -> Map ChrId (Array a)
+             -> RenderableLayer (Record ( view :: CoordSysView | r2 ))
+renderTrack' conf cSys name com trackData =
+  let
+      segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
+      segs = pixelSegments conf cSys
+  in case com of
+        Full     r ->
+          Layer Scrolling NoMask
+            $ Full     \c d -> r (get name c) trackData (segs d c.view) d
+
+        Padded p r ->
+          Layer Scrolling NoMask
+            $ Padded p \c d -> r (get name c) trackData (segs d c.view) d
+
         _ -> unsafeCrashWith "renderTrack' does not support UI slots yet"
 
 

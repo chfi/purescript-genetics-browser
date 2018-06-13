@@ -44,7 +44,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
 import Genetics.Browser.Canvas (BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, _drawings, _labels, createAndAddLayer, getDimensions)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
@@ -347,20 +347,20 @@ peaks :: ∀ rS.
       -> Array (Peak Bp Number (SNP rS))
 peaks r snps = unfoldr (peak1 r) snps
 
-type DemoAnnotationConfig =
+type AnnotationsConfig =
   { radius    :: Number
   , outline   :: Color
   , snpColor  :: Color
   , geneColor :: Color }
 
-defaultDemoAnnotationConfig :: DemoAnnotationConfig
-defaultDemoAnnotationConfig =
+defaultAnnotationsConfig :: AnnotationsConfig
+defaultAnnotationsConfig =
   { radius:    5.5
   , outline:   black
   , snpColor:  blue
   , geneColor: red }
 
-annotationLegendEntry :: ∀ r. DemoAnnotationConfig -> Annotation r -> LegendEntry
+annotationLegendEntry :: ∀ r. AnnotationsConfig -> Annotation r -> LegendEntry
 annotationLegendEntry conf a =
   let mkIcon color = outlined (outlineColor conf.outline <> lineWidth 2.0)
                   <> filled (fillColor color)
@@ -373,7 +373,7 @@ annotationLegendEntry conf a =
 annotationLegendTest :: ∀ f r.
                    Foldable f
                 => Functor f
-                => DemoAnnotationConfig
+                => AnnotationsConfig
                 -> Map ChrId (f (Annotation r))
                 -> Array LegendEntry
 annotationLegendTest config fs = trackLegend (annotationLegendEntry config) as
@@ -518,7 +518,7 @@ annotationsForScale cSys snps annots =
 renderAnnotationPeaks :: ∀ r r1 r2.
                          CoordSys ChrId BigInt
                       -> { min :: Number, max :: Number | r1 }
-                      -> DemoAnnotationConfig
+                      -> AnnotationsConfig
                       -> Map ChrId (Array (Peak Bp Number (Annotation r2)))
                       -> Canvas.Dimensions
                       -> Map ChrId (Pair Number)
@@ -608,23 +608,23 @@ renderAnnotationPeaks cSys vScale conf annoPks cdim =
               in { drawings, labels }
 
 
-renderAnnotation :: ∀ r r1 r2.
+renderAnnotations :: ∀ r r1 r2.
                     CoordSys _ _
                  -> Map ChrId (Array (SNP ()))
                  -> { threshold :: { min :: Number, max :: Number | r }
-                    , annotationConfig :: DemoAnnotationConfig | r2 }
+                    , annotationsConfig :: AnnotationsConfig | r2 }
                  -> Map ChrId (Array (Annotation r2))
                  -> Map ChrId (Pair Number)
                  -> Canvas.Dimensions
                  -> List Renderable
-renderAnnotation cSys sigSnps conf allAnnots =
+renderAnnotations cSys sigSnps conf allAnnots =
   let features = fold allAnnots
       annoPeaks = annotationsForScale cSys sigSnps allAnnots
 
 
   in \seg size ->
         let {drawings, labels} =
-              renderAnnotationPeaks cSys conf.threshold conf.annotationConfig (annoPeaks seg) size seg
+              renderAnnotationPeaks cSys conf.threshold conf.annotationsConfig (annoPeaks seg) size seg
         in List.fromFoldable
            [ inj _drawings $ drawings
            , inj _labels   $ labels ]
@@ -635,7 +635,7 @@ renderAnnotation cSys sigSnps conf allAnnots =
 
 type BrowserConfig =
   { chrLabelsUI :: { fontSize :: Int }
-  , legend :: DemoAnnotationConfig
+  , legend :: AnnotationsConfig
   , threshold :: { min :: Number, max :: Number, sig :: Number }
   , snpsConfig :: Record (SNPConfig ())
   }
@@ -645,9 +645,16 @@ type Overlaps r = Number -> Point -> Record r
 
 _snps = SProxy :: SProxy "snps"
 
+_annotations = SProxy :: SProxy "annotations"
+
 addDemoLayers :: ∀ r r2.
                 CoordSys ChrId BigInt
-             -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
+             -- -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
+             -> { score :: { min :: Number, max :: Number, sig :: Number }
+                , legend :: _
+                , vscale :: _
+                , snpsConfig :: _
+                , annotationsConfig :: _ | r }
              -> { snps        :: Map ChrId (Array (SNP ()))
                 , annotations :: Map ChrId (Array (Annotation ())) | r2 }
              -> BrowserContainer
@@ -661,7 +668,7 @@ addDemoLayers cSys config trackData =
 
       sigSnps = filterSig config.score trackData.snps
       legend = defaultLegendConfig
-               $ (annotationLegendTest defaultDemoAnnotationConfig)
+               $ (annotationLegendTest defaultAnnotationsConfig)
                   trackData.annotations
 
       conf = { segmentPadding: 12.0 }
@@ -674,19 +681,29 @@ addDemoLayers cSys config trackData =
         renderTrack conf cSys
           (Padded 5.0 $ renderSNPs) trackData.snps
 
+
+      snpLayer' :: RenderableLayer
+                   { snps :: { threshold  :: Threshold
+                             , snpsConfig :: Record (SNPConfig ()) }
+                   , view :: CoordSysView }
+      snpLayer' =
+        renderTrack' conf cSys _snps
+          (Padded 5.0 $ renderSNPs) trackData.snps
+
       annotationLayer :: RenderableLayer
-                         { config :: { threshold :: Threshold
-                                     , annotationConfig :: DemoAnnotationConfig }
+                         { annotations
+                           :: { threshold :: Threshold
+                              , annotationsConfig :: AnnotationsConfig }
                          , view :: CoordSysView }
       annotationLayer =
-        renderTrack conf cSys
-          (Padded 5.0 $ renderAnnotation cSys sigSnps) trackData.annotations
+        renderTrack' conf cSys _annotations
+          (Padded 5.0 $ renderAnnotations cSys sigSnps) trackData.annotations
 
 
   in \bc -> do
     dims <- getDimensions bc
     (Tuple _ renderSNPTrack)  <-
-      createAndAddLayer bc "snps" snpLayer
+      createAndAddLayer bc "snps" snpLayer'
 
     (Tuple _ renderAnnoTrack) <-
       createAndAddLayer bc "annotations" annotationLayer
@@ -699,10 +716,10 @@ addDemoLayers cSys config trackData =
 
     overlapsRef <- Ref.newRef (\_ _ -> { snps: mempty })
 
-    let snpsConfig = defaultSNPConfig
-        annotationConfig = defaultDemoAnnotationConfig
+    -- let snpsConfig = defaultSNPConfig
+    --     annotationConfig = defaultAnnotationConfig
 
-        fixedUI = do
+    let fixedUI = do
           renderVScale 0.0 unit
           renderLegend 0.0 unit
 
@@ -710,12 +727,17 @@ addDemoLayers cSys config trackData =
         overlaps = Ref.readRef overlapsRef
 
         snps :: _
-        snps o v = do
-          renderSNPTrack o { config: {threshold, snpsConfig}, view: v }
+        snps o v =
+          renderSNPTrack o { snps: { threshold
+                                   , snpsConfig: config.snpsConfig }
+                           , view: v }
+          -- renderSNPTrack o { config, view: v }
 
         annotations :: _
         annotations o v =
-          renderAnnoTrack o { config: {threshold, annotationConfig}, view: v }
+          renderAnnoTrack o { config: { threshold
+                                      , annotationsConfig: config.annotationsConfig }
+                            , view: v }
 
 
     pure { snps

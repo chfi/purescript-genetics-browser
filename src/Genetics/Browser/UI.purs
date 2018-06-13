@@ -53,7 +53,7 @@ import Data.Variant as V
 import Genetics.Browser (Peak, RenderedTrack, pixelSegments)
 import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Renderable, TrackPadding, _Dimensions, _Track, browserCanvas, browserClickHandler, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, getDimensions, getLayers, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, zIndexLayers)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
-import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
+import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, SNPConfig, AnnotationsConfig, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(..), Layer(..), browserSlots)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Global.Unsafe (unsafeStringify)
@@ -718,6 +718,8 @@ type Conf = { browserHeight :: Number
             , trackPadding :: TrackPadding
             , score :: { min :: Number, max :: Number, sig :: Number }
             , urls :: DataURLs
+            , snpsConfig        :: { | SNPConfig () }
+            , annotationsConfig :: AnnotationsConfig
             }
 
 foreign import setWindow :: ∀ e a. String -> a -> Eff e Unit
