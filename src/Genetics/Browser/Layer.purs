@@ -4,18 +4,16 @@ import Prelude
 
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff, liftEff)
-import Control.Monad.Eff.Console (log)
 import Data.Foldable (class Foldable, foldlDefault, foldrDefault)
 import Data.Generic.Rep (class Generic)
 import Data.Lens (Getter', to, (^.))
 import Data.Monoid (class Monoid)
-import Data.Newtype (class Newtype)
-import Data.Traversable (class Traversable, sequenceDefault, traverse_)
+import Data.Traversable (class Traversable, sequenceDefault)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Type.Prelude (SProxy(..))
-import Unsafe.Coerce (unsafeCoerce)
+
 
 foreign import setContextTranslation :: ∀ e.
                                         Point

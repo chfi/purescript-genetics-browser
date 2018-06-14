@@ -2,23 +2,24 @@ module Genetics.Browser.Demo where
 
 import Prelude
 
-import Color (Color, black)
+import Color (black)
 import Color.Scheme.Clrs (blue, red)
 import Color.Scheme.X11 (darkblue, darkgrey, lightgrey)
-import Control.Monad.Aff (Aff, error, throwError)
+import Control.Monad.Aff (Aff, error)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Ref as Ref
+import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExcept)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Either (Either(..))
+import Data.Either (Either(Right, Left))
 import Data.Filterable (filter, filterMap, partition, partitionMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldr, length, minimumBy, sequence_)
 import Data.FoldableWithIndex (foldMapWithIndex)
-import Data.Foreign (F, Foreign, ForeignError(..))
+import Data.Foreign (F, Foreign, ForeignError(ForeignError))
 import Data.Foreign (readArray) as Foreign
 import Data.Foreign.Index (readProp) as Foreign
 import Data.Foreign.Keys (keys) as Foreign
@@ -30,13 +31,14 @@ import Data.List (List)
 import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
 import Data.Monoid (mempty)
 import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Profunctor.Strong (fanout)
-import Data.Record.Builder (build, insert, modify)
+import Data.Record (insert) as Record
+import Data.Record.Builder (build, insert, merge, modify)
 import Data.Record.Extra (class Keys)
 import Data.Record.Extra (keys) as Record
 import Data.Traversable (for)
@@ -44,7 +46,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, defaultLegendConfig, defaultVScaleConfig, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
 import Genetics.Browser.Canvas (BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, _drawings, _labels, createAndAddLayer, getDimensions)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
@@ -349,21 +351,21 @@ peaks r snps = unfoldr (peak1 r) snps
 
 type AnnotationsConfig =
   { radius    :: Number
-  , outline   :: Color
-  , snpColor  :: Color
-  , geneColor :: Color }
+  , outline   :: HexColor
+  , snpColor  :: HexColor
+  , geneColor :: HexColor }
 
 defaultAnnotationsConfig :: AnnotationsConfig
 defaultAnnotationsConfig =
   { radius:    5.5
-  , outline:   black
-  , snpColor:  blue
-  , geneColor: red }
+  , outline:   wrap black
+  , snpColor:  wrap blue
+  , geneColor: wrap red }
 
 annotationLegendEntry :: ∀ r. AnnotationsConfig -> Annotation r -> LegendEntry
 annotationLegendEntry conf a =
-  let mkIcon color = outlined (outlineColor conf.outline <> lineWidth 2.0)
-                  <> filled (fillColor color)
+  let mkIcon color = outlined (outlineColor (unwrap conf.outline) <> lineWidth 2.0)
+                  <> filled (fillColor $ unwrap color)
                    $ circle 0.0 0.0 conf.radius
   in case a.feature.gene of
        Nothing -> { text: "SNP name",  icon: mkIcon conf.snpColor  }
@@ -414,34 +416,36 @@ filterSig {sig} = map (filter
 
 
 
-snpsUI :: VScale
+snpsUI :: VScale (VScaleRow ())
        -> RenderableLayer Unit
 snpsUI vscale = renderFixedUI (CLeft $ drawVScaleInSlot vscale)
 
 annotationsUI :: ∀ r.
-                LegendConfig r
+                LegendConfig (entries :: Array LegendEntry | r)
              -> RenderableLayer Unit
 annotationsUI legend = renderFixedUI (CRight $ drawLegendInSlot legend)
 
 
-type SNPConfig r
-  = ( radius :: Number
-    , color :: { outline :: Color
-               , fill    :: Color }
-    , pixelOffset :: Point
-    | r )
 
-defaultSNPConfig :: { | SNPConfig () }
+type SNPConfig
+  = { radius :: Number
+    , lineWidth :: Number
+    , color :: { outline :: HexColor
+               , fill    :: HexColor }
+    , pixelOffset :: Point }
+
+defaultSNPConfig :: SNPConfig
 defaultSNPConfig =
   { radius: 3.75
-  , color: { outline: darkblue, fill: darkblue }
+  , lineWidth: 1.0
+  , color: { outline: wrap darkblue, fill: wrap darkblue }
   , pixelOffset: {x: 0.0, y: 0.0}
   }
 
 
 renderSNPs :: ∀ m r1 r2 r3.
               { threshold  :: { min  :: Number, max :: Number | r1 }
-              , snpsConfig :: { | SNPConfig () } | r2 }
+              , snpsConfig :: SNPConfig }
            -> Map ChrId (Array (SNP ()))
            -> Map ChrId (Pair Number)
            -> Canvas.Dimensions
@@ -456,8 +460,9 @@ renderSNPs { snpsConfig, threshold } snpData =
       drawing =
           let {x,y} = snps.pixelOffset
               c     = circle x y radius
-              out   = outlined (outlineColor snps.color.outline) c
-              fill  = filled   (fillColor    snps.color.fill)    c
+              out   = outlined (outlineColor (unwrap snps.color.outline) <>
+                                lineWidth snps.lineWidth) c
+              fill  = filled   (fillColor    $ unwrap snps.color.fill)    c
           in out <> fill
 
       drawings :: Array (Tuple (SNP ()) Point) -> Array DrawingN
@@ -637,7 +642,7 @@ type BrowserConfig =
   { chrLabelsUI :: { fontSize :: Int }
   , legend :: AnnotationsConfig
   , threshold :: { min :: Number, max :: Number, sig :: Number }
-  , snpsConfig :: Record (SNPConfig ())
+  , snpsConfig :: SNPConfig
   }
 
 -- In the future, this will be handled with a type class, by the compiler
@@ -651,10 +656,10 @@ addDemoLayers :: ∀ r r2.
                 CoordSys ChrId BigInt
              -- -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
              -> { score :: { min :: Number, max :: Number, sig :: Number }
-                , legend :: _
-                , vscale :: _
-                , snpsConfig :: _
-                , annotationsConfig :: _ | r }
+                , legend :: LegendConfig ()
+                , vscale :: VScale ()
+                , snpsConfig :: SNPConfig
+                , annotationsConfig :: AnnotationsConfig | r }
              -> { snps        :: Map ChrId (Array (SNP ()))
                 , annotations :: Map ChrId (Array (Annotation ())) | r2 }
              -> BrowserContainer
@@ -664,18 +669,18 @@ addDemoLayers :: ∀ r r2.
                       , overlaps :: Eff _ (Overlaps (snps :: Array (SNP ()))) }
 addDemoLayers cSys config trackData =
   let threshold = config.score
-      vscale = defaultVScaleConfig threshold
+      vscale = build (merge config.vscale) threshold
 
       sigSnps = filterSig config.score trackData.snps
-      legend = defaultLegendConfig
-               $ (annotationLegendTest defaultAnnotationsConfig)
-                  trackData.annotations
+      legend = Record.insert (SProxy :: SProxy "entries")
+               (annotationLegendTest config.annotationsConfig
+                 trackData.annotations) config.legend
 
       conf = { segmentPadding: 12.0 }
 
       snpLayer :: RenderableLayer
                   { config :: { threshold  :: Threshold
-                              , snpsConfig :: Record (SNPConfig ()) }
+                              , snpsConfig :: SNPConfig }
                   , view :: CoordSysView }
       snpLayer =
         renderTrack conf cSys
@@ -684,7 +689,7 @@ addDemoLayers cSys config trackData =
 
       snpLayer' :: RenderableLayer
                    { snps :: { threshold  :: Threshold
-                             , snpsConfig :: Record (SNPConfig ()) }
+                             , snpsConfig :: SNPConfig }
                    , view :: CoordSysView }
       snpLayer' =
         renderTrack' conf cSys _snps
@@ -731,11 +736,10 @@ addDemoLayers cSys config trackData =
           renderSNPTrack o { snps: { threshold
                                    , snpsConfig: config.snpsConfig }
                            , view: v }
-          -- renderSNPTrack o { config, view: v }
 
         annotations :: _
         annotations o v =
-          renderAnnoTrack o { config: { threshold
+          renderAnnoTrack o { annotations: { threshold
                                       , annotationsConfig: config.annotationsConfig }
                             , view: v }
 

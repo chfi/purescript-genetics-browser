@@ -23,7 +23,7 @@ import Data.Either (Either(..))
 import Data.Filterable (filterMap)
 import Data.Foldable (any, foldl, for_, length)
 import Data.Int as Int
-import Data.Lens (Getter', Lens', Prism', iso, preview, prism', re, to, view, (^.), (^?))
+import Data.Lens (Getter', Lens', Prism', iso, preview, prism', to, view, (^.))
 import Data.Lens.Iso (Iso')
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Record as Lens
@@ -31,7 +31,7 @@ import Data.List (List)
 import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe(Nothing, Just), fromMaybe, maybe)
+import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
 import Data.Monoid (mempty)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Nullable (Nullable, toMaybe)
@@ -41,8 +41,7 @@ import Data.Traversable (traverse, traverse_)
 import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
-import Debug.Trace as Debug
-import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, BrowserSlots, Component(..), Layer(Layer), LayerType(Scrolling, Fixed), _Component, asSlot, browserSlots, setContextTranslation, slotContext, slotOffset, slotRelative)
+import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, Component(CBottom, CRight, CLeft, CTop, Padded, Full), Layer(Layer), LayerType(Scrolling, Fixed), _Component, asSlot, browserSlots, setContextTranslation, slotContext, slotRelative)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)

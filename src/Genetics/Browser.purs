@@ -3,15 +3,19 @@ module Genetics.Browser where
 import Prelude
 
 import Color (Color, black, white)
+import Color as Color
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff, liftEff)
 import Control.Monad.Eff.Ref as Ref
+import Control.Monad.Except (except)
 import Control.Monad.Reader (class MonadReader, ask)
 import Data.Array ((..))
 import Data.Array as Array
 import Data.BigInt (BigInt)
+import Data.Either (note)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length)
 import Data.FoldableWithIndex (foldMapWithIndex)
+import Data.Foreign (F, Foreign, ForeignError(..), readString)
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
@@ -21,7 +25,7 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe)
 import Data.Monoid (class Monoid, mempty)
-import Data.Newtype (unwrap, wrap)
+import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Number.Format as Num
 import Data.Pair (Pair(..))
 import Data.Record (get)
@@ -43,6 +47,7 @@ import Graphics.Drawing.Font (font, sansSerif)
 import Math (pow)
 import Math as Math
 import Partial.Unsafe (unsafeCrashWith)
+import Simple.JSON (class ReadForeign)
 import Type.Prelude (class IsSymbol, class RowLacks)
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -126,7 +131,6 @@ chrLabelTrack {fontSize} cs =
   in mapWithIndex (\i _ -> [mkLabel i]) $ cs ^. _Segments
 
 
-
 -- boxesTrack :: Number
 --            -> CoordSys ChrId BigInt
 --            -> Canvas.Dimensions
@@ -142,6 +146,20 @@ chrLabelTrack {fontSize} cs =
 --              in outlined (outlineColor black <> lineWidth 1.5) rect
 
 
+newtype HexColor = HexColor Color
+
+derive instance newtypeHexColor :: Newtype HexColor _
+
+instance readforeignHexColor :: ReadForeign HexColor where
+  readImpl = map wrap <$> parseColor
+
+
+parseColor :: Foreign -> F Color
+parseColor = readColor <=< readString
+  where readColor c =
+          except
+           $ note (pure $ JSONError "Could not parse color: expected hex string")
+           $ Color.fromHexString c
 
 
 type VScaleRow r = ( min :: Number
@@ -151,20 +169,20 @@ type VScaleRow r = ( min :: Number
 
 type Threshold = Record (VScaleRow ())
 
-type VScale = { color :: Color
-              , hPad :: Number
-              , numSteps :: Int
-              | VScaleRow () }
+type VScale r = { color :: HexColor
+                , hPad :: Number
+                , numSteps :: Int
+                | r }
 
 defaultVScaleConfig :: Record (VScaleRow ())
-                    -> VScale
+                    -> VScale (VScaleRow ())
 defaultVScaleConfig =
-  build (insert (SProxy :: SProxy "color")    black
+  build (insert (SProxy :: SProxy "color")    (wrap black)
      >>> insert (SProxy :: SProxy "hPad")     0.125
      >>> insert (SProxy :: SProxy "numSteps") 3)
 
 
-drawVScaleInSlot :: VScale
+drawVScaleInSlot :: VScale (VScaleRow ())
                  -> Canvas.Dimensions
                  -> Drawing
 drawVScaleInSlot vscale size =
@@ -179,7 +197,7 @@ drawVScaleInSlot vscale size =
       spokes = (_ / (Int.toNumber numSteps))
                <<< Int.toNumber <$> (0 .. numSteps)
 
-      barOutline = outlineColor vscale.color <> lineWidth 2.0
+      barOutline = outlineColor (unwrap vscale.color) <> lineWidth 2.0
 
       vBar = Drawing.path [{x, y: 0.0}, {x, y: size.height}]
 
@@ -222,20 +240,18 @@ drawLegendItem {text, icon} =
 
 
 type LegendConfig r =
-  { entries :: Array LegendEntry
-  , hPad :: Number, vPad :: Number
+  { hPad :: Number, vPad :: Number
   , fontSize :: Int | r }
 
-defaultLegendConfig :: Array LegendEntry -> LegendConfig ()
-defaultLegendConfig entries =
-  { entries
-  , hPad: 0.2, vPad: 0.2
+defaultLegendConfig :: LegendConfig ()
+defaultLegendConfig =
+  { hPad: 0.2, vPad: 0.2
   , fontSize: 12 }
 
 
 
 drawLegendInSlot :: ∀ r.
-                    LegendConfig r
+                    LegendConfig (entries :: Array LegendEntry | r)
                  -> Canvas.Dimensions
                  -> Drawing
 drawLegendInSlot c@{entries} size =
