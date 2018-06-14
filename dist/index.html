@@ -47,7 +47,26 @@
           left: vscaleWidth,
           right: legendWidth },
         score: { min: 0.0, max: 30.0, sig: 4 },
-        urls: localUrls
+        urls: localUrls,
+        snpsConfig:
+        { radius: 3.75,
+          lineWidth: 1.0,
+          color: { outline: "#FFFFFF",
+                   fill:    "#00008B" },
+          pixelOffset: {x: 0.0, y: 0.0} },
+        annotationsConfig:
+        { radius: 5.5,
+          outline:   "#000000",
+          snpColor:  "#0074D9",
+          geneColor: "#FF4136" },
+        legend:
+        { fontSize: 12,
+          hPad: 0.2,
+          vPad: 0.2 },
+        vscale:
+        { color: "#000000",
+          hPad: 0.125,
+          numSteps: 3 }
       };
 
       GGB.main(config)();

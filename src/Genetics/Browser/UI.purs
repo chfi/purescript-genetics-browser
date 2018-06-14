@@ -50,7 +50,7 @@ import Data.Traversable (for_, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
-import Genetics.Browser (Peak, RenderedTrack, pixelSegments)
+import Genetics.Browser (LegendConfig, Peak, RenderedTrack, VScale, pixelSegments)
 import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Renderable, TrackPadding, _Dimensions, _Track, browserCanvas, browserClickHandler, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, getDimensions, getLayers, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, zIndexLayers)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, SNPConfig, AnnotationsConfig, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
@@ -194,10 +194,11 @@ type BrowserInterface' e
     }
 
 
-initializeBrowser' :: CoordSys _ _
+initializeBrowser' :: ∀ r.
+                      CoordSys _ _
                    -> { snps        :: Number -> CoordSysView -> Eff _ Unit
                       , annotations :: Number -> CoordSysView -> Eff _ Unit
-                      , fixedUI     :: Eff _ Unit }
+                      , fixedUI     :: Eff _ Unit | r}
                   -> CoordSysView
                   -> BrowserContainer
                   -> Aff _ (BrowserInterface' _)
@@ -714,13 +715,17 @@ type DataURLs = { snps        :: Maybe String
                 }
 
 
-type Conf = { browserHeight :: Number
-            , trackPadding :: TrackPadding
-            , score :: { min :: Number, max :: Number, sig :: Number }
-            , urls :: DataURLs
-            , snpsConfig        :: { | SNPConfig () }
-            , annotationsConfig :: AnnotationsConfig
-            }
+
+type Conf =
+  { browserHeight :: Number
+  , trackPadding :: TrackPadding
+  , score :: { min :: Number, max :: Number, sig :: Number }
+  , urls :: DataURLs
+  , snpsConfig        :: SNPConfig
+  , annotationsConfig :: AnnotationsConfig
+  , legend :: LegendConfig ()
+  , vscale :: VScale ()
+  }
 
 foreign import setWindow :: ∀ e a. String -> a -> Eff e Unit
 
