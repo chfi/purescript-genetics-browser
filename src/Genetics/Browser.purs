@@ -4,16 +4,20 @@ import Prelude
 
 import Color (Color, black, white)
 import Color as Color
+import Color.Scheme.Clrs (gray)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff, liftEff)
 import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Except (except)
 import Control.Monad.Reader (class MonadReader, ask)
+import Control.Monad.State (State, evalState, runState)
+import Control.Monad.State.Class as State
 import Data.Array ((..))
 import Data.Array as Array
+import Data.Bifunctor (lmap)
 import Data.BigInt (BigInt)
 import Data.Either (note)
-import Data.Foldable (class Foldable, fold, foldMap, foldl, length)
+import Data.Foldable (class Foldable, fold, foldMap, foldl, foldr, length)
 import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.Foreign (F, Foreign, ForeignError(..), readString)
 import Data.Function (on)
@@ -25,6 +29,7 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe)
 import Data.Monoid (class Monoid, mempty)
+import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Number.Format as Num
 import Data.Pair (Pair(..))
@@ -33,15 +38,18 @@ import Data.Record as Record
 import Data.Record.Builder (build, insert)
 import Data.Record.Unsafe as Record
 import Data.Symbol (class IsSymbol, SProxy(SProxy), reflectSymbol)
+import Data.Traversable (scanr, traverse)
+import Data.Tuple (Tuple(..), snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
+import Debug.Trace as Debug
 import Genetics.Browser.Cached (Cached, cache)
 import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, Renderable, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), RenderableLayer, _Dimensions, _Track, _static)
 import Genetics.Browser.Canvas (uiSlots) as Canvas
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, scaledSegments, viewScale)
 import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerType(..))
-import Genetics.Browser.Types (Bp, ChrId, _exp)
+import Genetics.Browser.Types (Bp, ChrId, _exp, _fixed)
 import Graphics.Canvas (Dimensions) as Canvas
-import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
+import Graphics.Drawing (Drawing, Point, Shape, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math (pow)
@@ -131,19 +139,31 @@ chrLabelTrack {fontSize} cs =
   in mapWithIndex (\i _ -> [mkLabel i]) $ cs ^. _Segments
 
 
--- boxesTrack :: Number
---            -> CoordSys ChrId BigInt
---            -> Canvas.Dimensions
---            -> Pair BigInt -> CanvasReadyDrawing
--- boxesTrack h cs = unsafeCoerce unit
--- boxesTrack h cs = drawRelativeUI cs $ map (const [glyph]) $ cs ^. _BrowserIntervals
---   where glyph :: NormalizedGlyph
---         glyph = { drawing: inj _range draw
---                 , horPos:  inj _range $ Normalized <$> (Pair zero one)
---                 , verPos: aone }
---         draw = \w ->
---              let rect = rectangle 0.0 0.0 w h
---              in outlined (outlineColor black <> lineWidth 1.5) rect
+chrBackgroundLayer :: ∀ r a.
+                      { bg1 :: HexColor
+                      , bg2 :: HexColor
+                      , segmentPadding :: Number | r }
+                   -> Map ChrId a
+                   -> Map ChrId (Pair Number)
+                   -> Canvas.Dimensions
+                   -> List Renderable
+chrBackgroundLayer conf _ seg size =
+  let col c = if c then black else gray
+
+      segBG :: Pair Number -> State Boolean (Tuple Color Shape)
+      segBG (Pair l r) = do
+        curSeg <- State.get
+        State.modify not
+        pure $ Tuple
+          (unwrap $ if curSeg then conf.bg1
+                              else conf.bg2)
+          (Drawing.rectangle
+             (l   -     conf.segmentPadding) (-5.0)
+             (r-l + 2.0*conf.segmentPadding) (size.height+10.0))
+
+  in map (inj _static
+          <<< uncurry \c s -> filled (fillColor c) s)
+     $ evalState (traverse segBG $ Map.values seg) false
 
 
 newtype HexColor = HexColor Color
@@ -369,16 +389,22 @@ type RenderedTrack a = { features :: Array a
                        , overlaps :: Number -> Point -> Array a }
 
 
-type Renderer a =
+type RendererOld a =
      Canvas.Dimensions
   -> Map ChrId (Array a)
   -> Map ChrId (Pair Number)
   -> RenderedTrack a
 
-type Renderer' a = Map ChrId (Array a)
-                -> Map ChrId (Pair Number)
-                -> Canvas.Dimensions
-                -> List Renderable
+type RendererPlain =
+     Map ChrId (Pair Number)
+  -> Canvas.Dimensions
+  -> List Renderable
+
+type Renderer a =
+     Map ChrId (Array a)
+  -> Map ChrId (Pair Number)
+  -> Canvas.Dimensions
+  -> List Renderable
 
 
 pixelSegments :: ∀ r c.
@@ -395,7 +421,7 @@ pixelSegments conf cSys trackDim csView =
 renderTrack :: ∀ a b r1 r2.
                { segmentPadding :: Number | r1 }
             -> CoordSys ChrId BigInt
-            -> Component (b -> Renderer' a)
+            -> Component (b -> Renderer a)
             -> Map ChrId (Array a)
             -> RenderableLayer { config :: b, view :: CoordSysView | r2 }
 renderTrack conf cSys com trackData =
@@ -417,7 +443,7 @@ renderTrack' :: ∀ a b l rC r1 r2.
              => { segmentPadding :: Number | rC }
              -> CoordSys ChrId BigInt
              -> SProxy l
-             -> Component (b -> Renderer' a)
+             -> Component (b -> Renderer a)
              -> Map ChrId (Array a)
              -> RenderableLayer (Record ( view :: CoordSysView | r2 ))
 renderTrack' conf cSys name com trackData =

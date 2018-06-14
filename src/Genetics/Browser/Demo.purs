@@ -3,7 +3,7 @@ module Genetics.Browser.Demo where
 import Prelude
 
 import Color (black)
-import Color.Scheme.Clrs (blue, red)
+import Color.Scheme.Clrs (blue, gray, red)
 import Color.Scheme.X11 (darkblue, darkgrey, lightgrey)
 import Control.Monad.Aff (Aff, error)
 import Control.Monad.Eff (Eff)
@@ -46,7 +46,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor, LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
 import Genetics.Browser.Canvas (BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, _drawings, _labels, createAndAddLayer, getDimensions)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
@@ -665,6 +665,7 @@ addDemoLayers :: ∀ r r2.
              -> BrowserContainer
              -> Eff _ { snps        :: Number -> CoordSysView -> Eff _ Unit
                       , annotations :: Number -> CoordSysView -> Eff _ Unit
+                      , background  :: Number -> CoordSysView -> Eff _ Unit
                       , fixedUI  :: Eff _ Unit
                       , overlaps :: Eff _ (Overlaps (snps :: Array (SNP ()))) }
 addDemoLayers cSys config trackData =
@@ -676,22 +677,22 @@ addDemoLayers cSys config trackData =
                (annotationLegendTest config.annotationsConfig
                  trackData.annotations) config.legend
 
-      conf = { segmentPadding: 12.0 }
+      segmentPadding = 12.0
+      conf = { segmentPadding }
+
+      padded = Padded 15.0
+
+      bgLayer :: RenderableLayer _
+      bgLayer =
+        renderTrack conf cSys
+          (Padded 5.0 $ chrBackgroundLayer) trackData.snps
+
 
       snpLayer :: RenderableLayer
-                  { config :: { threshold  :: Threshold
-                              , snpsConfig :: SNPConfig }
+                  { snps :: { threshold  :: Threshold
+                            , snpsConfig :: SNPConfig }
                   , view :: CoordSysView }
       snpLayer =
-        renderTrack conf cSys
-          (Padded 5.0 $ renderSNPs) trackData.snps
-
-
-      snpLayer' :: RenderableLayer
-                   { snps :: { threshold  :: Threshold
-                             , snpsConfig :: SNPConfig }
-                   , view :: CoordSysView }
-      snpLayer' =
         renderTrack' conf cSys _snps
           (Padded 5.0 $ renderSNPs) trackData.snps
 
@@ -707,8 +708,12 @@ addDemoLayers cSys config trackData =
 
   in \bc -> do
     dims <- getDimensions bc
+
+    (Tuple _ renderChrBG)  <-
+      createAndAddLayer bc "chrBackground" bgLayer
+
     (Tuple _ renderSNPTrack)  <-
-      createAndAddLayer bc "snps" snpLayer'
+      createAndAddLayer bc "snps" snpLayer
 
     (Tuple _ renderAnnoTrack) <-
       createAndAddLayer bc "annotations" annotationLayer
@@ -721,15 +726,18 @@ addDemoLayers cSys config trackData =
 
     overlapsRef <- Ref.newRef (\_ _ -> { snps: mempty })
 
-    -- let snpsConfig = defaultSNPConfig
-    --     annotationConfig = defaultAnnotationConfig
-
     let fixedUI = do
           renderVScale 0.0 unit
           renderLegend 0.0 unit
 
         -- TODO very unfinished
         overlaps = Ref.readRef overlapsRef
+
+        background :: _
+        background o v =
+          renderChrBG o { config: { bg1: HexColor black, bg2: HexColor gray
+                                  , segmentPadding }
+                        , view: v }
 
         snps :: _
         snps o v =
@@ -746,6 +754,7 @@ addDemoLayers cSys config trackData =
 
     pure { snps
          , annotations
+         , background
          , fixedUI
          , overlaps
          }

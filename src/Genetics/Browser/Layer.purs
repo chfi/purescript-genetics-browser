@@ -209,8 +209,8 @@ slotContext com dims el = liftEff do
     Full     _ -> pure ctx
     Padded r _ -> do
       -- the `r` padding is *not* part of the BrowserDimensions; it's just cosmetic
-      setContextTranslation { x: slots.padded.offset.x + r
-                            , y: slots.padded.offset.y + r } ctx
+      setContextTranslation { x: slots.padded.offset.x
+                            , y: slots.padded.offset.y } ctx
       pure ctx
     CTop     _ -> do
       setContextTranslation { x: slots.top.offset.x

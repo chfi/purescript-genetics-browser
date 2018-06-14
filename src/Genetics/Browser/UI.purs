@@ -198,6 +198,7 @@ initializeBrowser' :: ∀ r.
                       CoordSys _ _
                    -> { snps        :: Number -> CoordSysView -> Eff _ Unit
                       , annotations :: Number -> CoordSysView -> Eff _ Unit
+                      , background  :: Number -> CoordSysView -> Eff _ Unit
                       , fixedUI     :: Eff _ Unit | r}
                   -> CoordSysView
                   -> BrowserContainer
@@ -258,6 +259,7 @@ initializeBrowser' cSys renderFuns initView bc = do
           log $ "rendering with offset: " <> show offset
           log <<< show =<< Map.keys <$> getLayers bc
 
+          renderFuns.background  offset csView
           renderFuns.annotations offset csView
           renderFuns.snps        offset csView
           renderFuns.fixedUI
@@ -623,6 +625,8 @@ runBrowser config bc = launchAff $ do
 
   browser <-
     initializeBrowser' cSys render (wrap $ Pair zero (cSys^._TotalSize)) bc
+
+  -- zI
 
   browserClickHandler bc
     $ Padded 5.0 \pt -> do
