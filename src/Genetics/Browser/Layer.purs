@@ -10,7 +10,7 @@ import Data.Lens (Getter', to, (^.))
 import Data.Monoid (class Monoid)
 import Data.Traversable (class Traversable, sequenceDefault)
 import Data.Variant (Variant, case_, inj, onMatch)
-import Graphics.Canvas (CanvasElement, Context2D)
+import Graphics.Canvas (CanvasElement, Context2D, beginPath, clip, closePath, lineTo, moveTo)
 import Graphics.Canvas as Canvas
 import Type.Prelude (SProxy(..))
 
@@ -194,15 +194,23 @@ browserSlots {size,padding} =
 -- | canvas context that has been translated to the relevant slot
 slotContext :: ∀ m a.
                 MonadEff _ m
-             => Component a
+             => Layer a
              -> BrowserDimensions
              -> CanvasElement
              -> m Context2D
-slotContext com dims el = liftEff do
+slotContext (Layer _ mask com) dims el = liftEff do
 
   ctx <- Canvas.getContext2D el
 
   let slots = browserSlots dims
+      clipMask p0 p1 = do
+        _ <- beginPath ctx
+        _ <- moveTo ctx p0.x p0.y
+        _ <- lineTo ctx p1.x p0.y
+        _ <- lineTo ctx p1.x p1.y
+        _ <- lineTo ctx p0.x p1.y
+        _ <- clip ctx
+        void $ closePath ctx
 
   -- TODO handle masking etc.
   case com of
@@ -211,6 +219,11 @@ slotContext com dims el = liftEff do
       -- the `r` padding is *not* part of the BrowserDimensions; it's just cosmetic
       setContextTranslation { x: slots.padded.offset.x
                             , y: slots.padded.offset.y } ctx
+      when (mask == Masked)
+        $ clipMask { x: -r, y: -r }
+                   { x: slots.padded.size.width  + r
+                   , y: slots.padded.size.height + r }
+
       pure ctx
     CTop     _ -> do
       setContextTranslation { x: slots.top.offset.x

@@ -929,13 +929,13 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
               CRight   _ -> slots'.right.size
               CBottom  _ -> slots'.bottom.size
 
-        layers <- liftEff $ Ref.readRef layerRef
+        layers <- getLayers bc
 
         -- TODO handle exceptions!!! :|
         el  <- case Map.lookup name layers of
                  Nothing -> unsafeCrashWith $ "Tried to render layer '" <> name <> "', but it did not exist!"
                  Just e  -> pure $ e ^. _FrontCanvas
-        ctx <- slotContext com dims el
+        ctx <- slotContext layer dims el
         liftEff $ Canvas.withContext ctx do
           setContextTranslation {x: zero, y: zero} ctx
           void $ Canvas.clearRect ctx { x: 0.0, y: 0.0

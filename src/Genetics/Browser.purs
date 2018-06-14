@@ -431,7 +431,7 @@ renderTrack conf cSys com trackData =
   in case com of
         Full     r -> Layer Scrolling NoMask
                       $ Full     $ \c d -> r c.config trackData (segs d c.view) d
-        Padded p r -> Layer Scrolling NoMask
+        Padded p r -> Layer Scrolling Masked
                       $ Padded p $ \c d -> r c.config trackData (segs d c.view) d
         _ -> unsafeCrashWith "renderTrack' does not support UI slots yet"
 
@@ -456,7 +456,7 @@ renderTrack' conf cSys name com trackData =
             $ Full     \c d -> r (get name c) trackData (segs d c.view) d
 
         Padded p r ->
-          Layer Scrolling NoMask
+          Layer Scrolling Masked
             $ Padded p \c d -> r (get name c) trackData (segs d c.view) d
 
         _ -> unsafeCrashWith "renderTrack' does not support UI slots yet"
