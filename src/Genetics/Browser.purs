@@ -16,6 +16,7 @@ import Data.Array ((..))
 import Data.Array as Array
 import Data.Bifunctor (lmap)
 import Data.BigInt (BigInt)
+import Data.BigInt as BigInt
 import Data.Either (note)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, foldr, length)
 import Data.FoldableWithIndex (foldMapWithIndex)
@@ -43,9 +44,9 @@ import Data.Tuple (Tuple(..), snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Debug.Trace as Debug
 import Genetics.Browser.Cached (Cached, cache)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, Renderable, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), RenderableLayer, _Dimensions, _Track, _static)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, Renderable, RenderableLayer, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), _Dimensions, _Track, _drawings, _static)
 import Genetics.Browser.Canvas (uiSlots) as Canvas
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, scaledSegments, viewScale)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, scaledSegments, viewScale, xPerPixel)
 import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerType(..))
 import Genetics.Browser.Types (Bp, ChrId, _exp, _fixed)
 import Graphics.Canvas (Dimensions) as Canvas
@@ -137,6 +138,40 @@ chrLabelTrack {fontSize} cs =
                     , verPos: Normalized (0.03) }
 
   in mapWithIndex (\i _ -> [mkLabel i]) $ cs ^. _Segments
+
+
+
+chrLabels :: ∀ r1 r2 a.
+               { segmentPadding :: Number | r1 }
+            -> CoordSys ChrId BigInt
+            -> RenderableLayer { view :: CoordSysView | r2 }
+chrLabels conf cSys =
+  let labelSeg :: _
+               -> CoordSysView
+               -> Tuple ChrId (Pair Number)
+               -> Array { drawing :: _, points :: _ }
+      labelSeg d v (Tuple c s@(Pair l r)) = pure {drawing, points}
+        where drawing = mempty
+              points  = mempty
+              viewPx = viewPixels d v
+
+
+      viewPixels :: _ -> CoordSysView -> Pair Number
+      viewPixels d v = let s = viewScale d v
+                           v' = map BigInt.toNumber $ unwrap v
+                       in (_ * xPerPixel s) <$> v'
+
+      segs :: Canvas.Dimensions
+           -> CoordSysView
+           -> List (Tuple ChrId (Pair Number))
+      segs = (map <<< map) Map.toUnfoldable
+             $ pixelSegments conf cSys
+
+  in Layer Scrolling Masked
+     $ (CBottom \ {view} dim ->
+         map (inj _drawings <<< labelSeg dim view ) (segs dim view))
+
+
 
 
 chrBackgroundLayer :: ∀ r a.

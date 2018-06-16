@@ -2,9 +2,9 @@ module Genetics.Browser.Demo where
 
 import Prelude
 
-import Color (black)
+import Color (black, white)
 import Color.Scheme.Clrs (blue, gray, red)
-import Color.Scheme.X11 (darkblue, darkgrey, lightgrey)
+import Color.Scheme.X11 (darkblue, darkgrey, lightgray, lightgrey)
 import Control.Monad.Aff (Aff, error)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
@@ -735,7 +735,7 @@ addDemoLayers cSys config trackData =
 
         background :: _
         background o v =
-          rBG.render { config: { bg1: HexColor black, bg2: HexColor gray
+          rBG.render { config: { bg1: HexColor white, bg2: HexColor lightgray
                                , segmentPadding }
                      , view: v } >>= rBG.drawOnCanvas o
 
