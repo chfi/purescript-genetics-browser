@@ -709,47 +709,49 @@ addDemoLayers cSys config trackData =
   in \bc -> do
     dims <- getDimensions bc
 
-    (Tuple _ renderChrBG)  <-
+    rBG  <-
       createAndAddLayer bc "chrBackground" bgLayer
 
-    (Tuple _ renderSNPTrack)  <-
+    rSNPs  <-
       createAndAddLayer bc "snps" snpLayer
 
-    (Tuple _ renderAnnoTrack) <-
+    rAnnos <-
       createAndAddLayer bc "annotations" annotationLayer
 
-    (Tuple _ renderVScale) <-
+    rVScale <-
       createAndAddLayer bc "vscale" $ snpsUI vscale
 
-    (Tuple _ renderLegend) <-
+    rLegend <-
       createAndAddLayer bc "legend" $ annotationsUI legend
 
     overlapsRef <- Ref.newRef (\_ _ -> { snps: mempty })
 
     let fixedUI = do
-          renderVScale 0.0 unit
-          renderLegend 0.0 unit
+          rVScale.render unit >>= rVScale.drawOnCanvas 0.0
+          rLegend.render unit >>= rLegend.drawOnCanvas 0.0
 
         -- TODO very unfinished
         overlaps = Ref.readRef overlapsRef
 
         background :: _
         background o v =
-          renderChrBG o { config: { bg1: HexColor black, bg2: HexColor gray
-                                  , segmentPadding }
-                        , view: v }
+          rBG.render { config: { bg1: HexColor black, bg2: HexColor gray
+                               , segmentPadding }
+                     , view: v } >>= rBG.drawOnCanvas o
 
         snps :: _
-        snps o v =
-          renderSNPTrack o { snps: { threshold
-                                   , snpsConfig: config.snpsConfig }
-                           , view: v }
+        snps o v = do
+          snpsDrawings <-
+            rSNPs.render { snps: { threshold
+                                 , snpsConfig: config.snpsConfig }
+                         , view: v }
+          rSNPs.drawOnCanvas o snpsDrawings
 
         annotations :: _
         annotations o v =
-          renderAnnoTrack o { annotations: { threshold
-                                      , annotationsConfig: config.annotationsConfig }
-                            , view: v }
+          rAnnos.render { annotations: { threshold
+                                , annotationsConfig: config.annotationsConfig }
+                 , view: v } >>= rAnnos.drawOnCanvas o
 
 
     pure { snps

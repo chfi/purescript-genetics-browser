@@ -882,13 +882,13 @@ type RenderableLayer c = Layer (c -> Canvas.Dimensions -> List Renderable)
 -- | Provided a BrowserContainer, we can initialize and add a named layer.
 -- | This returns a function that can be used to render to the layer maybe idk????
 -- | If the layer already existed, overwrites it
-
 createAndAddLayer :: ∀ m c.
                      MonadEff _ m
                   => BrowserContainer
                   -> String
                   -> RenderableLayer c
-                  -> m (Tuple String (Number -> c -> m Unit))
+                  -> m { render :: c -> m (List Renderable)
+                       , drawOnCanvas :: Number -> List Renderable -> m Unit }
 createAndAddLayer bc name layer@(Layer lt _ com) = do
 
   dims <- getDimensions bc
@@ -913,8 +913,8 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 
   -- 3. create the rendering function
   let
-      render :: Number -> c -> m Unit
-      render offset c = do
+      render :: c -> m (List Renderable)
+      render c = do
         dims <- getDimensions bc
 
         let
@@ -929,6 +929,11 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
               CRight   _ -> slots'.right.size
               CBottom  _ -> slots'.bottom.size
 
+        pure toRender
+
+
+      drawOnCanvas :: Number -> List Renderable -> m Unit
+      drawOnCanvas offset renderables = do
         layers <- getLayers bc
 
         -- TODO handle exceptions!!! :|
@@ -943,9 +948,8 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
                                       , h: slots.full.size.height }
 
         -- temporary hack to offset scrolling tracks as needed
+
         _ <- liftEff $ Canvas.translate { translateX: -offset, translateY: 0.0 } ctx
-
-
         -- use the List Renderable to draw to the canvas
         let
             static :: Drawing -> m _
@@ -964,7 +968,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
               log "drawing labels"
               renderLabels ls ctx
 
-        for_ toRender
+        for_ renderables
           $ case_ # onMatch { static, drawings, labels }
 
-  pure $ Tuple name render
+  pure { render, drawOnCanvas }
