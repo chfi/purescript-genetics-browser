@@ -869,7 +869,6 @@ type Renderable =
 _static   = SProxy :: SProxy "static"
 _drawings = SProxy :: SProxy "drawings"
 _labels   = SProxy :: SProxy "labels"
-_overlaps = SProxy :: SProxy "overlaps"
 
 type RenderableLayer c = Layer (c -> Canvas.Dimensions -> List Renderable)
 

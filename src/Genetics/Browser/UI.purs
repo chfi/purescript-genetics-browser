@@ -198,7 +198,7 @@ initializeBrowser' :: ∀ r.
                       CoordSys _ _
                    -> { snps        :: Number -> CoordSysView -> Eff _ Unit
                       , annotations :: Number -> CoordSysView -> Eff _ Unit
-                      , background  :: Number -> CoordSysView -> Eff _ Unit
+                      , chrs        :: Number -> CoordSysView -> Eff _ Unit
                       , fixedUI     :: Eff _ Unit | r}
                   -> CoordSysView
                   -> BrowserContainer
@@ -245,7 +245,9 @@ initializeBrowser' cSys renderFuns initView bc = do
         -- toRender <- drawCachedBrowser canvas csView
 
         currentDims <- getDimensions canvas
-        let currentScale = viewScale currentDims.size csView
+
+        let trackDims = _.padded $ browserSlots currentDims
+            currentScale = viewScale trackDims.size csView
             offset = scaleToScreen  currentScale (Pair.fst $ unwrap $ csView)
 
                           -- offset the click by the current canvas translation
@@ -259,7 +261,7 @@ initializeBrowser' cSys renderFuns initView bc = do
           log $ "rendering with offset: " <> show offset
           log <<< show =<< Map.keys <$> getLayers bc
 
-          renderFuns.background  offset csView
+          renderFuns.chrs        offset csView
           renderFuns.annotations offset csView
           renderFuns.snps        offset csView
           renderFuns.fixedUI

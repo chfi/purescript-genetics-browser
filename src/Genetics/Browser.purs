@@ -24,7 +24,8 @@ import Data.Foreign (F, Foreign, ForeignError(..), readString)
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens ((^.))
+import Data.Lens (view, (^.))
+import Data.Lens as Lens
 import Data.List (List)
 import Data.Map (Map)
 import Data.Map as Map
@@ -44,9 +45,9 @@ import Data.Tuple (Tuple(..), snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Debug.Trace as Debug
 import Genetics.Browser.Cached (Cached, cache)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, Renderable, RenderableLayer, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), _Dimensions, _Track, _drawings, _static)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), LabelPlace(..), Renderable, RenderableLayer, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), Label, _Dimensions, _Track, _drawings, _labels, _static)
 import Genetics.Browser.Canvas (uiSlots) as Canvas
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, scaledSegments, viewScale, xPerPixel)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap, scaledSegments, viewScale, xPerPixel)
 import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerType(..))
 import Genetics.Browser.Types (Bp, ChrId, _exp, _fixed)
 import Graphics.Canvas (Dimensions) as Canvas
@@ -121,45 +122,36 @@ sigLevelRuler {min, max, sig} color f = outlined outline rulerDrawing <> label
         label = Drawing.text font' (f.width+4.0) (y-6.0) (fillColor color) text
 
 
-chrLabelTrack :: ∀ r.
-                 { fontSize :: Int | r }
-              -> CoordSys ChrId BigInt
-              -> Map ChrId (Array NormalizedGlyph)
-chrLabelTrack {fontSize} cs =
-  let font' = font sansSerif fontSize mempty
-
-      chrText :: ChrId -> Drawing
-      chrText chr =
-        Drawing.text font' zero zero (fillColor black) (unwrap chr)
-
-      mkLabel :: ChrId -> NormalizedGlyph
-      mkLabel chr = { drawing: inj (SProxy :: SProxy "point") $ chrText chr
-                    , horPos:  inj (SProxy :: SProxy "point") $ Normalized (0.5)
-                    , verPos: Normalized (0.03) }
-
-  in mapWithIndex (\i _ -> [mkLabel i]) $ cs ^. _Segments
-
-
 
 chrLabels :: ∀ r1 r2 a.
                { segmentPadding :: Number | r1 }
             -> CoordSys ChrId BigInt
             -> RenderableLayer { view :: CoordSysView | r2 }
 chrLabels conf cSys =
-  let labelSeg :: _
+  let labelSeg :: Canvas.Dimensions
                -> CoordSysView
                -> Tuple ChrId (Pair Number)
-               -> Array { drawing :: _, points :: _ }
-      labelSeg d v (Tuple c s@(Pair l r)) = pure {drawing, points}
-        where drawing = mempty
-              points  = mempty
-              viewPx = viewPixels d v
+               -> Array Label
+      labelSeg d v (Tuple c s@(Pair l r)) =
+        let viewPx = viewPixels d v
+            point = { x: segXPoint viewPx s
+                    , y: 1.0 * d.height }
+        in [{ text: show c
+            , point
+            , gravity: LCenter }]
 
-
-      viewPixels :: _ -> CoordSysView -> Pair Number
+      viewPixels :: Canvas.Dimensions -> CoordSysView -> Pair Number
       viewPixels d v = let s = viewScale d v
                            v' = map BigInt.toNumber $ unwrap v
-                       in (_ * xPerPixel s) <$> v'
+                       in (_ / xPerPixel s) <$> v'
+
+      segXPoint :: Pair Number
+                -> Pair Number
+                -> Number
+      segXPoint (Pair vL vR) (Pair sL sR) =
+        let l' = max vL sL
+            r' = min vR sR
+        in l' + ((r' - l') / 2.0)
 
       segs :: Canvas.Dimensions
            -> CoordSysView
@@ -168,9 +160,9 @@ chrLabels conf cSys =
              $ pixelSegments conf cSys
 
   in Layer Scrolling Masked
-     $ (CBottom \ {view} dim ->
-         map (inj _drawings <<< labelSeg dim view ) (segs dim view))
-
+     $ CBottom \ {view} dim ->
+         map (inj _labels <<< labelSeg dim view)
+         $ segs dim view
 
 
 
@@ -503,36 +495,6 @@ renderFixedUI com = Layer Fixed NoMask $ map f com
   where f draw = \_ d -> pure $ inj _static (draw d)
 
 
-renderRelativeUI :: CoordSys ChrId BigInt
-                 -> Map ChrId (Array NormalizedGlyph)
-                 -> BrowserCanvas
-                 -> CoordSysView
-                 -> Drawing
-renderRelativeUI cSys uiGlyphs canvas =
-  let
-      trackDim = canvas ^. _Track <<< _Dimensions
-      overlayDim = canvas ^. _Dimensions
-
-      renderUIElement :: Map ChrId (Array NormalizedGlyph)
-                      -> ChrId -> Pair Number -> Array SingleGlyph
-      renderUIElement m k s
-          = fold $ rescaleNormSingleGlyphs overlayDim.height s
-                <$> (Map.lookup k m)
-
-      drawTrackUI :: Pair BigInt -> (ChrId -> Pair Number -> (Array _)) -> Drawing
-      drawTrackUI v = foldMap f <<< withPixelSegments cSys trackDim v
-        where f {drawing, point} = Drawing.translate point.x point.y (drawing unit)
-
-  in \v -> drawTrackUI (unwrap v) $ renderUIElement uiGlyphs
-
-
-chrLabelsUI :: ∀ r.
-               CoordSys ChrId BigInt
-            -> { fontSize :: Int | r }
-            -> BrowserCanvas
-            -> CoordSysView
-            -> Drawing
-chrLabelsUI cSys c = renderRelativeUI cSys (chrLabelTrack c cSys)
 
 
 type Peak x y r = { covers :: Pair x

@@ -9,6 +9,7 @@ import Control.Monad.Aff (Aff, error)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
+import Control.Monad.Eff.Ref (Ref)
 import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExcept)
@@ -46,7 +47,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
 import Genetics.Browser.Canvas (BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, _drawings, _labels, createAndAddLayer, getDimensions)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
@@ -665,9 +666,8 @@ addDemoLayers :: ∀ r r2.
              -> BrowserContainer
              -> Eff _ { snps        :: Number -> CoordSysView -> Eff _ Unit
                       , annotations :: Number -> CoordSysView -> Eff _ Unit
-                      , background  :: Number -> CoordSysView -> Eff _ Unit
-                      , fixedUI  :: Eff _ Unit
-                      , overlaps :: Eff _ (Overlaps (snps :: Array (SNP ()))) }
+                      , chrs        :: Number -> CoordSysView -> Eff _ Unit
+                      , fixedUI  :: Eff _ Unit }
 addDemoLayers cSys config trackData =
   let threshold = config.score
       vscale = build (merge config.vscale) threshold
@@ -724,20 +724,14 @@ addDemoLayers cSys config trackData =
     rLegend <-
       createAndAddLayer bc "legend" $ annotationsUI legend
 
-    overlapsRef <- Ref.newRef (\_ _ -> { snps: mempty })
+    rChrLabels <-
+      createAndAddLayer bc "chrLabels" $ chrLabels conf cSys
+
 
     let fixedUI = do
           rVScale.render unit >>= rVScale.drawOnCanvas 0.0
           rLegend.render unit >>= rLegend.drawOnCanvas 0.0
 
-        -- TODO very unfinished
-        overlaps = Ref.readRef overlapsRef
-
-        background :: _
-        background o v =
-          rBG.render { config: { bg1: HexColor white, bg2: HexColor lightgray
-                               , segmentPadding }
-                     , view: v } >>= rBG.drawOnCanvas o
 
         snps :: _
         snps o v = do
@@ -754,9 +748,17 @@ addDemoLayers cSys config trackData =
                  , view: v } >>= rAnnos.drawOnCanvas o
 
 
+        chrs :: _
+        chrs o v = do
+          rBG.render { config: { bg1: HexColor white, bg2: HexColor lightgray
+                               , segmentPadding }
+                     , view: v } >>= rBG.drawOnCanvas o
+
+          rChrLabels.render { view: v }
+            >>= rChrLabels.drawOnCanvas o
+
     pure { snps
          , annotations
-         , background
          , fixedUI
-         , overlaps
+         , chrs
          }

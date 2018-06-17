@@ -138,19 +138,6 @@ slotRelative {size, padding} = case_ # onMatch
 
 
 
-  -- { full:   \_ -> \p -> p
-  -- , padded: \_ -> \p -> { x: padding.left - p.x
-  --                       , y: padding.top - p.y }
-  -- , top:    \_ -> \p -> { x: padding.left - p.x
-  --                       , y: p.y }
-  -- , right:  \_ -> \p -> { x: ( size.width - padding.right ) - p.x
-  --                       , y: p.y }
-  -- , bottom: \_ -> \p -> { x: padding.left - p.x
-  --                       , y: ( size.height - padding.bottom ) - p.y }
-  -- , left:   \_ -> \p -> p
-  -- }
-
-
 browserSlots :: BrowserDimensions
              -> Record (BrowserSlots ComponentSlot)
 browserSlots {size,padding} =
@@ -236,6 +223,11 @@ slotContext (Layer _ mask com) dims el = liftEff do
     CBottom  _ -> do
       setContextTranslation { x: slots.bottom.offset.x
                             , y: slots.bottom.offset.y } ctx
+
+      when (mask == Masked)
+        $ clipMask { x: 0.0, y: 0.0 }
+                   { x: slots.bottom.size.width
+                   , y: slots.bottom.size.height }
       pure ctx
     CLeft    _ -> do
       setContextTranslation { x: slots.left.offset.x
