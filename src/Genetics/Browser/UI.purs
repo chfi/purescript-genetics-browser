@@ -51,7 +51,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser (LegendConfig, Peak, VScale, pixelSegments)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Renderable, TrackPadding, _Dimensions, _Track, browserCanvas, browserClickHandler, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, getDimensions, getLayers, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, zIndexLayers)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Renderable, TrackPadding, _Container, _Dimensions, _Element, _Track, browserCanvas, browserClickHandler, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, getDimensions, getLayers, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, zIndexLayers)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, SNPConfig, AnnotationsConfig, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(..), Layer(..), browserSlots)
@@ -130,15 +130,11 @@ initializeBrowser cSys renderFuns initView bc = do
   let mainLoop = do
         uiCmd <- AVar.takeVar uiCmdVar
         case_ # V.on _render (\_ -> pure unit)
-              # V.on _docResize (\_ -> pure unit)
-              -- # V.on _docResize (\ {width} -> do
-              --         canvas <- AVar.takeVar bcVar
-              --         {height} <- _.size <$> getDimensions canvas
-              --         -- let {height} = dims.size
-              --         _ <- liftEff $ setBrowserContainerSize {width, height} canvas
-              --         AVar.putVar canvas bcVar
-              --         queueCommand $ inj _render unit
-              --         mainLoop)
+              # V.on _docResize (\ {width} -> do
+                      {height} <- _.size <$> getDimensions bc
+                      setBrowserContainerSize {width, height} bc
+                      queueCommand $ inj _render unit
+                      mainLoop)
               $ uiCmd
 
         -- if there's a rendering fiber running, we kill it
@@ -147,20 +143,12 @@ initializeBrowser cSys renderFuns initView bc = do
 
         csView <- getView
         canvas <- getBrowserCanvas
-        -- toRender <- liftEff $ renderFuns.snps csView
-        -- toRender <- drawCachedBrowser canvas csView
 
         currentDims <- getDimensions canvas
 
         let trackDims = _.padded $ browserSlots currentDims
             currentScale = viewScale trackDims.size csView
             offset = scaleToScreen  currentScale (Pair.fst $ unwrap $ csView)
-
-                          -- offset the click by the current canvas translation
-        -- _ <- AVar.tryTakeVar lastOverlapsVar
-        -- AVar.putVar (\n r -> let r' = {x: r.x + offset, y: r.y }
-        --                      in unsafeCoerce $ unit) lastOverlapsVar
-                             -- in { snps: toRender.tracks.snps.overlaps n r' }) lastOverlapsVar
 
         -- fork a new renderFiber
         renderFiber <- forkAff $ liftEff do
@@ -171,8 +159,6 @@ initializeBrowser cSys renderFuns initView bc = do
           renderFuns.annotations offset csView
           renderFuns.snps        offset csView
           renderFuns.fixedUI
-
-
 
         AVar.putVar renderFiber renderFiberVar
 
@@ -290,14 +276,11 @@ keyUI el mods cb = keydownEvent el f
           _ -> pure unit
 
 
-
 type UICmdR = ( render :: Unit
               , docResize :: { width :: Number, height :: Number } )
 
 _render = SProxy :: SProxy "render"
 _docResize = SProxy :: SProxy "docResize"
-
-
 
 
 debugView :: BrowserInterface _ _
@@ -314,67 +297,6 @@ debugView s = do
                $ ModView $ const (BigInt.fromNumber <$> Pair lr.l lr.r)
 
   pure {get, set}
-
-
-browserCache
-  :: ∀ a b.
-     (BrowserCanvas
-      -> CoordSysView
-      -> { tracks :: { snps :: a
-                     , annotations :: b }
-         , relativeUI :: Drawing
-         , fixedUI :: Drawing })
-     -> Aff _ (BrowserCanvas
-               -> CoordSysView
-               -> Aff _ ({ tracks :: { snps :: a
-                                     , annotations :: b }
-                         , relativeUI :: Drawing
-                         , fixedUI :: Drawing }))
-browserCache f = do
-  bcDim <- AVar.makeEmptyVar
-  viewSize <- AVar.makeEmptyVar
-
-  lastPartial <- AVar.makeEmptyVar
-  lastFinal <- AVar.makeEmptyVar
-
-  pure \bc csv -> do
-
-    let newBCDim = bc ^. _Dimensions
-    oldBCDim <- AVar.tryTakeVar bcDim
-    AVar.putVar newBCDim bcDim
-
-    oldPartial <- AVar.tryTakeVar lastPartial
-
-    partial <- case oldBCDim, oldPartial of
-      Just d, Just o -> do
-        let changed = not $ d `eqRecord` newBCDim
-        liftEff $ log $ "BrowserCanvas changed? " <> (show changed)
-        -- remove the cached final output value on canvas resize,
-        -- since we need to recalculate everything
-        when changed (void $ AVar.tryTakeVar lastFinal)
-        pure $ if d `eqRecord` newBCDim then o else f bc
-
-      _, _ -> do
-        liftEff $ log "Cache was empty! Recalculating all"
-        _ <- AVar.tryTakeVar lastFinal
-        pure $ f bc
-
-    AVar.putVar partial lastPartial
-
-    let newViewSize = pairSize $ unwrap csv
-    oldViewSize <- AVar.tryTakeVar viewSize
-    AVar.putVar newViewSize viewSize
-
-    oldFinal <- AVar.tryTakeVar lastFinal
-
-    let output = case oldViewSize, oldFinal of
-          Just vs, Just o -> if newViewSize == vs then o else partial csv
-          _, _ -> partial csv
-
-    AVar.putVar output lastFinal
-    pure output
-
-
 
 
 
@@ -543,8 +465,7 @@ runBrowser config bc = launchAff $ do
 
     btnUI mods browser.queueUpdateView
 
-    -- keyUI (unsafeCoerce $ (unwrap bc).staticOverlay)
-    --       mods browser.queueUpdateView
+    keyUI (bc ^. _Container) { scrollMod: 0.075 } browser.queueUpdateView
 
     dragScroll bc \ {x,y} ->
       -- only do anything when scrolling at least a pixel
@@ -634,10 +555,7 @@ main rawConfig = do
 
           {width} <- windowInnerSize
           let dimensions = { width, height: c.browserHeight }
-          -- bc <- browserCanvas dimensions c.trackPadding el
           bc <- browserContainer dimensions c.trackPadding el
-
-          -- debugBrowserCanvas "debugBC" bc
 
           log $ unsafeStringify c
           void $ runBrowser c bc

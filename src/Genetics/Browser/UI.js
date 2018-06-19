@@ -25,7 +25,7 @@ exports.keydownEvent = function(el) {
 
 exports.resizeEvent = function(cb) {
     return function() {
-        var resizeDelay = 500; // ms delay before running resize logic
+        var resizeDelay = 250; // ms delay before running resize logic
         var resizeTimeout = null;
 
         var throttled = function() {

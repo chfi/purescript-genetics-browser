@@ -480,14 +480,15 @@ setBrowserCanvasSize dim (BrowserCanvas bc) = do
             , track = track }
 
 
-setBrowserContainerSize :: Canvas.Dimensions
+setBrowserContainerSize :: ∀ m.
+                           MonadEff _ m
+                        => Canvas.Dimensions
                         -> BrowserContainer
-                        -> Eff _ Unit
-setBrowserContainerSize dim bc'@(BrowserContainer bc) = do
+                        -> m Unit
+setBrowserContainerSize dim bc'@(BrowserContainer bc) = liftEff $ do
+  Ref.modifyRef bc.dimensions (_ { size = dim })
   setContainerStyle bc.element dim
-  _ <- traverseLayers (resizeLayer dim) bc'
-  pure unit
-
+  traverse_ (resizeLayer dim) =<< getLayers bc'
 
 
 -- | Creates a `BrowserCanvas` and appends it to the provided element.
@@ -580,16 +581,6 @@ zIndexLayers (BrowserContainer bc) order = liftEff do
 
     else
       unsafeCrashWith "Called `zIndexLayers` with an order that did not contain all layers"
-
-
-traverseLayers :: ∀ m a.
-                  MonadEff _ m
-               => (LayerCanvas -> m a)
-               -> BrowserContainer
-               -> m (Map String a)
-traverseLayers f bc = do
-  layers <- getLayers bc
-  traverse f layers
 
 
 getLayers :: ∀ m.
@@ -928,10 +919,9 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
   -- 3. create the rendering function
   let render :: c -> m (List Renderable)
       render c = do
-        dims <- getDimensions bc
+        dims' <- getDimensions bc
 
-        let
-            slots' = browserSlots dims
+        let slots' = browserSlots dims'
 
             toRender = (com ^. _Component) c $ case com of
               Full     _ -> slots'.full.size
@@ -956,7 +946,10 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
         el  <- case Map.lookup name layers of
                  Nothing -> unsafeCrashWith $ "Tried to render layer '" <> name <> "', but it did not exist!"
                  Just e  -> pure $ e ^. _FrontCanvas
-        ctx <- slotContext layer dims el
+
+        dims' <- getDimensions bc
+        ctx <- slotContext layer dims' el
+
         liftEff $ Canvas.withContext ctx do
           setContextTranslation {x: zero, y: zero} ctx
           void $ Canvas.clearRect ctx { x: 0.0, y: 0.0
