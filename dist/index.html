@@ -37,7 +37,7 @@
 
 
       var vscaleWidth = 90.0;
-      var legendWidth = 120.0;
+      var legendWidth = 140.0;
 
       var config =
       { browserHeight: 400.0,
@@ -66,14 +66,19 @@
           geneColor: "#FF4136" },
 
         legend:
-        { fontSize: 12,
+        { fontSize: 14,
           hPad: 0.2,
           vPad: 0.2 },
 
         vscale:
         { color: "#000000",
           hPad: 0.125,
-          numSteps: 3 }
+          numSteps: 3,
+          fonts: { labelSize: 18, scaleSize: 16 }
+        },
+
+        chrLabels:
+        { fontSize: 16 }
       };
 
       GGB.main(config)();

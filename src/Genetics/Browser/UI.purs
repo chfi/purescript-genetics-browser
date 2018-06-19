@@ -525,6 +525,7 @@ type Conf =
   , trackPadding :: TrackPadding
   , score :: { min :: Number, max :: Number, sig :: Number }
   , urls :: DataURLs
+  , chrLabels :: { fontSize :: Int }
   , snpsConfig        :: SNPConfig
   , annotationsConfig :: AnnotationsConfig
   , legend :: LegendConfig ()
@@ -542,19 +543,25 @@ main rawConfig = do
            <$> (DOM.document =<< DOM.window)
     DOM.querySelector (wrap "#browser") (toParentNode doc)
 
-  case read rawConfig :: Either MultipleErrors Conf of
-    Left errs -> traverse_ (log <<< renderForeignError) errs
-    Right c   -> do
-      case el' of
-        Nothing -> log "Could not find element '#browser'"
-        Just el -> do
 
-          {width} <- windowInnerSize
-          let dimensions = { width, height: c.browserHeight }
-          bc <- browserContainer dimensions c.trackPadding el
+  case el' of
+    Nothing -> log "Could not find element '#browser'"
+    Just el -> do
 
-          log $ unsafeStringify c
-          void $ runBrowser c bc
+      case read rawConfig :: Either MultipleErrors Conf of
+        Left errs -> do
+          setElementContents el
+            $  "<p>Error when parsing provided config object:<p>"
+            <> foldMap (wrapWith "p" <<< renderForeignError) errs
+
+        Right c   -> do
+
+              {width} <- windowInnerSize
+              let dimensions = { width, height: c.browserHeight }
+              bc <- browserContainer dimensions c.trackPadding el
+
+              log $ unsafeStringify c
+              void $ runBrowser c bc
 
 
 

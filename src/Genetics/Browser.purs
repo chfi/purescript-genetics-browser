@@ -30,11 +30,12 @@ import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Number.Format as Num
 import Data.Pair (Pair(..))
 import Data.Record (get)
+import Data.String as String
 import Data.Symbol (SProxy)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
-import Genetics.Browser.Canvas (Label, LabelPlace(LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, _labels, _static)
+import Genetics.Browser.Canvas (Renderable, RenderableLayer, RenderableLayerHotspots, _static)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), aroundPair, normalize, pairSize, scaledSegments, viewScale, xPerPixel)
 import Genetics.Browser.Layer (Component(Padded, Full, CBottom), Layer(Layer), LayerMask(NoMask, Masked), LayerType(Fixed, Scrolling))
 import Genetics.Browser.Types (Bp, ChrId, _exp)
@@ -121,46 +122,46 @@ thresholdRuler {threshold: {sig,min,max}, rulerColor} slot =
 
 
 chrLabels :: ∀ r1 r2 a.
-               { segmentPadding :: Number | r1 }
+               { segmentPadding :: Number
+               , fontSize :: Int | r1 }
             -> CoordSys ChrId BigInt
             -> RenderableLayer { view :: CoordSysView | r2 }
 chrLabels conf cSys =
-  let labelSeg :: Canvas.Dimensions
+  let
+      labelOffset chrId = 0.3 *
+        (Int.toNumber $ conf.fontSize * (String.length $ show chrId))
+
+      labelSeg :: Canvas.Dimensions
                -> CoordSysView
                -> Tuple ChrId (Pair Number)
-               -> Array Label
+               -> Drawing
       labelSeg d v (Tuple c s@(Pair l r)) =
-        let viewPx = viewPixels d v
-            point = { x: segXPoint viewPx s
-                    , y: 1.0 * d.height }
-        in [{ text: show c
-            , point
-            , gravity: LCenter }]
+          Drawing.text
+             (font sansSerif conf.fontSize mempty)
+             (segMidPoint (viewPixels d v) s - labelOffset c)
+             (0.7 * d.height)
+             (fillColor black)
+             (show c)
 
       viewPixels :: Canvas.Dimensions -> CoordSysView -> Pair Number
       viewPixels d v = let s = viewScale d v
                            v' = map BigInt.toNumber $ unwrap v
                        in (_ / xPerPixel s) <$> v'
 
-      segXPoint :: Pair Number
-                -> Pair Number
-                -> Number
-      segXPoint (Pair vL vR) (Pair sL sR) =
+      segMidPoint :: Pair Number
+                  -> Pair Number
+                  -> Number
+      segMidPoint (Pair vL vR) (Pair sL sR) =
         let l' = max vL sL
             r' = min vR sR
         in l' + ((r' - l') / 2.0)
 
-      segs :: Canvas.Dimensions
-           -> CoordSysView
-           -> List (Tuple ChrId (Pair Number))
-      segs = (map <<< map) Map.toUnfoldable
-             $ pixelSegments conf cSys
 
   in Layer Scrolling Masked
      $ CBottom \ {view} dim ->
-         map (inj _labels <<< labelSeg dim view)
-         $ segs dim view
-
+         map (inj _static <<< labelSeg dim view)
+         $ Map.toUnfoldable
+         $ pixelSegments conf cSys dim view
 
 
 chrBackgroundLayer :: ∀ r a.
@@ -215,6 +216,8 @@ type Threshold = Record (VScaleRow ())
 type VScale r = { color :: HexColor
                 , hPad :: Number
                 , numSteps :: Int
+                , fonts :: { scaleSize :: Int
+                           , labelSize :: Int }
                 | r }
 
 
@@ -222,7 +225,8 @@ defaultVScaleConfig :: VScale ()
 defaultVScaleConfig =
   { color: wrap black
   , hPad: 0.125
-  , numSteps: 3 }
+  , numSteps: 3
+  , fonts: { labelSize: 18, scaleSize: 14 } }
 
 
 drawVScaleInSlot :: VScale (VScaleRow ())
@@ -251,11 +255,11 @@ drawVScaleInSlot vscale size =
       unitLabel =
         Drawing.translate (size.width * 0.4 - hPad) (size.height * 0.72)
         $ Drawing.rotate (- Math.pi / 2.0)
-        $ Drawing.text (font sansSerif 18 mempty)
+        $ Drawing.text (font sansSerif vscale.fonts.labelSize mempty)
             0.0 0.0 (fillColor black) "-log10 (P value)"
 
       label yN = Drawing.text
-                    (font sansSerif 14 mempty)
+                    (font sansSerif vscale.fonts.scaleSize mempty)
                     (size.width * 0.6 - hPad)
                     (yN * size.height + 5.0)
                     (fillColor black)

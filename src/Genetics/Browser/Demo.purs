@@ -637,19 +637,7 @@ renderAnnotations cSys sigSnps allAnnots conf =
            , inj _labels   $ labels ]
 
 
-
-type BrowserConfig =
-  { chrLabelsUI :: { fontSize :: Int }
-  , legend :: AnnotationsConfig
-  , threshold :: { min :: Number, max :: Number, sig :: Number }
-  , snpsConfig :: SNPConfig
-  }
-
--- In the future, this will be handled with a type class, by the compiler
-type Hotspots r = Number -> Point -> Record r
-
 _snps = SProxy :: SProxy "snps"
-
 _annotations = SProxy :: SProxy "annotations"
 
 addDemoLayers :: ∀ r r2.
@@ -657,6 +645,7 @@ addDemoLayers :: ∀ r r2.
              -> { score :: { min :: Number, max :: Number, sig :: Number }
                 , legend :: LegendConfig ()
                 , vscale :: VScale ()
+                , chrLabels :: { fontSize :: Int }
                 , snpsConfig :: SNPConfig
                 , annotationsConfig :: AnnotationsConfig | r }
              -> { snps        :: Map ChrId (Array (SNP ()))
@@ -727,7 +716,9 @@ addDemoLayers cSys config trackData =
       createAndAddLayer_ bc "legend" $ annotationsUI legend
 
     rChrLabels <-
-      createAndAddLayer_ bc "chrLabels" $ chrLabels conf cSys
+      createAndAddLayer_ bc "chrLabels"
+        $ chrLabels { segmentPadding
+                    , fontSize: config.chrLabels.fontSize }  cSys
 
 
     let fixedUI = do
