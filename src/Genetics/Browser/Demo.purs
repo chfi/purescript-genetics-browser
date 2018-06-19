@@ -47,9 +47,9 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrack, renderTrack', trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderOverlaps, renderTrack, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
-import Genetics.Browser.Canvas (BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, _drawings, _labels, createAndAddLayer, getDimensions)
+import Genetics.Browser.Canvas (BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerOverlaps, _drawings, _labels, createAndAddLayer, createAndAddLayer_, getDimensions)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
 import Genetics.Browser.Layer (Component(Padded, CRight, CLeft))
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
@@ -444,14 +444,15 @@ defaultSNPConfig =
   }
 
 
-renderSNPs :: ∀ m r1 r2 r3.
-              { threshold  :: { min  :: Number, max :: Number | r1 }
-              , snpsConfig :: SNPConfig }
-           -> Map ChrId (Array (SNP ()))
+renderSNPs :: ∀ m r1 rC.
+              Map ChrId (Array (SNP ()))
+           -> { threshold  :: { min  :: Number, max :: Number | r1 }
+              , snpsConfig :: SNPConfig | rC }
            -> Map ChrId (Pair Number)
            -> Canvas.Dimensions
-           -> List Renderable
-renderSNPs { snpsConfig, threshold } snpData =
+           -> { renderables :: List Renderable
+              , overlaps :: Number -> Point -> Array (SNP ()) }
+renderSNPs snpData { snpsConfig, threshold } =
   let features :: Array (SNP ())
       features = fold snpData
 
@@ -477,7 +478,7 @@ renderSNPs { snpsConfig, threshold } snpData =
            , y: wrap $ normYLogScore threshold s.feature.score })) snpData
 
 
-      pointed :: _
+      pointed :: Canvas.Dimensions
               -> Map ChrId (Pair Number)
               -> Array (Tuple (SNP ()) Point)
       pointed size = foldMapWithIndex scaleSegs
@@ -499,7 +500,9 @@ renderSNPs { snpsConfig, threshold } snpData =
 
   in \seg size ->
         let pts = pointed size seg
-        in pure $ inj _drawings $ drawings pts
+        in { renderables: pure $ inj _drawings $ drawings pts
+           , overlaps: overlaps pts }
+
 
 
 annotationsForScale :: ∀ r1 r2 i c.
@@ -614,16 +617,16 @@ renderAnnotationPeaks cSys vScale conf annoPks cdim =
               in { drawings, labels }
 
 
-renderAnnotations :: ∀ r r1 r2.
+renderAnnotations :: ∀ r1 r2 rC.
                     CoordSys _ _
                  -> Map ChrId (Array (SNP ()))
-                 -> { threshold :: { min :: Number, max :: Number | r }
-                    , annotationsConfig :: AnnotationsConfig | r2 }
-                 -> Map ChrId (Array (Annotation r2))
+                 -> Map ChrId (Array (Annotation r1))
+                 -> { threshold :: { min :: Number, max :: Number | r2 }
+                    , annotationsConfig :: AnnotationsConfig | rC }
                  -> Map ChrId (Pair Number)
                  -> Canvas.Dimensions
                  -> List Renderable
-renderAnnotations cSys sigSnps conf allAnnots =
+renderAnnotations cSys sigSnps allAnnots conf =
   let features = fold allAnnots
       annoPeaks = annotationsForScale cSys sigSnps allAnnots
 
@@ -634,8 +637,6 @@ renderAnnotations cSys sigSnps conf allAnnots =
         in List.fromFoldable
            [ inj _drawings $ drawings
            , inj _labels   $ labels ]
-
-
 
 
 
@@ -667,6 +668,7 @@ addDemoLayers :: ∀ r r2.
              -> Eff _ { snps        :: Number -> CoordSysView -> Eff _ Unit
                       , annotations :: Number -> CoordSysView -> Eff _ Unit
                       , chrs        :: Number -> CoordSysView -> Eff _ Unit
+                      , overlaps    :: Eff _ (Number -> Point -> Array (SNP ()))
                       , fixedUI  :: Eff _ Unit }
 addDemoLayers cSys config trackData =
   let threshold = config.score
@@ -680,21 +682,20 @@ addDemoLayers cSys config trackData =
       segmentPadding = 12.0
       conf = { segmentPadding }
 
-      padded = Padded 15.0
-
-      bgLayer :: RenderableLayer _
+      bgLayer :: ∀ r'.
+                 RenderableLayer { config :: { bg1 :: HexColor
+                                             , bg2 :: HexColor
+                                             , segmentPadding :: Number }
+                                 , view :: CoordSysView | r' }
       bgLayer =
-        renderTrack conf cSys
-          (Padded 5.0 $ chrBackgroundLayer) trackData.snps
+        renderTrack conf cSys (SProxy :: SProxy "config")
+          (Padded 5.0 $ chrBackgroundLayer)
 
 
-      snpLayer :: RenderableLayer
-                  { snps :: { threshold  :: Threshold
-                            , snpsConfig :: SNPConfig }
-                  , view :: CoordSysView }
+      snpLayer :: RenderableLayerOverlaps _ _
       snpLayer =
-        renderTrack' conf cSys _snps
-          (Padded 5.0 $ renderSNPs) trackData.snps
+        renderOverlaps conf cSys _snps
+          (Padded 5.0 $ renderSNPs trackData.snps)
 
       annotationLayer :: RenderableLayer
                          { annotations
@@ -702,30 +703,30 @@ addDemoLayers cSys config trackData =
                               , annotationsConfig :: AnnotationsConfig }
                          , view :: CoordSysView }
       annotationLayer =
-        renderTrack' conf cSys _annotations
-          (Padded 5.0 $ renderAnnotations cSys sigSnps) trackData.annotations
+        renderTrack conf cSys _annotations
+          (Padded 5.0 $ renderAnnotations cSys sigSnps trackData.annotations)
 
 
   in \bc -> do
     dims <- getDimensions bc
 
     rBG  <-
-      createAndAddLayer bc "chrBackground" bgLayer
+      createAndAddLayer_ bc "chrBackground" bgLayer
 
     rSNPs  <-
-      createAndAddLayer bc "snps" snpLayer
+      createAndAddLayer  bc "snps" snpLayer
 
     rAnnos <-
-      createAndAddLayer bc "annotations" annotationLayer
+      createAndAddLayer_ bc "annotations" annotationLayer
 
     rVScale <-
-      createAndAddLayer bc "vscale" $ snpsUI vscale
+      createAndAddLayer_ bc "vscale" $ snpsUI vscale
 
     rLegend <-
-      createAndAddLayer bc "legend" $ annotationsUI legend
+      createAndAddLayer_ bc "legend" $ annotationsUI legend
 
     rChrLabels <-
-      createAndAddLayer bc "chrLabels" $ chrLabels conf cSys
+      createAndAddLayer_ bc "chrLabels" $ chrLabels conf cSys
 
 
     let fixedUI = do
@@ -740,6 +741,9 @@ addDemoLayers cSys config trackData =
                                  , snpsConfig: config.snpsConfig }
                          , view: v }
           rSNPs.drawOnCanvas o snpsDrawings
+
+        overlaps :: _
+        overlaps = rSNPs.lastOverlaps
 
         annotations :: _
         annotations o v =
@@ -759,6 +763,7 @@ addDemoLayers cSys config trackData =
 
     pure { snps
          , annotations
+         , overlaps
          , fixedUI
          , chrs
          }
