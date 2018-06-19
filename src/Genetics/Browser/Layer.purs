@@ -72,6 +72,9 @@ instance traverseComponent :: Traversable Component where
 
 data Layer a = Layer LayerType LayerMask (Component a)
 
+derive instance functorLayer :: Functor Layer
+
+
 data LayerType =
     Fixed
   | Scrolling

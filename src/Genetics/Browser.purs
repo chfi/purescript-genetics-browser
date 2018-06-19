@@ -45,7 +45,7 @@ import Data.Tuple (Tuple(..), snd, uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Debug.Trace as Debug
 import Genetics.Browser.Cached (Cached, cache)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), LabelPlace(..), Renderable, RenderableLayer, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), Label, _Dimensions, _Track, _drawings, _labels, _static)
+import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, LabelPlace(..), Renderable, RenderableLayer, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), RenderableLayerOverlaps, _Dimensions, _Track, _drawings, _labels, _static)
 import Genetics.Browser.Canvas (uiSlots) as Canvas
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap, scaledSegments, viewScale, xPerPixel)
 import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerType(..))
@@ -170,11 +170,10 @@ chrBackgroundLayer :: ∀ r a.
                       { bg1 :: HexColor
                       , bg2 :: HexColor
                       , segmentPadding :: Number | r }
-                   -> Map ChrId a
                    -> Map ChrId (Pair Number)
                    -> Canvas.Dimensions
                    -> List Renderable
-chrBackgroundLayer conf _ seg size =
+chrBackgroundLayer conf seg size =
   let col c = if c then black else gray
 
       segBG :: Pair Number -> State Boolean (Tuple Color Shape)
@@ -409,23 +408,17 @@ withPixelSegments cs cdim bView =
 
 type DrawingN = { drawing :: Drawing, points :: Array Point }
 
-
-type RenderedTrack a = { features :: Array a
-                       , drawings :: Array DrawingN
-                       , labels   :: Array Label
-                       , overlaps :: Number -> Point -> Array a }
-
-
-type RendererOld a =
-     Canvas.Dimensions
-  -> Map ChrId (Array a)
-  -> Map ChrId (Pair Number)
-  -> RenderedTrack a
-
-type RendererPlain =
+-- TODO this will be handled much more nicely using type classes
+type TrackRenderer =
      Map ChrId (Pair Number)
   -> Canvas.Dimensions
   -> List Renderable
+
+type TrackOverlapsRenderer a =
+     Map ChrId (Pair Number)
+  -> Canvas.Dimensions
+  -> { renderables :: List Renderable
+     , overlaps :: Number -> Point -> Array a }
 
 type Renderer a =
      Map ChrId (Array a)
@@ -445,46 +438,49 @@ pixelSegments conf cSys trackDim csView =
        <$> scaledSegments cSys (viewScale trackDim csView)
 
 
-renderTrack :: ∀ a b r1 r2.
-               { segmentPadding :: Number | r1 }
+renderOverlaps :: ∀ a b l rC r1 r2.
+               IsSymbol l
+            => RowCons  l b r1 ( view :: CoordSysView | r2 )
+            => { segmentPadding :: Number | rC }
             -> CoordSys ChrId BigInt
-            -> Component (b -> Renderer a)
-            -> Map ChrId (Array a)
-            -> RenderableLayer { config :: b, view :: CoordSysView | r2 }
-renderTrack conf cSys com trackData =
-  let
-      segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
-      segs = pixelSegments conf cSys
-  in case com of
-        Full     r -> Layer Scrolling NoMask
-                      $ Full     $ \c d -> r c.config trackData (segs d c.view) d
-        Padded p r -> Layer Scrolling Masked
-                      $ Padded p $ \c d -> r c.config trackData (segs d c.view) d
-        _ -> unsafeCrashWith "renderTrack' does not support UI slots yet"
-
-
-renderTrack' :: ∀ a b l rC r1 r2.
-                IsSymbol l
-             => RowLacks l   r1
-             => RowCons  l b r1 ( view :: CoordSysView | r2 )
-             => { segmentPadding :: Number | rC }
-             -> CoordSys ChrId BigInt
-             -> SProxy l
-             -> Component (b -> Renderer a)
-             -> Map ChrId (Array a)
-             -> RenderableLayer (Record ( view :: CoordSysView | r2 ))
-renderTrack' conf cSys name com trackData =
+            -> SProxy l
+            -> Component (b -> TrackOverlapsRenderer a)
+            -> RenderableLayerOverlaps (Record ( view :: CoordSysView | r2 )) a
+renderOverlaps conf cSys name com =
   let
       segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
       segs = pixelSegments conf cSys
   in case com of
         Full     r ->
           Layer Scrolling NoMask
-            $ Full     \c d -> r (get name c) trackData (segs d c.view) d
+            $ Full     \c d -> r (get name c) (segs d c.view) d
 
         Padded p r ->
           Layer Scrolling Masked
-            $ Padded p \c d -> r (get name c) trackData (segs d c.view) d
+            $ Padded p \c d -> r (get name c) (segs d c.view) d
+
+        _ -> unsafeCrashWith "renderTrack' does not support UI slots yet"
+
+renderTrack :: ∀ a b l rC r1 r2.
+               IsSymbol l
+            => RowCons  l b r1 ( view :: CoordSysView | r2 )
+            => { segmentPadding :: Number | rC }
+            -> CoordSys ChrId BigInt
+            -> SProxy l
+            -> Component (b -> TrackRenderer)
+            -> RenderableLayer (Record ( view :: CoordSysView | r2 ))
+renderTrack conf cSys name com =
+  let
+      segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
+      segs = pixelSegments conf cSys
+  in case com of
+        Full     r ->
+          Layer Scrolling NoMask
+            $ Full     \c d -> r (get name c) (segs d c.view) d
+
+        Padded p r ->
+          Layer Scrolling Masked
+            $ Padded p \c d -> r (get name c) (segs d c.view) d
 
         _ -> unsafeCrashWith "renderTrack' does not support UI slots yet"
 

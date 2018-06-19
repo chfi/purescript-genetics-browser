@@ -872,22 +872,31 @@ _labels   = SProxy :: SProxy "labels"
 
 type RenderableLayer c = Layer (c -> Canvas.Dimensions -> List Renderable)
 
+type RenderableLayerOverlaps c a =
+  Layer (c
+         -> Canvas.Dimensions
+         -> { renderables :: List Renderable
+            , overlaps :: Number -> Point -> Array a })
+
 -- | A renderable `Layer` contains all the "DOM agnostic" parts required to define *any* layer;
 -- | by providing a BrowserContainer (which has a BrowserDimensions), a "physical"
 -- | canvas with all the required bits can be created, which can then be rendered
 -- | by providing a configuration!
 
 
+
+
 -- | Provided a BrowserContainer, we can initialize and add a named layer.
 -- | This returns a function that can be used to render to the layer maybe idk????
 -- | If the layer already existed, overwrites it
-createAndAddLayer :: ∀ m c.
+createAndAddLayer :: ∀ m c a.
                      MonadEff _ m
                   => BrowserContainer
                   -> String
-                  -> RenderableLayer c
+                  -> RenderableLayerOverlaps c a
                   -> m { render :: c -> m (List Renderable)
-                       , drawOnCanvas :: Number -> List Renderable -> m Unit }
+                       , drawOnCanvas :: Number -> List Renderable -> m Unit
+                       , lastOverlaps :: m (Number -> Point -> Array a) }
 createAndAddLayer bc name layer@(Layer lt _ com) = do
 
   dims <- getDimensions bc
@@ -903,6 +912,12 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
     setCanvasPosition pos (cv ^. _FrontCanvas)
     pure cv
 
+
+  overlapsRef <- liftEff $ Ref.newRef { offset: 0.0, overlaps: (\r p -> []) }
+  let lastOverlaps = liftEff do
+        { offset, overlaps } <- Ref.readRef overlapsRef
+        pure \r {x, y} -> overlaps r {x: x+offset, y}
+
   -- 2. add the canvas to the browsercontainer & DOM
   let layerRef :: _
       layerRef = _.layers $ unwrap bc
@@ -911,15 +926,13 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
     appendCanvasElem (unwrap bc).element $ canvas ^. _FrontCanvas
 
   -- 3. create the rendering function
-  let
-      render :: c -> m (List Renderable)
+  let render :: c -> m (List Renderable)
       render c = do
         dims <- getDimensions bc
 
         let
             slots' = browserSlots dims
 
-            toRender :: List Renderable
             toRender = (com ^. _Component) c $ case com of
               Full     _ -> slots'.full.size
               Padded _ _ -> slots'.padded.size
@@ -928,13 +941,17 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
               CRight   _ -> slots'.right.size
               CBottom  _ -> slots'.bottom.size
 
-        pure toRender
+
+        liftEff $ Ref.modifyRef overlapsRef $ _ { overlaps = toRender.overlaps }
+
+        pure toRender.renderables
 
 
       drawOnCanvas :: Number -> List Renderable -> m Unit
       drawOnCanvas offset renderables = do
         layers <- getLayers bc
 
+        liftEff $ Ref.modifyRef overlapsRef $ _ { offset = offset }
         -- TODO handle exceptions!!! :|
         el  <- case Map.lookup name layers of
                  Nothing -> unsafeCrashWith $ "Tried to render layer '" <> name <> "', but it did not exist!"
@@ -970,4 +987,22 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
         for_ renderables
           $ case_ # onMatch { static, drawings, labels }
 
+  pure { render, drawOnCanvas, lastOverlaps }
+
+
+
+-- | Used for layers that don't contain clickable features
+createAndAddLayer_ :: ∀ m c.
+                     MonadEff _ m
+                  => BrowserContainer
+                  -> String
+                  -> RenderableLayer c
+                  -> m { render :: c -> m (List Renderable)
+                       , drawOnCanvas :: Number -> List Renderable -> m Unit }
+createAndAddLayer_ bc name layer@(Layer lt _ com) = do
+  -- silly solution to avoid code duping createAndAddLayer
+  let layer' :: ∀ a. RenderableLayerOverlaps c a
+      layer' = (map <<< map <<< map) (\ renderables -> { renderables, overlaps: \r p -> [] }) layer
+
+  { render, drawOnCanvas } <- createAndAddLayer bc name layer'
   pure { render, drawOnCanvas }
