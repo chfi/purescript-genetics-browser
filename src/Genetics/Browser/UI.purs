@@ -430,14 +430,15 @@ initInfoBox = do
 runBrowser :: Conf -> BrowserContainer -> Eff _ _
 runBrowser config bc = launchAff $ do
 
-  let clickRadius = 1.0
+  let cSys :: CoordSys ChrId BigInt
+      cSys = coordSys mouseChrSizes
+      initialView = wrap $ Pair zero (cSys^._TotalSize)
+      clickRadius = 1.0
 
   liftEff $ initDebugDiv clickRadius
 
   cmdInfoBox <- liftEff $ initInfoBox
 
-  let cSys :: CoordSys ChrId BigInt
-      cSys = coordSys mouseChrSizes
 
   trackData <-
     {genes:_, snps:_, annotations:_}
@@ -450,16 +451,19 @@ runBrowser config bc = launchAff $ do
             $ addDemoLayers cSys config trackData bc
 
   browser <-
-    initializeBrowser cSys render (wrap $ Pair zero (cSys^._TotalSize)) bc
+    initializeBrowser cSys render initialView bc
 
 
   liftEff do
     resizeEvent \d ->
       launchAff_ $ browser.queueCommand $ inj _docResize d
 
-    let mods = { scrollMod: 0.05, zoomMod: 0.1 }
+    let btnMods = { scrollMod: 0.05, zoomMod: 0.1 }
+    btnUI btnMods browser.queueUpdateView
 
-    btnUI mods browser.queueUpdateView
+    buttonEvent "reset"
+      $ browser.queueUpdateView
+        (ModView (const $ unwrap initialView))
 
     keyUI (bc ^. _Container) { scrollMod: 0.075 } browser.queueUpdateView
 
