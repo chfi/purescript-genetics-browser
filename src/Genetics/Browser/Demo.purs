@@ -3,14 +3,12 @@ module Genetics.Browser.Demo where
 import Prelude
 
 import Color (black, white)
-import Color.Scheme.Clrs (blue, gray, red)
+import Color.Scheme.Clrs (blue, red)
 import Color.Scheme.X11 (darkblue, darkgrey, lightgray, lightgrey)
 import Control.Monad.Aff (Aff, error)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (liftEff)
 import Control.Monad.Eff.Console (log)
-import Control.Monad.Eff.Ref (Ref)
-import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Error.Class (throwError)
 import Control.Monad.Except (runExcept)
 import Data.Array as Array
@@ -47,11 +45,11 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderOverlaps, renderTrack, trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderHotspots, renderTrack, thresholdRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
-import Genetics.Browser.Canvas (BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerOverlaps, _drawings, _labels, createAndAddLayer, createAndAddLayer_, getDimensions)
+import Genetics.Browser.Canvas (BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, _drawings, _labels, createAndAddLayer, createAndAddLayer_, getDimensions)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
-import Genetics.Browser.Layer (Component(Padded, CRight, CLeft))
+import Genetics.Browser.Layer (Component(Padded, CRight, CLeft), Layer(..), LayerMask(..), LayerType(..))
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
@@ -451,7 +449,7 @@ renderSNPs :: ∀ m r1 rC.
            -> Map ChrId (Pair Number)
            -> Canvas.Dimensions
            -> { renderables :: List Renderable
-              , overlaps :: Number -> Point -> Array (SNP ()) }
+              , hotspots :: Number -> Point -> Array (SNP ()) }
 renderSNPs snpData { snpsConfig, threshold } =
   let features :: Array (SNP ())
       features = fold snpData
@@ -489,10 +487,10 @@ renderSNPs snpData { snpsConfig, threshold } =
               scaleSegs chrId seg = foldMap (map <<< map $ rescale seg)
                                       $ Map.lookup chrId npointed
 
-      overlaps :: Array (Tuple (SNP ()) Point)
+      hotspots :: Array (Tuple (SNP ()) Point)
                -> Number -> Point
                -> Array (SNP ())
-      overlaps pts radius' pt = filterMap covers pts
+      hotspots pts radius' pt = filterMap covers pts
         where covers :: Tuple (SNP ()) Point -> Maybe (SNP ())
               covers (Tuple f fPt)
                 | dist fPt pt <= radius + radius'   = Just f
@@ -501,7 +499,7 @@ renderSNPs snpData { snpsConfig, threshold } =
   in \seg size ->
         let pts = pointed size seg
         in { renderables: pure $ inj _drawings $ drawings pts
-           , overlaps: overlaps pts }
+           , hotspots: hotspots pts }
 
 
 
@@ -648,7 +646,7 @@ type BrowserConfig =
   }
 
 -- In the future, this will be handled with a type class, by the compiler
-type Overlaps r = Number -> Point -> Record r
+type Hotspots r = Number -> Point -> Record r
 
 _snps = SProxy :: SProxy "snps"
 
@@ -656,7 +654,6 @@ _annotations = SProxy :: SProxy "annotations"
 
 addDemoLayers :: ∀ r r2.
                 CoordSys ChrId BigInt
-             -- -> { score :: { min :: Number, max :: Number, sig :: Number } | r }
              -> { score :: { min :: Number, max :: Number, sig :: Number }
                 , legend :: LegendConfig ()
                 , vscale :: VScale ()
@@ -668,7 +665,7 @@ addDemoLayers :: ∀ r r2.
              -> Eff _ { snps        :: Number -> CoordSysView -> Eff _ Unit
                       , annotations :: Number -> CoordSysView -> Eff _ Unit
                       , chrs        :: Number -> CoordSysView -> Eff _ Unit
-                      , overlaps    :: Eff _ (Number -> Point -> Array (SNP ()))
+                      , hotspots    :: Eff _ (Number -> Point -> Array (SNP ()))
                       , fixedUI  :: Eff _ Unit }
 addDemoLayers cSys config trackData =
   let threshold = config.score
@@ -692,9 +689,9 @@ addDemoLayers cSys config trackData =
           (Padded 5.0 $ chrBackgroundLayer)
 
 
-      snpLayer :: RenderableLayerOverlaps _ _
+      snpLayer :: RenderableLayerHotspots _ _
       snpLayer =
-        renderOverlaps conf cSys _snps
+        renderHotspots conf cSys _snps
           (Padded 5.0 $ renderSNPs trackData.snps)
 
       annotationLayer :: RenderableLayer
@@ -712,6 +709,10 @@ addDemoLayers cSys config trackData =
 
     rBG  <-
       createAndAddLayer_ bc "chrBackground" bgLayer
+
+    rRuler <-
+      createAndAddLayer_ bc "ruler"
+      $ Layer Fixed NoMask (Padded 5.0 $ thresholdRuler)
 
     rSNPs  <-
       createAndAddLayer  bc "snps" snpLayer
@@ -732,6 +733,7 @@ addDemoLayers cSys config trackData =
     let fixedUI = do
           rVScale.render unit >>= rVScale.drawOnCanvas 0.0
           rLegend.render unit >>= rLegend.drawOnCanvas 0.0
+          rRuler.render { rulerColor: wrap red, threshold } >>= rRuler.drawOnCanvas 0.0
 
 
         snps :: _
@@ -742,8 +744,8 @@ addDemoLayers cSys config trackData =
                          , view: v }
           rSNPs.drawOnCanvas o snpsDrawings
 
-        overlaps :: _
-        overlaps = rSNPs.lastOverlaps
+        hotspots :: _
+        hotspots = rSNPs.lastHotspots
 
         annotations :: _
         annotations o v =
@@ -763,7 +765,7 @@ addDemoLayers cSys config trackData =
 
     pure { snps
          , annotations
-         , overlaps
+         , hotspots
          , fixedUI
          , chrs
          }

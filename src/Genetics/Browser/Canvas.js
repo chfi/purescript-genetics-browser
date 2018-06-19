@@ -126,6 +126,7 @@ exports.canvasWheelCBImpl = function(canvas) {
     return function(cb) {
         return function() {
             var evCb = function(e) {
+                e.preventDefault();
                 cb(Math.sign(e.deltaY))();
             };
 

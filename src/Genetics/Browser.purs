@@ -2,64 +2,52 @@ module Genetics.Browser where
 
 import Prelude
 
-import Color (Color, black, white)
+import Color (Color, black)
 import Color as Color
 import Color.Scheme.Clrs (gray)
-import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (class MonadEff, liftEff)
-import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Except (except)
-import Control.Monad.Reader (class MonadReader, ask)
-import Control.Monad.State (State, evalState, runState)
+import Control.Monad.State (State, evalState)
 import Control.Monad.State.Class as State
 import Data.Array ((..))
 import Data.Array as Array
-import Data.Bifunctor (lmap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (note)
-import Data.Foldable (class Foldable, fold, foldMap, foldl, foldr, length)
+import Data.Foldable (class Foldable, fold, foldMap, foldl, length)
 import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.Foreign (F, Foreign, ForeignError(..), readString)
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
-import Data.Lens (view, (^.))
-import Data.Lens as Lens
+import Data.Lens ((^.))
 import Data.List (List)
+import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe)
 import Data.Monoid (class Monoid, mempty)
-import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Number.Format as Num
 import Data.Pair (Pair(..))
 import Data.Record (get)
-import Data.Record as Record
-import Data.Record.Builder (build, insert)
-import Data.Record.Unsafe as Record
-import Data.Symbol (class IsSymbol, SProxy(SProxy), reflectSymbol)
-import Data.Traversable (scanr, traverse)
-import Data.Tuple (Tuple(..), snd, uncurry)
+import Data.Symbol (SProxy)
+import Data.Traversable (traverse)
+import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
-import Debug.Trace as Debug
-import Genetics.Browser.Cached (Cached, cache)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Label, LabelPlace(..), Renderable, RenderableLayer, UISlot, UISlotGravity(UIBottom, UITop, UIRight, UILeft), RenderableLayerOverlaps, _Dimensions, _Track, _drawings, _labels, _static)
-import Genetics.Browser.Canvas (uiSlots) as Canvas
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, pairSize, pairsOverlap, scaledSegments, viewScale, xPerPixel)
-import Genetics.Browser.Layer (Component(..), ComponentSlot, Layer(..), LayerMask(..), LayerType(..))
-import Genetics.Browser.Types (Bp, ChrId, _exp, _fixed)
+import Genetics.Browser.Canvas (Label, LabelPlace(LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, _labels, _static)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), aroundPair, normalize, pairSize, scaledSegments, viewScale, xPerPixel)
+import Genetics.Browser.Layer (Component(Padded, Full, CBottom), Layer(Layer), LayerMask(NoMask, Masked), LayerType(Fixed, Scrolling))
+import Genetics.Browser.Types (Bp, ChrId, _exp)
 import Graphics.Canvas (Dimensions) as Canvas
-import Graphics.Drawing (Drawing, Point, Shape, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle, translate)
+import Graphics.Drawing (Drawing, Point, Shape, fillColor, filled, lineWidth, outlineColor, outlined, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math (pow)
 import Math as Math
 import Partial.Unsafe (unsafeCrashWith)
 import Simple.JSON (class ReadForeign)
-import Type.Prelude (class IsSymbol, class RowLacks)
-import Unsafe.Coerce (unsafeCoerce)
+import Type.Prelude (class IsSymbol)
+
 
 
 type Feature a = { position  :: Pair Bp
@@ -104,23 +92,32 @@ type NormalizedGlyph = { drawing :: Variant DrawingR
 type SingleGlyph = { drawing :: Unit -> Drawing, point :: Point, width :: Number }
 
 
-sigLevelRuler :: forall r.
-                 { min :: Number, max :: Number, sig :: Number | r }
-              -> Color
-              -> Canvas.Dimensions
-              -> Drawing
-sigLevelRuler {min, max, sig} color f = outlined outline rulerDrawing <> label
-  where normY = (sig - min) / (max - min)
-        thickness = 2.0
-        outline = outlineColor color <> lineWidth thickness
-        y = thickness + f.height - (normY * f.height)
-        rulerDrawing = Drawing.path [{x: 0.0, y}, {x: f.width, y}]
 
-        text  = "P = " <> (10.0 `pow` -sig) ^. _exp 1
+thresholdRuler :: ∀ r r1.
+                  { threshold :: Record (VScaleRow r1)
+                  , rulerColor :: HexColor | r }
+               -> Canvas.Dimensions
+               -> List Renderable
+thresholdRuler {threshold: {sig,min,max}, rulerColor} slot =
+  let y = slot.height - (normalize min max sig * slot.height)
 
-        font' = font sansSerif 16 mempty
-        label = Drawing.text font' (f.width+4.0) (y-6.0) (fillColor color) text
+      outline = outlineColor (unwrap rulerColor)
+                <> lineWidth 2.0
 
+      rulerDrawing =
+        outlined outline
+        $ Drawing.path [{x: -5.0, y}, {x: slot.width+5.0, y}]
+
+      text  = "P = " <> (10.0 `pow` -sig) ^. _exp 1
+      font' = font sansSerif 16 mempty
+      label = Drawing.text
+              font'
+              (slot.width+10.0) (y-6.0)
+              (fillColor $ unwrap rulerColor) text
+
+  in List.fromFoldable
+       [ inj _static rulerDrawing
+       , inj _static label ]
 
 
 chrLabels :: ∀ r1 r2 a.
@@ -220,12 +217,12 @@ type VScale r = { color :: HexColor
                 , numSteps :: Int
                 | r }
 
-defaultVScaleConfig :: Record (VScaleRow ())
-                    -> VScale (VScaleRow ())
+
+defaultVScaleConfig :: VScale ()
 defaultVScaleConfig =
-  build (insert (SProxy :: SProxy "color")    (wrap black)
-     >>> insert (SProxy :: SProxy "hPad")     0.125
-     >>> insert (SProxy :: SProxy "numSteps") 3)
+  { color: wrap black
+  , hPad: 0.125
+  , numSteps: 3 }
 
 
 drawVScaleInSlot :: VScale (VScaleRow ())
@@ -414,11 +411,11 @@ type TrackRenderer =
   -> Canvas.Dimensions
   -> List Renderable
 
-type TrackOverlapsRenderer a =
+type TrackHotspotsRenderer a =
      Map ChrId (Pair Number)
   -> Canvas.Dimensions
   -> { renderables :: List Renderable
-     , overlaps :: Number -> Point -> Array a }
+     , hotspots :: Number -> Point -> Array a }
 
 type Renderer a =
      Map ChrId (Array a)
@@ -438,15 +435,15 @@ pixelSegments conf cSys trackDim csView =
        <$> scaledSegments cSys (viewScale trackDim csView)
 
 
-renderOverlaps :: ∀ a b l rC r1 r2.
+renderHotspots :: ∀ a b l rC r1 r2.
                IsSymbol l
             => RowCons  l b r1 ( view :: CoordSysView | r2 )
             => { segmentPadding :: Number | rC }
             -> CoordSys ChrId BigInt
             -> SProxy l
-            -> Component (b -> TrackOverlapsRenderer a)
-            -> RenderableLayerOverlaps (Record ( view :: CoordSysView | r2 )) a
-renderOverlaps conf cSys name com =
+            -> Component (b -> TrackHotspotsRenderer a)
+            -> RenderableLayerHotspots (Record ( view :: CoordSysView | r2 )) a
+renderHotspots conf cSys name com =
   let
       segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
       segs = pixelSegments conf cSys

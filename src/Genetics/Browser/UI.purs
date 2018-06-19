@@ -33,10 +33,7 @@ import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
 import Data.Lens ((^.))
-import Data.Lens as Lens
 import Data.Lens.Iso.Newtype (_Newtype)
-import Data.List (List)
-import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
@@ -44,21 +41,20 @@ import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (over, unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
-import Data.Record.Extra (eqRecord)
 import Data.Symbol (SProxy(SProxy))
 import Data.Traversable (for_, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser (LegendConfig, Peak, VScale, pixelSegments)
-import Genetics.Browser.Canvas (BrowserCanvas, BrowserContainer(..), Renderable, TrackPadding, _Container, _Dimensions, _Element, _Track, browserCanvas, browserClickHandler, browserContainer, browserOnClick, debugBrowserCanvas, dragScroll, getDimensions, getLayers, renderBrowser, setBrowserCanvasSize, setBrowserContainerSize, setElementStyle, wheelZoom, zIndexLayers)
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairSize, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
+import Genetics.Browser.Canvas (BrowserContainer, TrackPadding, _Container, browserClickHandler, browserContainer, dragScroll, getDimensions, getLayers, setBrowserContainerSize, setElementStyle, wheelZoom)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, SNPConfig, AnnotationsConfig, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
-import Genetics.Browser.Layer (Component(..), Layer(..), browserSlots)
+import Genetics.Browser.Layer (Component(Padded), browserSlots)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing, Point)
+import Graphics.Drawing (Point)
 import Math as Math
 import Partial.Unsafe (unsafePartial)
 import Simple.JSON (read)
@@ -91,7 +87,7 @@ foreign import resizeEvent :: ∀ e.
 type BrowserInterface e a
   = { getView          :: Aff e CoordSysView
     , getBrowserCanvas :: Aff e BrowserContainer
-    , lastOverlaps     :: Eff e (Number -> Point -> Array a)
+    , lastHotspots     :: Eff e (Number -> Point -> Array a)
     , queueCommand     :: Variant UICmdR -> Aff e Unit
     , queueUpdateView  :: UpdateView -> Eff e Unit
     }
@@ -104,7 +100,7 @@ initializeBrowser :: ∀ r.
                   -> { snps        :: Number -> CoordSysView -> Eff _ Unit
                      , annotations :: Number -> CoordSysView -> Eff _ Unit
                      , chrs        :: Number -> CoordSysView -> Eff _ Unit
-                     , overlaps    :: Eff _ (Number -> Point -> Array (SNP ()))
+                     , hotspots    :: Eff _ (Number -> Point -> Array (SNP ()))
                      , fixedUI     :: Eff _ Unit | r}
                   -> CoordSysView
                   -> BrowserContainer
@@ -117,12 +113,12 @@ initializeBrowser cSys renderFuns initView bc = do
   bcVar <- AVar.makeVar bc
 
   uiCmdVar <- AVar.makeEmptyVar
-  lastOverlapsVar <- AVar.makeEmptyVar
+  lastHotspotsVar <- AVar.makeEmptyVar
 
   let getView = AVar.readVar viewVar
       getBrowserCanvas = AVar.readVar bcVar
       queueCommand = flip AVar.putVar uiCmdVar
-      lastOverlaps = renderFuns.overlaps
+      lastHotspots = renderFuns.hotspots
 
     -- hardcoded timeout for now
   queueUpdateView <- uiViewUpdate cSys (wrap 100.0) {view: viewVar, uiCmd: uiCmdVar}
@@ -170,7 +166,7 @@ initializeBrowser cSys renderFuns initView bc = do
 
   pure { getView
        , getBrowserCanvas
-       , lastOverlaps
+       , lastHotspots
        , queueCommand
        , queueUpdateView }
 
@@ -496,9 +492,9 @@ runBrowser config bc = launchAff $ do
               annoPeaks = annotationsForScale cSys sigSnps
                             trackData.annotations segs
 
-          lastOverlaps' <- liftEff $ browser.lastOverlaps
+          lastHotspots' <- liftEff $ browser.lastHotspots
           liftEff do
-            let clicked = (lastOverlaps' clickRadius p)
+            let clicked = (lastHotspots' clickRadius p)
             printSNPInfo clicked
             case Array.head clicked of
               Nothing -> cmdInfoBox IBoxHide

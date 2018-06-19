@@ -9,7 +9,6 @@ import Prelude
 import Control.Monad.Aff (Aff, delay)
 import Control.Monad.Eff (Eff)
 import Control.Monad.Eff.Class (class MonadEff, liftEff)
-import Control.Monad.Eff.Console (log)
 import Control.Monad.Eff.Ref (Ref)
 import Control.Monad.Eff.Ref as Ref
 import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
@@ -18,7 +17,6 @@ import DOM.Classy.Node (class IsNode, fromNode)
 import DOM.Classy.Node as DOM
 import DOM.HTML.Types (HTMLCanvasElement)
 import DOM.Node.Types (Element, Node)
-import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Filterable (filterMap)
 import Data.Foldable (any, foldl, for_, length)
@@ -122,17 +120,10 @@ foreign import setCanvasTranslation :: ∀ e.
                                     -> CanvasElement
                                     -> Eff e Unit
 
-
-canvasClick :: CanvasElement -> (Point -> Eff _ Unit) -> Eff _ Unit
-canvasClick = elementClick <<< view _Element
-
-
-
 foreign import elementClickImpl :: ∀ e.
                                    EffFn2 e
                                    Element (Point -> Eff e Unit)
                                    Unit
-
 
 elementClick :: ∀ e.
                 IsElement e
@@ -141,20 +132,6 @@ elementClick :: ∀ e.
              -> Eff _ Unit
 elementClick e = runEffFn2 elementClickImpl (toElement e)
 
-
--- | Attaches two callbacks to the BrowserCanvas click event handler,
--- | provided with the track canvas and static overlay canvas' relative
--- | coordinates of the click, respectively.
-browserOnClick :: BrowserCanvas
-               -> { track   :: Point -> Eff _ Unit
-                  , overlay :: Point -> Eff _ Unit }
-               -> Eff _ Unit
-browserOnClick (BrowserCanvas bc) {track, overlay} =
-  canvasClick bc.staticOverlay \o -> do
-    let t = { x: o.x - bc.trackPadding.left
-            , y: o.y - bc.trackPadding.top }
-    overlay o
-    track t
 
 -- | Attaches a callback to the browsercontainer, to be called when
 -- | the browser element is clicked. The callback is called with
@@ -863,11 +840,11 @@ _labels   = SProxy :: SProxy "labels"
 
 type RenderableLayer c = Layer (c -> Canvas.Dimensions -> List Renderable)
 
-type RenderableLayerOverlaps c a =
+type RenderableLayerHotspots c a =
   Layer (c
          -> Canvas.Dimensions
          -> { renderables :: List Renderable
-            , overlaps :: Number -> Point -> Array a })
+            , hotspots :: Number -> Point -> Array a })
 
 -- | A renderable `Layer` contains all the "DOM agnostic" parts required to define *any* layer;
 -- | by providing a BrowserContainer (which has a BrowserDimensions), a "physical"
@@ -884,10 +861,10 @@ createAndAddLayer :: ∀ m c a.
                      MonadEff _ m
                   => BrowserContainer
                   -> String
-                  -> RenderableLayerOverlaps c a
+                  -> RenderableLayerHotspots c a
                   -> m { render :: c -> m (List Renderable)
                        , drawOnCanvas :: Number -> List Renderable -> m Unit
-                       , lastOverlaps :: m (Number -> Point -> Array a) }
+                       , lastHotspots :: m (Number -> Point -> Array a) }
 createAndAddLayer bc name layer@(Layer lt _ com) = do
 
   dims <- getDimensions bc
@@ -904,10 +881,10 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
     pure cv
 
 
-  overlapsRef <- liftEff $ Ref.newRef { offset: 0.0, overlaps: (\r p -> []) }
-  let lastOverlaps = liftEff do
-        { offset, overlaps } <- Ref.readRef overlapsRef
-        pure \r {x, y} -> overlaps r {x: x+offset, y}
+  hotspotsRef <- liftEff $ Ref.newRef { offset: 0.0, hotspots: (\r p -> []) }
+  let lastHotspots = liftEff do
+        { offset, hotspots } <- Ref.readRef hotspotsRef
+        pure \r {x, y} -> hotspots r {x: x+offset, y}
 
   -- 2. add the canvas to the browsercontainer & DOM
   let layerRef :: _
@@ -932,7 +909,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
               CBottom  _ -> slots'.bottom.size
 
 
-        liftEff $ Ref.modifyRef overlapsRef $ _ { overlaps = toRender.overlaps }
+        liftEff $ Ref.modifyRef hotspotsRef $ _ { hotspots = toRender.hotspots }
 
         pure toRender.renderables
 
@@ -941,7 +918,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
       drawOnCanvas offset renderables = do
         layers <- getLayers bc
 
-        liftEff $ Ref.modifyRef overlapsRef $ _ { offset = offset }
+        liftEff $ Ref.modifyRef hotspotsRef $ _ { offset = offset }
         -- TODO handle exceptions!!! :|
         el  <- case Map.lookup name layers of
                  Nothing -> unsafeCrashWith $ "Tried to render layer '" <> name <> "', but it did not exist!"
@@ -962,25 +939,20 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
         -- use the List Renderable to draw to the canvas
         let
             static :: Drawing -> m _
-            static d = liftEff do
-              log "drawing UI!"
-              Drawing.render ctx d
+            static d = liftEff $ Drawing.render ctx d
 
             drawings :: Array { drawing :: Drawing, points :: Array Point }
                      -> m _
-            drawings ds = liftEff do
-              log $ "drawing glyphs: " <> show (Array.length ds)
-              for_ ds $ renderGlyphs' (_.glyphBuffer $ unwrap bc) ctx
+            drawings ds = liftEff $ for_ ds
+                            $ renderGlyphs' (_.glyphBuffer $ unwrap bc) ctx
 
             labels :: Array _ -> m _
-            labels ls = liftEff do
-              log "drawing labels"
-              renderLabels ls ctx
+            labels ls = liftEff $ renderLabels ls ctx
 
         for_ renderables
           $ case_ # onMatch { static, drawings, labels }
 
-  pure { render, drawOnCanvas, lastOverlaps }
+  pure { render, drawOnCanvas, lastHotspots }
 
 
 
@@ -994,8 +966,8 @@ createAndAddLayer_ :: ∀ m c.
                        , drawOnCanvas :: Number -> List Renderable -> m Unit }
 createAndAddLayer_ bc name layer@(Layer lt _ com) = do
   -- silly solution to avoid code duping createAndAddLayer
-  let layer' :: ∀ a. RenderableLayerOverlaps c a
-      layer' = (map <<< map <<< map) (\ renderables -> { renderables, overlaps: \r p -> [] }) layer
+  let layer' :: ∀ a. RenderableLayerHotspots c a
+      layer' = (map <<< map <<< map) (\ renderables -> { renderables, hotspots: \r p -> [] }) layer
 
   { render, drawOnCanvas } <- createAndAddLayer bc name layer'
   pure { render, drawOnCanvas }
