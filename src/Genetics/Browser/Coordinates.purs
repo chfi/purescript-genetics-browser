@@ -11,13 +11,14 @@ import Data.Lens (Getter', Lens, _2, findOf, folded, to, view, (^.))
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe)
+import Data.Maybe (Maybe, fromJust)
 import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (class Newtype, alaF, unwrap)
 import Data.Pair (Pair(..))
 import Data.Tuple (Tuple(Tuple))
 import Genetics.Browser.Types (Point)
 import Global.Unsafe (unsafeStringify)
+import Partial.Unsafe (unsafePartial)
 
 
 -- | The global coordinate system works by taking the sum of the chromosome sizes,
@@ -274,14 +275,15 @@ translatePairBy :: Pair BigInt
                 -> Number
                 -> Pair BigInt
 translatePairBy p x = (_ + delta) <$> p
-  where delta = BigInt.fromNumber $ x * (BigInt.toNumber $ pairSize p)
+  where delta = unsafePartial $ fromJust
+                <$> BigInt.fromNumber $ x * (BigInt.toNumber $ pairSize p)
 
 
 -- | Scale an Int pair by changing its length to be `x` times the pair size.
 scalePairBy :: Pair BigInt
             -> Number
             -> Pair BigInt
-scalePairBy p x = result
+scalePairBy p x = unsafePartial $ fromJust <$> result
   where x' = max zero x
         p'@(Pair l' r') = BigInt.toNumber <$> p
         delta = ((pairSize p' * x') - (pairSize p')) / 2.0

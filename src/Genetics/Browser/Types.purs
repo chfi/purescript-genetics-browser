@@ -2,7 +2,7 @@ module Genetics.Browser.Types where
 
 import Prelude
 
-import Data.Foreign.Class (class Decode, class Encode)
+import Foreign.Class (class Decode, class Encode)
 import Data.Lens (Getter', iso, to)
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Types (Iso')
@@ -24,8 +24,8 @@ newtype Bp = Bp Number
 derive instance newtypeBp :: Newtype Bp _
 derive newtype instance eqBp :: Eq Bp
 derive newtype instance ordBp :: Ord Bp
-derive newtype instance fieldBp :: Field Bp
 derive newtype instance euclideanRingBp :: EuclideanRing Bp
+derive newtype instance divisionRingBp :: DivisionRing Bp
 derive newtype instance commutativeRingBp :: CommutativeRing Bp
 derive newtype instance semiringBp :: Semiring Bp
 derive newtype instance ringBp :: Ring Bp
@@ -51,8 +51,8 @@ newtype MBp = MBp Number
 derive instance newtypeMBp :: Newtype MBp _
 derive newtype instance eqMBp :: Eq MBp
 derive newtype instance ordMBp :: Ord MBp
-derive newtype instance fieldMBp :: Field MBp
 derive newtype instance euclideanRingMBp :: EuclideanRing MBp
+derive newtype instance divisionRingMBp :: DivisionRing MBp
 derive newtype instance commutativeRingMBp :: CommutativeRing MBp
 derive newtype instance semiringMBp :: Semiring MBp
 derive newtype instance ringMBp :: Ring MBp
@@ -74,12 +74,12 @@ toScreen offset scale x = unwrap ((x' - offset') * scale')
         x' = bp x
 
 instance hCoordBp :: HCoordinate Bp where
-  bp = id
+  bp = identity
   mbp (Bp x) = MBp (x * 0.000001)
 
 instance hCoordMBp :: HCoordinate MBp where
   bp (MBp x) = Bp (x * 1000000.0)
-  mbp  = id
+  mbp  = identity
 
 -- | Newtype wrapper for a chromosome identifier
 newtype ChrId = ChrId String

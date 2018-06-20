@@ -15,7 +15,6 @@ import Data.BigInt as BigInt
 import Data.Either (note)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length)
 import Data.FoldableWithIndex (foldMapWithIndex)
-import Data.Foreign (F, Foreign, ForeignError(..), readString)
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
@@ -25,16 +24,15 @@ import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe)
-import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Number.Format as Num
 import Data.Pair (Pair(..))
-import Data.Record (get)
 import Data.String as String
 import Data.Symbol (SProxy)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
+import Foreign (F, Foreign, ForeignError(..), readString)
 import Genetics.Browser.Canvas (Renderable, RenderableLayer, RenderableLayerHotspots, _static)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), aroundPair, normalize, pairSize, scaledSegments, viewScale, xPerPixel)
 import Genetics.Browser.Layer (Component(Padded, Full, CBottom), Layer(Layer), LayerMask(NoMask, Masked), LayerType(Fixed, Scrolling))
@@ -46,6 +44,8 @@ import Graphics.Drawing.Font (font, sansSerif)
 import Math (pow)
 import Math as Math
 import Partial.Unsafe (unsafeCrashWith)
+import Prim.Row as Row
+import Record (get)
 import Simple.JSON (class ReadForeign)
 import Type.Prelude (class IsSymbol)
 
@@ -177,7 +177,7 @@ chrBackgroundLayer conf seg size =
       segBG :: Pair Number -> State Boolean (Tuple Color Shape)
       segBG (Pair l r) = do
         curSeg <- State.get
-        State.modify not
+        State.modify_ not
         pure $ Tuple
           (unwrap $ if curSeg then conf.bg1
                               else conf.bg2)
@@ -202,7 +202,7 @@ parseColor :: Foreign -> F Color
 parseColor = readColor <=< readString
   where readColor c =
           except
-           $ note (pure $ JSONError "Could not parse color: expected hex string")
+           $ note (pure $ ForeignError "Could not parse color: expected hex string")
            $ Color.fromHexString c
 
 
@@ -346,7 +346,7 @@ trackLegend :: forall f a.
             => (a -> LegendEntry)
             -> f a
             -> Array LegendEntry
-trackLegend f as = Array.nubBy (eq `on` _.text) $ Array.fromFoldable $ map f as
+trackLegend f as = Array.nubBy (compare `on` _.text) $ Array.fromFoldable $ map f as
 
 
 
@@ -441,7 +441,7 @@ pixelSegments conf cSys trackDim csView =
 
 renderHotspots :: ∀ a b l rC r1 r2.
                IsSymbol l
-            => RowCons  l b r1 ( view :: CoordSysView | r2 )
+            => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
             => { segmentPadding :: Number | rC }
             -> CoordSys ChrId BigInt
             -> SProxy l
@@ -464,7 +464,7 @@ renderHotspots conf cSys name com =
 
 renderTrack :: ∀ a b l rC r1 r2.
                IsSymbol l
-            => RowCons  l b r1 ( view :: CoordSysView | r2 )
+            => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
             => { segmentPadding :: Number | rC }
             -> CoordSys ChrId BigInt
             -> SProxy l

@@ -4,23 +4,6 @@ import Prelude
 
 import Control.Coroutine (Consumer, Producer, connect, runProcess)
 import Control.Coroutine as Co
-import Control.Monad.Aff (Aff, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_)
-import Control.Monad.Aff.AVar (AVar)
-import Control.Monad.Aff.AVar as AVar
-import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
-import Control.Monad.Eff.Exception (error, throw)
-import DOM.Classy.HTMLElement (appendChild, setId) as DOM
-import DOM.Classy.ParentNode (toParentNode)
-import DOM.Event.KeyboardEvent (key) as DOM
-import DOM.Event.Types (KeyboardEvent)
-import DOM.HTML (window) as DOM
-import DOM.HTML.Types (htmlDocumentToDocument) as DOM
-import DOM.HTML.Window (document) as DOM
-import DOM.Node.Document (createElement, documentElement) as DOM
-import DOM.Node.ParentNode (querySelector) as DOM
-import DOM.Node.Types (Element, ElementId)
 import Data.Array as Array
 import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
@@ -28,7 +11,6 @@ import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
 import Data.Filterable (filterMap)
 import Data.Foldable (class Foldable, foldMap, length, null)
-import Data.Foreign (Foreign, MultipleErrors, renderForeignError)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
@@ -46,6 +28,14 @@ import Data.Traversable (for_, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
+import Effect (Effect)
+import Effect.Aff (Aff, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_)
+import Effect.Aff.AVar (AVar)
+import Effect.Aff.AVar as AVar
+import Effect.Class (liftEffect)
+import Effect.Console (log)
+import Effect.Exception (error, throw)
+import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (LegendConfig, Peak, VScale, pixelSegments)
 import Genetics.Browser.Canvas (BrowserContainer, TrackPadding, _Container, browserClickHandler, browserContainer, dragScroll, getDimensions, getLayers, setBrowserContainerSize, setElementStyle, wheelZoom)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, _Segments, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
@@ -59,37 +49,49 @@ import Math as Math
 import Partial.Unsafe (unsafePartial)
 import Simple.JSON (read)
 import Unsafe.Coerce (unsafeCoerce)
+import Web.DOM (Element)
+import Web.DOM.Document (createElement, documentElement) as DOM
+import Web.DOM.Document (toParentNode)
+import Web.DOM.Element (setId)
+import Web.DOM.Element as Element
+import Web.DOM.Node (appendChild)
+import Web.DOM.ParentNode (querySelector) as DOM
+import Web.HTML (window) as DOM
+import Web.HTML.HTMLDocument as DOM
+import Web.HTML.Window (document) as DOM
+import Web.UIEvent.KeyboardEvent (KeyboardEvent)
+import Web.UIEvent.KeyboardEvent (key) as DOM
 
 
-foreign import windowInnerSize :: ∀ e. Eff e Canvas.Dimensions
+foreign import windowInnerSize :: ∀ e. Effect Canvas.Dimensions
 
 -- | Set an event to fire on the given button id
 foreign import buttonEvent :: ∀ e.
                               String
-                           -> Eff e Unit
-                           -> Eff e Unit
+                           -> Effect Unit
+                           -> Effect Unit
 
 foreign import keydownEvent :: ∀ e.
                                 Element
-                             -> (KeyboardEvent -> Eff e Unit)
-                             -> Eff e Unit
+                             -> (KeyboardEvent -> Effect Unit)
+                             -> Effect Unit
 
 -- | Set callback to run after the window has resized (see UI.js for
 -- | time waited), providing it with the new window size.
 foreign import resizeEvent :: ∀ e.
                               ({ width  :: Number
-                               , height :: Number } -> Eff e Unit)
-                           -> Eff e Unit
+                               , height :: Number } -> Effect Unit)
+                           -> Effect Unit
 
 
 -- | The value returned by the function that initializes the genome browser;
 -- | provides an interface to the running browser instance.
-type BrowserInterface e a
-  = { getView          :: Aff e CoordSysView
-    , getBrowserCanvas :: Aff e BrowserContainer
-    , lastHotspots     :: Eff e (Number -> Point -> Array a)
-    , queueCommand     :: Variant UICmdR -> Aff e Unit
-    , queueUpdateView  :: UpdateView -> Eff e Unit
+type BrowserInterface a
+  = { getView          :: Aff CoordSysView
+    , getBrowserCanvas :: Aff BrowserContainer
+    , lastHotspots     :: Effect (Number -> Point -> Array a)
+    , queueCommand     :: Variant UICmdR -> Aff Unit
+    , queueUpdateView  :: UpdateView -> Effect Unit
     }
 
 
@@ -97,34 +99,34 @@ type BrowserInterface e a
 -- | a BrowserInterface for reading state & sending commands to it
 initializeBrowser :: ∀ r.
                      CoordSys _ _
-                  -> { snps        :: Number -> CoordSysView -> Eff _ Unit
-                     , annotations :: Number -> CoordSysView -> Eff _ Unit
-                     , chrs        :: Number -> CoordSysView -> Eff _ Unit
-                     , hotspots    :: Eff _ (Number -> Point -> Array (SNP ()))
-                     , fixedUI     :: Eff _ Unit | r}
+                  -> { snps        :: Number -> CoordSysView -> Effect Unit
+                     , annotations :: Number -> CoordSysView -> Effect Unit
+                     , chrs        :: Number -> CoordSysView -> Effect Unit
+                     , hotspots    :: Effect (Number -> Point -> Array (SNP ()))
+                     , fixedUI     :: Effect Unit | r}
                   -> CoordSysView
                   -> BrowserContainer
-                  -> Aff _ (BrowserInterface _ (SNP ()))
+                  -> Aff (BrowserInterface (SNP ()))
 initializeBrowser cSys renderFuns initView bc = do
 
-  renderFiberVar <- AVar.makeEmptyVar
+  renderFiberVar <- AVar.empty
 
-  viewVar <- AVar.makeVar initView
-  bcVar <- AVar.makeVar bc
+  viewVar <- AVar.new initView
+  bcVar <- AVar.new bc
 
-  uiCmdVar <- AVar.makeEmptyVar
-  lastHotspotsVar <- AVar.makeEmptyVar
+  uiCmdVar <- AVar.empty
+  lastHotspotsVar <- AVar.empty
 
-  let getView = AVar.readVar viewVar
-      getBrowserCanvas = AVar.readVar bcVar
-      queueCommand = flip AVar.putVar uiCmdVar
+  let getView = AVar.read viewVar
+      getBrowserCanvas = AVar.read bcVar
+      queueCommand = flip AVar.put uiCmdVar
       lastHotspots = renderFuns.hotspots
 
     -- hardcoded timeout for now
   queueUpdateView <- uiViewUpdate cSys (wrap 100.0) {view: viewVar, uiCmd: uiCmdVar}
 
   let mainLoop = do
-        uiCmd <- AVar.takeVar uiCmdVar
+        uiCmd <- AVar.take uiCmdVar
         case_ # V.on _render (\_ -> pure unit)
               # V.on _docResize (\ {width} -> do
                       {height} <- _.size <$> getDimensions bc
@@ -135,7 +137,7 @@ initializeBrowser cSys renderFuns initView bc = do
 
         -- if there's a rendering fiber running, we kill it
         traverse_ (killFiber (error "Resetting renderer"))
-          =<< AVar.tryTakeVar renderFiberVar
+          =<< AVar.tryTake renderFiberVar
 
         csView <- getView
         canvas <- getBrowserCanvas
@@ -147,7 +149,7 @@ initializeBrowser cSys renderFuns initView bc = do
             offset = scaleToScreen  currentScale (Pair.fst $ unwrap $ csView)
 
         -- fork a new renderFiber
-        renderFiber <- forkAff $ liftEff do
+        renderFiber <- forkAff $ liftEffect do
           log $ "rendering with offset: " <> show offset
           log <<< show =<< Map.keys <$> getLayers bc
 
@@ -156,7 +158,7 @@ initializeBrowser cSys renderFuns initView bc = do
           renderFuns.snps        offset csView
           renderFuns.fixedUI
 
-        AVar.putVar renderFiber renderFiberVar
+        AVar.put renderFiber renderFiberVar
 
         mainLoop
 
@@ -190,7 +192,7 @@ instance semigroupUpdateView :: Semigroup UpdateView where
   append _ y = y
 
 instance monoidUpdateView :: Monoid UpdateView where
-  mempty = ModView id
+  mempty = ModView identity
 
 
 updateViewFold :: UpdateView
@@ -202,8 +204,8 @@ updateViewFold uv = over CoordSysView case uv of
   ModView f    -> f
 
 
-queueCmd :: ∀ a. AVar a -> a -> Eff _ Unit
-queueCmd av cmd = launchAff_ $ AVar.putVar cmd av
+queueCmd :: ∀ a. AVar a -> a -> Effect Unit
+queueCmd av cmd = launchAff_ $ AVar.put cmd av
 
 
 -- | Provided with the AVar containing the view state (which is updated atomically)
@@ -214,33 +216,33 @@ uiViewUpdate :: ∀ r.
              -> Milliseconds
              -> { view  :: AVar CoordSysView
                 , uiCmd :: AVar (Variant UICmdR) | r }
-             -> Aff _ (UpdateView -> Eff _ Unit)
+             -> Aff (UpdateView -> Effect Unit)
 uiViewUpdate cs timeout { view, uiCmd } = do
-  viewCmd <- AVar.makeEmptyVar
+  viewCmd <- AVar.empty
 
-  curCmdVar <- AVar.makeVar (ModView id)
+  curCmdVar <- AVar.new (ModView identity)
 
   let normView = normalizeView cs (BigInt.fromInt 200000)
       loop' updater = do
-        cmd <- AVar.takeVar viewCmd
+        cmd <- AVar.take viewCmd
 
         killFiber (error "Resetting view update") updater
-        liftEff $ log $ "forking view update"
+        liftEffect $ log $ "forking view update"
 
-        curCmd <- AVar.takeVar curCmdVar
+        curCmd <- AVar.take curCmdVar
         let cmd' = curCmd <> cmd
-        AVar.putVar cmd' curCmdVar
+        AVar.put cmd' curCmdVar
 
         updater' <- forkAff do
             delay timeout
-            liftEff $ log "Running view update"
+            liftEffect $ log "Running view update"
 
-            vr <- AVar.takeVar view
+            vr <- AVar.take view
             let vr' = normView $ updateViewFold cmd' vr
-            AVar.putVar vr' view
+            AVar.put vr' view
 
-            AVar.putVar (inj _render unit) uiCmd
-            AVar.takeVar curCmdVar *> AVar.putVar mempty curCmdVar
+            AVar.put (inj _render unit) uiCmd
+            AVar.take curCmdVar *> AVar.put mempty curCmdVar
 
         loop' updater'
 
@@ -251,8 +253,8 @@ uiViewUpdate cs timeout { view, uiCmd } = do
 
 
 btnUI :: { scrollMod :: Number, zoomMod :: Number }
-      -> (UpdateView -> Eff _ Unit)
-      -> Eff _ Unit
+      -> (UpdateView -> Effect Unit)
+      -> Effect Unit
 btnUI mods cb = do
   buttonEvent "scrollLeft"  $ cb $ ScrollView     (-mods.scrollMod)
   buttonEvent "scrollRight" $ cb $ ScrollView       mods.scrollMod
@@ -263,8 +265,8 @@ btnUI mods cb = do
 keyUI :: ∀ r.
          Element
       -> { scrollMod :: Number | r }
-      -> (UpdateView -> Eff _ Unit)
-      -> Eff _ Unit
+      -> (UpdateView -> Effect Unit)
+      -> Effect Unit
 keyUI el mods cb = keydownEvent el f
   where f ke = case DOM.key ke of
           "ArrowLeft"  -> cb $ ScrollView (-mods.scrollMod)
@@ -279,24 +281,24 @@ _render = SProxy :: SProxy "render"
 _docResize = SProxy :: SProxy "docResize"
 
 
-debugView :: BrowserInterface _ _
-          -> Eff _ { get :: _
+debugView :: BrowserInterface _
+          -> Effect { get :: _
                    , set :: _ }
-debugView s = do
+debugView s = unsafePartial do
   let get name = launchAff_ do
          view <- s.getView
-         liftEff do
+         liftEffect do
            log $ "CoordSysView: " <> show (map BigInt.toString $ unwrap view)
            setWindow name $ (\(Pair l r) -> {l,r}) $ unwrap view
 
   let set lr = s.queueUpdateView
-               $ ModView $ const (BigInt.fromNumber <$> Pair lr.l lr.r)
+               $ ModView $ const ((fromJust <<< BigInt.fromNumber) <$> Pair lr.l lr.r)
 
   pure {get, set}
 
 
 
-printSNPInfo :: ∀ r. Array (SNP r) -> Eff _ Unit
+printSNPInfo :: ∀ r. Array (SNP r) -> Effect Unit
 printSNPInfo fs = do
   let n = length fs :: Int
       m = 5
@@ -391,12 +393,12 @@ annotationHTMLShort {feature} = wrapWith "p" anchor
 
 
 
-foreign import initDebugDiv :: ∀ e. Number -> Eff e Unit
-foreign import setDebugDivVisibility :: ∀ e. String -> Eff e Unit
-foreign import setDebugDivPoint :: ∀ e. Point -> Eff e Unit
+foreign import initDebugDiv :: ∀ e. Number -> Effect Unit
+foreign import setDebugDivVisibility :: ∀ e. String -> Effect Unit
+foreign import setDebugDivPoint :: ∀ e. Point -> Effect Unit
 
 
-foreign import setElementContents :: ∀ e. Element -> String -> Eff e Unit
+foreign import setElementContents :: ∀ e. Element -> String -> Effect Unit
 
 data InfoBoxF
   = IBoxShow
@@ -410,7 +412,7 @@ derive instance genericInfoBoxF :: Generic InfoBoxF _
 instance showInfoBoxF :: Show InfoBoxF where
   show = genericShow
 
-updateInfoBox :: Element -> InfoBoxF -> Eff _ Unit
+updateInfoBox :: Element -> InfoBoxF -> Effect Unit
 updateInfoBox el cmd =
   case cmd of
     IBoxShow ->
@@ -424,25 +426,25 @@ updateInfoBox el cmd =
     (IBoxSetContents html) ->
       setElementContents el html
 
-infoBoxId :: ElementId
-infoBoxId = wrap "infoBox"
+infoBoxId :: String
+infoBoxId = "infoBox"
 
-initInfoBox :: Eff _ (InfoBoxF -> Eff _ Unit)
+initInfoBox :: Effect (InfoBoxF -> Effect Unit)
 initInfoBox = do
-  doc <- map DOM.htmlDocumentToDocument
+  doc <- map DOM.toDocument
            $ DOM.document =<< DOM.window
   el <- DOM.createElement "div" doc
 
-  DOM.setId infoBoxId el
+  setId infoBoxId el
 
   DOM.documentElement doc >>= case _ of
     Nothing -> throw "Couldn't find document body!"
-    Just docBody -> void $ DOM.appendChild el docBody
+    Just docBody -> void $ appendChild (Element.toNode el) (Element.toNode docBody)
 
   pure $ updateInfoBox el
 
 
-runBrowser :: Conf -> BrowserContainer -> Eff _ _
+runBrowser :: Conf -> BrowserContainer -> Effect _
 runBrowser config bc = launchAff $ do
 
   let cSys :: CoordSys ChrId BigInt
@@ -456,9 +458,9 @@ runBrowser config bc = launchAff $ do
 
       clickRadius = 1.0
 
-  liftEff $ initDebugDiv clickRadius
+  liftEffect $ initDebugDiv clickRadius
 
-  cmdInfoBox <- liftEff $ initInfoBox
+  cmdInfoBox <- liftEffect $ initInfoBox
 
 
   trackData <-
@@ -468,14 +470,14 @@ runBrowser config bc = launchAff $ do
     <*> foldMap (getAnnotations cSys) config.urls.annotations
 
 
-  render <- liftEff
+  render <- liftEffect
             $ addDemoLayers cSys config trackData bc
 
   browser <-
     initializeBrowser cSys render initialView bc
 
 
-  liftEff do
+  liftEffect do
     resizeEvent \d ->
       launchAff_ $ browser.queueCommand $ inj _docResize d
 
@@ -501,7 +503,7 @@ runBrowser config bc = launchAff $ do
          $ ZoomView $ 1.0 + scrollZoomScale * dY
 
 
-  liftEff do
+  liftEffect do
     let sigSnps = filterSig config.score trackData.snps
         annotAround pks snp =
           Array.find (\a -> a.covers `pairsOverlap` snp.position)
@@ -517,8 +519,8 @@ runBrowser config bc = launchAff $ do
               annoPeaks = annotationsForScale cSys sigSnps
                             trackData.annotations segs
 
-          lastHotspots' <- liftEff $ browser.lastHotspots
-          liftEff do
+          lastHotspots' <- liftEffect $ browser.lastHotspots
+          liftEffect do
             let clicked = (lastHotspots' clickRadius p)
             printSNPInfo clicked
             case Array.head clicked of
@@ -559,14 +561,14 @@ type Conf =
   , initialChrs :: Maybe { left :: String, right :: String }
   }
 
-foreign import setWindow :: ∀ e a. String -> a -> Eff e Unit
+foreign import setWindow :: ∀ a. String -> a -> Effect Unit
 
 
-main :: Foreign -> Eff _ _
+main :: Foreign -> Effect Unit
 main rawConfig = do
 
   el' <- do
-    doc <- DOM.htmlDocumentToDocument
+    doc <- DOM.toDocument
            <$> (DOM.document =<< DOM.window)
     DOM.querySelector (wrap "#browser") (toParentNode doc)
 
@@ -593,34 +595,34 @@ main rawConfig = do
 
 
 -- TODO this could almost certainly be done better
-chunkConsumer :: ∀ m a.
-                 Foldable m
-              => Monoid (m a)
-              => AVar (m a)
-              -> Consumer (m a) (Aff _) Unit
-chunkConsumer av = Co.consumer \m ->
-  if null m
-    then pure $ Just unit
-    else do
-      sofar <- AVar.takeVar av
-      AVar.putVar (sofar <> m) av
-      delay (wrap 20.0)
-      pure Nothing
+-- chunkConsumer :: ∀ m a.
+--                  Foldable m
+--               => Monoid (m a)
+--               => AVar (m a)
+--               -> Consumer (m a) (Aff) Unit
+-- chunkConsumer av = Co.consumer \m ->
+--   if null m
+--     then pure $ Just unit
+--     else do
+--       sofar <- AVar.take av
+--       AVar.put (sofar <> m) av
+--       delay (wrap 20.0)
+--       pure Nothing
 
 
-type TrackVar a = AVar (Map ChrId (Array a))
-type TrackProducer eff a = Producer (Map ChrId (Array a)) (Aff eff) Unit
+-- type TrackVar a = AVar (Map ChrId (Array a))
+-- type TrackProducer eff a = Producer (Map ChrId (Array a)) (Aff eff) Unit
 
 -- Feels like this one takes care of a bit too much...
-fetchLoop1 :: ∀ a.
-              (Maybe (Aff _ (TrackProducer _ a)))
-           -> Aff _ (TrackVar a)
-fetchLoop1 Nothing = AVar.makeEmptyVar
-fetchLoop1 (Just startProd) = do
-  prod <- startProd
-  avar <- AVar.makeVar mempty
-  _ <- forkAff $ runProcess $ prod `connect` chunkConsumer avar
-  pure avar
+-- fetchLoop1 :: ∀ a.
+--               (Maybe (Aff (TrackProducer _ a)))
+--            -> Aff (TrackVar a)
+-- fetchLoop1 Nothing = AVar.empty
+-- fetchLoop1 (Just startProd) = do
+--   prod <- startProd
+--   avar <- AVar.new mempty
+--   _ <- forkAff $ runProcess $ prod `connect` chunkConsumer avar
+--   pure avar
 
 -- | Starts threads that fetch & parse each of the provided tracks,
 -- | filling an AVar over time per track, which can be used by other parts of the application
@@ -628,7 +630,7 @@ fetchLoop1 (Just startProd) = do
 {-
 fetchLoop :: CoordSys ChrId BigInt
           -> DataURLs
-          -> Aff _
+          -> Aff
                { gwas :: TrackVar (GWASFeature ())
                , genes :: TrackVar BedFeature
                }

@@ -5,12 +5,7 @@ import Prelude
 import Color (black, white)
 import Color.Scheme.Clrs (blue, red)
 import Color.Scheme.X11 (darkblue, darkgrey, lightgray, lightgrey)
-import Control.Monad.Aff (Aff, error)
-import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (liftEff)
-import Control.Monad.Eff.Console (log)
-import Control.Monad.Error.Class (throwError)
-import Control.Monad.Except (runExcept)
+import Control.Monad.Except (runExcept, throwError)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
@@ -18,10 +13,6 @@ import Data.Either (Either(Right, Left))
 import Data.Filterable (filter, filterMap, partition, partitionMap)
 import Data.Foldable (class Foldable, fold, foldMap, foldr, length, minimumBy, sequence_)
 import Data.FoldableWithIndex (foldMapWithIndex)
-import Data.Foreign (F, Foreign, ForeignError(ForeignError))
-import Data.Foreign (readArray) as Foreign
-import Data.Foreign.Index (readProp) as Foreign
-import Data.Foreign.Keys (keys) as Foreign
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Lens (re, view, (^.), (^?))
@@ -36,15 +27,19 @@ import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Profunctor.Strong (fanout)
-import Data.Record (insert) as Record
-import Data.Record.Builder (build, insert, merge, modify)
-import Data.Record.Extra (class Keys)
-import Data.Record.Extra (keys) as Record
 import Data.Traversable (for)
 import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
+import Effect (Effect)
+import Effect.Aff (Aff, error)
+import Effect.Class (liftEffect)
+import Effect.Console (log)
+import Foreign (F, Foreign, ForeignError(ForeignError))
+import Foreign (readArray) as Foreign
+import Foreign.Index (readProp) as Foreign
+import Foreign.Keys (keys) as Foreign
 import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderHotspots, renderTrack, thresholdRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
 import Genetics.Browser.Canvas (BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, _drawings, _labels, createAndAddLayer, createAndAddLayer_, getDimensions)
@@ -57,6 +52,11 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
 import Network.HTTP.Affjax as Affjax
+import Network.HTTP.Affjax.Response as Affjax
+import Record (insert) as Record
+import Record.Builder (build, insert, merge, modify)
+import Record.Extra (class Keys)
+import Record.Extra (keys) as Record
 import Simple.JSON as Simple
 import Type.Prelude (class RowToList, SProxy(SProxy))
 import Unsafe.Coerce (unsafeCoerce)
@@ -99,7 +99,7 @@ bedToFeature cs pl = do
 
 getGenes :: CoordSys ChrId BigInt
          -> String
-         -> Aff _ (Map ChrId (Array BedFeature))
+         -> Aff (Map ChrId (Array BedFeature))
 getGenes cs url = do
   ls <- fetchBed url
 
@@ -273,12 +273,12 @@ showAnnotation a = (List.fromFoldable
 
 getSNPs :: CoordSys ChrId BigInt
         -> String
-        -> Aff _ (Map ChrId (Array (SNP ())))
+        -> Aff (Map ChrId (Array (SNP ())))
 getSNPs cs url = do
-  resp <- Affjax.get url
+  resp <- Affjax.get Affjax.json url
 
   rawSNPs <-
-    case runExcept $ Foreign.readArray resp.response of
+    case runExcept $ Foreign.readArray $ unsafeCoerce resp.response of
            Left err -> throwError $ error "SNP data is not an array"
            Right as -> pure as
 
@@ -292,12 +292,12 @@ getSNPs cs url = do
 
 getAnnotations :: CoordSys ChrId BigInt
                -> String
-               -> Aff _ (Map ChrId (Array (Annotation ())))
+               -> Aff (Map ChrId (Array (Annotation ())))
 getAnnotations cs url = do
-  resp <- Affjax.get url
+  resp <- Affjax.get Affjax.json url
 
   rawAnnots <- case runExcept
-                    $ Foreign.readArray resp.response of
+                    $ Foreign.readArray $ unsafeCoerce resp.response of
                  Left err -> throwError $ error "Annotations data is not an array"
                  Right as -> pure as
 
@@ -306,7 +306,7 @@ getAnnotations cs url = do
 
 
   -- debug/testing stuff
-  liftEff do
+  liftEffect do
     log $ "Raw annotations array length: " <> show (Array.length rawAnnots)
     log $ "Could not parse "
         <> show (length parsed.left :: Int)
@@ -319,7 +319,7 @@ getAnnotations cs url = do
     log $ unsafeCoerce (parsed.right)
   case Array.head parsed.right of
     Nothing -> pure unit
-    Just an -> liftEff do
+    Just an -> liftEffect do
       log "first annotation: "
       sequence_ (log <$> (("> " <> _) <$> showAnnotation an))
 
@@ -471,7 +471,7 @@ renderSNPs snpData { snpsConfig, threshold } =
 
       npointed :: Map ChrId (Array (Tuple (SNP ()) NPoint))
       npointed = (map <<< map)
-        (fanout id (\s ->
+        (fanout identity (\s ->
            { x: featureNormX s
            , y: wrap $ normYLogScore threshold s.feature.score })) snpData
 
@@ -651,11 +651,11 @@ addDemoLayers :: ∀ r r2.
              -> { snps        :: Map ChrId (Array (SNP ()))
                 , annotations :: Map ChrId (Array (Annotation ())) | r2 }
              -> BrowserContainer
-             -> Eff _ { snps        :: Number -> CoordSysView -> Eff _ Unit
-                      , annotations :: Number -> CoordSysView -> Eff _ Unit
-                      , chrs        :: Number -> CoordSysView -> Eff _ Unit
-                      , hotspots    :: Eff _ (Number -> Point -> Array (SNP ()))
-                      , fixedUI  :: Eff _ Unit }
+             -> Effect { snps        :: Number -> CoordSysView -> Effect Unit
+                      , annotations :: Number -> CoordSysView -> Effect Unit
+                      , chrs        :: Number -> CoordSysView -> Effect Unit
+                      , hotspots    :: Effect (Number -> Point -> Array (SNP ()))
+                      , fixedUI  :: Effect Unit }
 addDemoLayers cSys config trackData =
   let threshold = config.score
       vscale = build (merge config.vscale) threshold

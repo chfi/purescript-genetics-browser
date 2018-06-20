@@ -2,12 +2,11 @@ module Genetics.Browser.Layer where
 
 import Prelude
 
-import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (class MonadEff, liftEff)
+import Effect (Effect)
+import Effect.Class (class MonadEffect, liftEffect)
 import Data.Foldable (class Foldable, foldlDefault, foldrDefault)
 import Data.Generic.Rep (class Generic)
 import Data.Lens (Getter', to, (^.))
-import Data.Monoid (class Monoid)
 import Data.Traversable (class Traversable, sequenceDefault)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Graphics.Canvas (CanvasElement, Context2D, beginPath, clip, closePath, lineTo, moveTo)
@@ -15,10 +14,9 @@ import Graphics.Canvas as Canvas
 import Type.Prelude (SProxy(..))
 
 
-foreign import setContextTranslation :: ∀ e.
-                                        Point
+foreign import setContextTranslation :: Point
                                      -> Context2D
-                                     -> Eff e Unit
+                                     -> Effect Unit
 
 type Point = { x :: Number, y :: Number }
 
@@ -183,12 +181,12 @@ browserSlots {size,padding} =
 -- | dimensions & padding of the browser, `slotContext` provides a
 -- | canvas context that has been translated to the relevant slot
 slotContext :: ∀ m a.
-                MonadEff _ m
+                MonadEffect m
              => Layer a
              -> BrowserDimensions
              -> CanvasElement
              -> m Context2D
-slotContext (Layer _ mask com) dims el = liftEff do
+slotContext (Layer _ mask com) dims el = liftEffect do
 
   ctx <- Canvas.getContext2D el
 

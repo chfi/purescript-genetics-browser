@@ -1,6 +1,6 @@
 {
   "name": "genetics-browser",
-  "set": "genetics-browser",
+  "set": "genetics-0.12",
   "source": "https://github.com/chfi/package-sets.git",
   "depends": [
     "aff",
@@ -12,15 +12,14 @@
     "console",
     "coroutines",
     "debug",
-    "dom",
-    "dom-classy",
     "drawing",
-    "eff",
+    "effect",
     "filterable",
     "foreign",
+    "foreign-generic",
     "functions",
     "lists",
-    "maps",
+    "ordered-collections",
     "newtype",
     "numbers",
     "pairs",
@@ -33,10 +32,12 @@
     "record-extra",
     "simple-json",
     "spec",
-    "spec-quickcheck",
     "transformers",
     "typelevel-prelude",
     "validation",
-    "variant"
+    "variant",
+    "web-dom",
+    "web-html",
+    "web-uievents"
   ]
 }

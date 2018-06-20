@@ -6,17 +6,6 @@ module Genetics.Browser.Canvas where
 
 import Prelude
 
-import Control.Monad.Aff (Aff, delay)
-import Control.Monad.Eff (Eff)
-import Control.Monad.Eff.Class (class MonadEff, liftEff)
-import Control.Monad.Eff.Ref (Ref)
-import Control.Monad.Eff.Ref as Ref
-import Control.Monad.Eff.Uncurried (EffFn2, EffFn3, EffFn4, runEffFn2, runEffFn3, runEffFn4)
-import DOM.Classy.Element (class IsElement, toElement)
-import DOM.Classy.Node (class IsNode, fromNode)
-import DOM.Classy.Node as DOM
-import DOM.HTML.Types (HTMLCanvasElement)
-import DOM.Node.Types (Element, Node)
 import Data.Either (Either(..))
 import Data.Filterable (filterMap)
 import Data.Foldable (any, foldl, for_, length)
@@ -39,6 +28,12 @@ import Data.Traversable (traverse, traverse_)
 import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
+import Effect (Effect)
+import Effect.Aff (Aff, delay)
+import Effect.Class (class MonadEffect, liftEffect)
+import Effect.Ref (Ref)
+import Effect.Ref as Ref
+import Effect.Uncurried (EffectFn2, EffectFn3, EffectFn4, runEffectFn2, runEffectFn3, runEffectFn4)
 import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, Component(CBottom, CRight, CLeft, CTop, Padded, Full), Layer(Layer), LayerType(Scrolling, Fixed), _Component, asSlot, browserSlots, setContextTranslation, slotContext, slotRelative)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
@@ -47,51 +42,52 @@ import Graphics.Drawing (render, translate) as Drawing
 import Graphics.Drawing.Font (font, fontString) as Drawing
 import Graphics.Drawing.Font (sansSerif)
 import Partial.Unsafe (unsafeCrashWith)
+import Prim.TypeError (class Warn)
 import Unsafe.Coerce (unsafeCoerce)
+import Web.DOM (Element)
+import Web.DOM.Node as DOM
 
 
 _Element :: Iso' CanvasElement Element
 _Element = iso unsafeCoerce unsafeCoerce
 
 -- | Create a new CanvasElement, not attached to the DOM, with the provided String as its CSS class
-foreign import createCanvas :: ∀ eff.
-                               { width :: Number, height :: Number }
+foreign import createCanvas :: { width :: Number, height :: Number }
                             -> String
-                            -> Eff eff CanvasElement
+                            -> Effect CanvasElement
 
 
-foreign import setElementStyleImpl :: ∀ e.
-                                      EffFn3 e
+foreign import setElementStyleImpl :: EffectFn3
                                       Element String String
                                       Unit
 
 setElementStyle :: Element
                 -> String
                 -> String
-                -> Eff _ Unit
-setElementStyle = runEffFn3 setElementStyleImpl
+                -> Effect Unit
+setElementStyle = runEffectFn3 setElementStyleImpl
 
-setElementStyles :: Element -> Array (Tuple String String) -> Eff _ Unit
+setElementStyles :: Element -> Array (Tuple String String) -> Effect Unit
 setElementStyles el =
   traverse_ (uncurry $ setElementStyle el)
 
-setCanvasStyles :: CanvasElement -> Array (Tuple String String) -> Eff _ Unit
+setCanvasStyles :: CanvasElement -> Array (Tuple String String) -> Effect Unit
 setCanvasStyles = setElementStyles <<< view _Element
 
 
 setCanvasStyle :: CanvasElement
                -> String
                -> String
-               -> Eff _ Unit
+               -> Effect Unit
 setCanvasStyle ce = setElementStyle (ce ^. _Element)
 
-setCanvasZIndex :: CanvasElement -> Int -> Eff _ Unit
+setCanvasZIndex :: CanvasElement -> Int -> Effect Unit
 setCanvasZIndex ce i = setCanvasStyle ce "z-index" (show i)
 
 setCanvasPosition :: ∀ r.
                      { left :: Number, top :: Number | r }
                   -> CanvasElement
-                  -> Eff _ Unit
+                  -> Effect Unit
 setCanvasPosition {left, top} ce =
   setCanvasStyles ce
     [ Tuple "position" "absolute"
@@ -99,18 +95,16 @@ setCanvasPosition {left, top} ce =
     , Tuple "left" (show left <> "px") ]
 
 
-foreign import appendCanvasElem :: ∀ e.
-                                   Element
+foreign import appendCanvasElem :: Element
                                 -> CanvasElement
-                                -> Eff e Unit
+                                -> Effect Unit
 
 
 -- | Sets some of the browser container's CSS to reasonable defaults
-foreign import setContainerStyle :: ∀ e. Element -> Canvas.Dimensions -> Eff e Unit
+foreign import setContainerStyle :: Element -> Canvas.Dimensions -> Effect Unit
 
 
-foreign import drawCopies :: ∀ eff a.
-                             EffFn4 eff
+foreign import drawCopies :: EffectFn4
                              CanvasElement Canvas.Dimensions Context2D (Array Point)
                              Unit
 
@@ -118,30 +112,27 @@ foreign import drawCopies :: ∀ eff a.
 foreign import setCanvasTranslation :: ∀ e.
                                        Point
                                     -> CanvasElement
-                                    -> Eff e Unit
+                                    -> Effect Unit
 
-foreign import elementClickImpl :: ∀ e.
-                                   EffFn2 e
-                                   Element (Point -> Eff e Unit)
+foreign import elementClickImpl :: EffectFn2
+                                   Element (Point -> Effect Unit)
                                    Unit
 
-elementClick :: ∀ e.
-                IsElement e
-             => e
-             -> (Point -> Eff _ Unit)
-             -> Eff _ Unit
-elementClick e = runEffFn2 elementClickImpl (toElement e)
+elementClick :: Element
+             -> (Point -> Effect Unit)
+             -> Effect Unit
+elementClick e = runEffectFn2 elementClickImpl e
 
 
 -- | Attaches a callback to the browsercontainer, to be called when
 -- | the browser element is clicked. The callback is called with
 -- | coordinates relative to the provided component slot.
 browserClickHandler :: ∀ m.
-                       MonadEff _ m
+                       MonadEffect m
                     => BrowserContainer
-                    -> Component (Point -> Eff _ Unit)
+                    -> Component (Point -> Effect Unit)
                     -> m Unit
-browserClickHandler bc com = liftEff do
+browserClickHandler bc com = liftEffect do
   dims <- getDimensions bc
 
   let cb = com ^. _Component
@@ -151,8 +142,7 @@ browserClickHandler bc com = liftEff do
 
 
 
-foreign import scrollCanvasImpl :: ∀ e.
-                                   EffFn3 e
+foreign import scrollCanvasImpl :: EffectFn3
                                    CanvasElement CanvasElement Point
                                    Unit
 
@@ -160,15 +150,15 @@ foreign import scrollCanvasImpl :: ∀ e.
 -- | then copying it back at an offset
 scrollCanvas :: BufferedCanvas
              -> Point
-             -> Eff _ Unit
-scrollCanvas (BufferedCanvas bc) = runEffFn3 scrollCanvasImpl bc.back bc.front
+             -> Effect Unit
+scrollCanvas (BufferedCanvas bc) = runEffectFn3 scrollCanvasImpl bc.back bc.front
 
 -- | Scroll all buffered canvases in a container
 scrollBrowser :: BrowserContainer
               -> Point
-              -> Eff _ Unit
+              -> Effect Unit
 scrollBrowser (BrowserContainer bc) pt = do
-  layers <- Ref.readRef bc.layers
+  layers <- Ref.read bc.layers
   -- | Filter out all layers that don't scroll
   let scrolling = filterMap (preview _Buffer) layers
   -- | then... scroll them
@@ -176,22 +166,20 @@ scrollBrowser (BrowserContainer bc) pt = do
 
 
 
-foreign import canvasDragImpl :: ∀ eff.
-                                 CanvasElement
+foreign import canvasDragImpl :: CanvasElement
                               -> ( { during :: Nullable Point
-                                   , total :: Nullable Point } -> Eff eff Unit )
-                              -> Eff eff Unit
+                                   , total :: Nullable Point } -> Effect Unit )
+                              -> Effect Unit
 
 
-foreign import canvasWheelCBImpl :: ∀ eff.
-                                    CanvasElement
-                                 -> (Number -> Eff eff Unit)
-                                 -> Eff eff Unit
+foreign import canvasWheelCBImpl :: CanvasElement
+                                 -> (Number -> Effect Unit)
+                                 -> Effect Unit
 
 -- |
 canvasDrag :: CanvasElement
-           -> (Either Point Point -> Eff _ Unit)
-           -> Eff _ Unit
+           -> (Either Point Point -> Effect Unit)
+           -> Effect Unit
 canvasDrag el f =
   let toEither g {during, total} = case toMaybe during of
         Just p  -> g $ Right p
@@ -202,8 +190,8 @@ canvasDrag el f =
 -- | Takes a BrowserContainer and a callback function that is called with the
 -- | total dragged distance when a click & drag action is completed.
 dragScroll :: BrowserContainer
-           -> (Point -> Eff _ Unit)
-           -> Eff _ Unit
+           -> (Point -> Effect Unit)
+           -> Effect Unit
 dragScroll bc'@(BrowserContainer {element}) cb =
   canvasDrag (unsafeCoerce element) f -- actually safe
   where f = case _ of
@@ -217,15 +205,15 @@ dragScroll bc'@(BrowserContainer {element}) cb =
 -- | wheel scroll `deltaY`. Callback is provided with only the sign of `deltaY`
 -- | as to be `deltaMode` agnostic.
 wheelZoom :: BrowserContainer
-          -> (Number -> Eff _ Unit)
-          -> Eff _ Unit
+          -> (Number -> Effect Unit)
+          -> Effect Unit
 wheelZoom bc cb =
   canvasWheelCBImpl
     (unsafeCoerce $ _.element $ unwrap bc) cb
 
 
 -- | Helper function for erasing the contents of a canvas context given its dimensions
-clearCanvas :: Context2D -> Canvas.Dimensions -> Eff _ Unit
+clearCanvas :: Context2D -> Canvas.Dimensions -> Effect Unit
 clearCanvas ctx {width, height} =
   void $ Canvas.clearRect ctx { x: 0.0, y: 0.0, w: width, h: height }
 
@@ -249,7 +237,7 @@ derive instance newtypeBufferedCanvas :: Newtype BufferedCanvas _
 
 createBufferedCanvas :: Canvas.Dimensions
                      -> String
-                     -> Eff _ BufferedCanvas
+                     -> Effect BufferedCanvas
 createBufferedCanvas dim name = do
   back  <- createCanvas dim $ name <> "-buffer"
   front <- createCanvas dim $ name
@@ -257,30 +245,29 @@ createBufferedCanvas dim name = do
   blankBuffer bc
   pure bc
 
-getBufferedContext :: Warn "deprecated"
-                   => BufferedCanvas
-                   -> Eff _ Context2D
+getBufferedContext :: BufferedCanvas
+                   -> Effect Context2D
 getBufferedContext = Canvas.getContext2D <$> _.front <<< unwrap
 
 setBufferedCanvasSize :: Canvas.Dimensions
                       -> BufferedCanvas
-                      -> Eff _ Unit
+                      -> Effect Unit
 setBufferedCanvasSize dim bc@(BufferedCanvas {back, front}) = do
-  _ <- Canvas.setCanvasDimensions dim back
-  _ <- Canvas.setCanvasDimensions dim front
+  _ <- Canvas.setCanvasDimensions back dim
+  _ <- Canvas.setCanvasDimensions front dim
   blankBuffer bc
   pure unit
 
 
 translateBuffer :: Point
                 -> BufferedCanvas
-                -> Eff _ Unit
+                -> Effect Unit
 translateBuffer p (BufferedCanvas bc) = do
   setCanvasTranslation p bc.back
   setCanvasTranslation p bc.front
 
 blankBuffer :: BufferedCanvas
-            -> Eff _ Unit
+            -> Effect Unit
 blankBuffer bc@(BufferedCanvas {back, front}) = do
   translateBuffer {x: zero, y: zero} bc
 
@@ -319,7 +306,7 @@ trackTotalDimensions d = { width:  d.width  + extra
 
 
 trackCanvas :: Canvas.Dimensions
-            -> Eff _ TrackCanvas
+            -> Effect TrackCanvas
 trackCanvas dim = do
   canvas <- createBufferedCanvas (trackTotalDimensions dim) "track"
   glyphBuffer <- createCanvas glyphBufferSize "glyphBuffer"
@@ -329,7 +316,7 @@ trackCanvas dim = do
 
 setTrackCanvasSize :: Canvas.Dimensions
                    -> TrackCanvas
-                   -> Eff _ TrackCanvas
+                   -> Effect TrackCanvas
 setTrackCanvasSize dim (TrackCanvas tc) = do
   setBufferedCanvasSize (trackTotalDimensions dim) tc.canvas
   pure $ TrackCanvas
@@ -375,11 +362,11 @@ derive instance newtypeBrowserContainer :: Newtype BrowserContainer _
 
 
 getDimensions :: ∀ m.
-                 MonadEff _ m
+                 MonadEffect m
               => BrowserContainer
               -> m BrowserDimensions
 getDimensions (BrowserContainer {dimensions}) =
-  liftEff $ Ref.readRef dimensions
+  liftEffect $ Ref.read dimensions
 
 _Layers :: Lens' BrowserContainer (Ref (Map String LayerCanvas))
 _Layers = _Newtype <<< Lens.prop (SProxy :: SProxy "layers")
@@ -395,7 +382,7 @@ _Track = _Newtype <<< Lens.prop (SProxy :: SProxy "track")
 foreign import debugBrowserCanvas :: ∀ e.
                                      String
                                   -> BrowserCanvas
-                                  -> Eff e Unit
+                                  -> Effect Unit
 
 
 subtractPadding :: Canvas.Dimensions
@@ -420,8 +407,7 @@ type UISlots = { left   :: UISlot
                , bottom :: UISlot }
 
 
-uiSlots :: Warn "deprecated"
-        => BrowserCanvas
+uiSlots :: BrowserCanvas
         -> UISlots
 uiSlots (BrowserCanvas bc) =
   let track   = subtractPadding bc.dimensions bc.trackPadding
@@ -441,7 +427,7 @@ uiSlots (BrowserCanvas bc) =
 
 setBrowserCanvasSize :: Canvas.Dimensions
                      -> BrowserCanvas
-                     -> Eff _ BrowserCanvas
+                     -> Effect BrowserCanvas
 setBrowserCanvasSize dim (BrowserCanvas bc) = do
 
   setContainerStyle bc.container dim
@@ -450,7 +436,7 @@ setBrowserCanvasSize dim (BrowserCanvas bc) = do
   track <- setTrackCanvasSize trackDim bc.track
 
   setBufferedCanvasSize dim bc.trackOverlay
-  _ <- Canvas.setCanvasDimensions dim bc.staticOverlay
+  _ <- Canvas.setCanvasDimensions bc.staticOverlay dim
 
   pure $ BrowserCanvas
        $ bc { dimensions = dim
@@ -458,12 +444,12 @@ setBrowserCanvasSize dim (BrowserCanvas bc) = do
 
 
 setBrowserContainerSize :: ∀ m.
-                           MonadEff _ m
+                           MonadEffect m
                         => Canvas.Dimensions
                         -> BrowserContainer
                         -> m Unit
-setBrowserContainerSize dim bc'@(BrowserContainer bc) = liftEff $ do
-  Ref.modifyRef bc.dimensions (_ { size = dim })
+setBrowserContainerSize dim bc'@(BrowserContainer bc) = liftEffect $ do
+  Ref.modify_ (_ { size = dim }) bc.dimensions
   setContainerStyle bc.element dim
   traverse_ (resizeLayer dim) =<< getLayers bc'
 
@@ -473,7 +459,7 @@ setBrowserContainerSize dim bc'@(BrowserContainer bc) = liftEff $ do
 browserCanvas :: Canvas.Dimensions
               -> TrackPadding
               -> Element
-              -> Eff _ BrowserCanvas
+              -> Effect BrowserCanvas
 browserCanvas dimensions trackPadding el = do
 
   setContainerStyle el dimensions
@@ -521,15 +507,15 @@ glyphBufferSize = { width: 15.0, height: 300.0 }
 browserContainer :: Canvas.Dimensions
                  -> BrowserPadding
                  -> Element
-                 -> Eff _ BrowserContainer
+                 -> Effect BrowserContainer
 browserContainer size padding element = do
 
   setContainerStyle element size
 
   glyphBuffer <- createCanvas glyphBufferSize "glyphBuffer"
 
-  dimensions <- Ref.newRef { size, padding }
-  layers     <- Ref.newRef mempty
+  dimensions <- Ref.new { size, padding }
+  layers     <- Ref.new mempty
 
   pure $
     BrowserContainer
@@ -540,17 +526,16 @@ browserContainer size padding element = do
 -- | canvases are drawn in the correct order (i.e. as the
 -- | BrowserContainer layer list is ordered)
 zIndexLayers :: ∀ m.
-                MonadEff _ m
-             => Warn "Test this!"
+                MonadEffect m
              => BrowserContainer
              -> List String
              -> m Unit
-zIndexLayers (BrowserContainer bc) order = liftEff do
-  layers <- Ref.readRef bc.layers
+zIndexLayers (BrowserContainer bc) order = liftEffect do
+  layers <- Ref.read bc.layers
   let layerNames = Map.keys layers
       n = length layerNames :: Int
   -- if order does not have the same layer names as the BrowserContainer, fail
-  if List.null (List.difference order layerNames)
+  if List.null (List.difference order $ List.fromFoldable layerNames)
     then do
       void $ forWithIndex order \i ln ->
         traverse_ (\l -> setCanvasZIndex (l ^. _FrontCanvas) i)
@@ -561,62 +546,63 @@ zIndexLayers (BrowserContainer bc) order = liftEff do
 
 
 getLayers :: ∀ m.
-             MonadEff _ m
+             MonadEffect m
           => BrowserContainer
           -> m (Map String LayerCanvas)
 getLayers (BrowserContainer bc) =
-  liftEff $ Ref.readRef bc.layers
+  liftEffect $ Ref.read bc.layers
 
 
 resizeLayer :: ∀ m.
-               MonadEff _ m
+               MonadEffect m
             => Canvas.Dimensions
             -> LayerCanvas
             -> m Unit
-resizeLayer dims lc = liftEff do
+resizeLayer dims lc = liftEffect do
   case lc of
-    Static e -> void $ Canvas.setCanvasDimensions dims e
+    Static e -> void $ Canvas.setCanvasDimensions e dims
     Buffer b -> setBufferedCanvasSize dims b
 
 -- | Add a LayerCanvas with the provided name to the browser container
 -- | and its element. The LayerCanvas' front element is added without
 -- | a Z-index, and replaces any existing layer with the same name!
 addLayer :: ∀ m.
-            MonadEff _ m
+            MonadEffect m
          => BrowserContainer
          -> String
          -> LayerCanvas
          -> m Unit
-addLayer bc name lc = liftEff do
+addLayer bc name lc = liftEffect do
   layers <- getLayers bc
 
-  Ref.modifyRef (bc ^. _Layers) $ Map.insert name lc
+  Ref.modify_  (Map.insert name lc) (bc ^. _Layers)
+  let toNode l = unsafeCoerce $ l ^. _FrontCanvas
 
   void $ case Map.lookup name layers of
-    Just oldL  -> DOM.replaceChild lc oldL $ bc ^. _Container
-    Nothing    -> DOM.appendChild  lc      $ bc ^. _Container
+    Just oldL  -> DOM.replaceChild (toNode lc) (toNode oldL) (unsafeCoerce $ bc ^. _Container)
+    Nothing    -> DOM.appendChild  (toNode lc)               (unsafeCoerce $ bc ^. _Container)
 
 -- | Delete a LayerCanvas by name from the browser container, and the
 -- | container DOM element.
 deleteLayer :: ∀ m.
-               MonadEff _ m
+               MonadEffect m
             => BrowserContainer
             -> String
             -> m Unit
-deleteLayer bc name = liftEff do
+deleteLayer bc name = liftEffect do
   layers <- getLayers bc
+  let toNode l = unsafeCoerce $ l ^. _FrontCanvas
 
   case Map.lookup name layers of
     Nothing -> pure unit
-    Just l  -> void $ DOM.removeChild l (bc ^. _Container)
+    Just l  -> void $ DOM.removeChild (toNode l) (unsafeCoerce $ bc ^. _Container)
 
-  Ref.modifyRef (bc ^. _Layers) $ Map.delete name
+  Ref.modify_ (Map.delete name) $ (bc ^. _Layers)
 
 
-renderGlyphs :: Warn "deprecated"
-             => TrackCanvas
+renderGlyphs :: TrackCanvas
              -> { drawing :: Drawing, points :: Array Point }
-             -> Eff _ Unit
+             -> Effect Unit
 renderGlyphs (TrackCanvas tc) {drawing, points} = do
   glyphBfr <- Canvas.getContext2D tc.glyphBuffer
   ctx <- getBufferedContext tc.canvas
@@ -631,14 +617,14 @@ renderGlyphs (TrackCanvas tc) {drawing, points} = do
   Drawing.render glyphBfr
     $ Drawing.translate x0 y0 drawing
 
-  runEffFn4 drawCopies tc.glyphBuffer glyphBufferSize ctx points
+  runEffectFn4 drawCopies tc.glyphBuffer glyphBufferSize ctx points
 
 
 renderGlyphs' :: CanvasElement
               -- -> LayerContainer
               -> Canvas.Context2D
               -> { drawing :: Drawing, points :: Array Point }
-              -> Eff _ Unit
+              -> Effect Unit
 renderGlyphs' glyphBuffer ctx {drawing, points} = do
   glyphCtx <- Canvas.getContext2D glyphBuffer
 
@@ -652,7 +638,7 @@ renderGlyphs' glyphBuffer ctx {drawing, points} = do
   Drawing.render glyphCtx
     $ Drawing.translate x0 y0 drawing
 
-  runEffFn4 drawCopies glyphBuffer glyphBufferSize ctx points
+  runEffectFn4 drawCopies glyphBuffer glyphBufferSize ctx points
 
 
 type Label = { text :: String, point :: Point, gravity :: LabelPlace }
@@ -674,10 +660,10 @@ labelFont = Drawing.fontString $ Drawing.font sansSerif labelFontSize mempty
 
 -- | Calculate the rectangle covered by a label when it'd be rendered
 -- | to a provided canvas context
-labelBox :: Context2D -> Label -> Eff _ Canvas.Rectangle
+labelBox :: Context2D -> Label -> Effect Canvas.Rectangle
 labelBox ctx {text, point, gravity} = do
   {width} <- Canvas.withContext ctx do
-    _ <- Canvas.setFont labelFont ctx
+    _ <- Canvas.setFont ctx labelFont
     Canvas.measureText ctx text
 
   -- close enough height, actually calculating it is a nightmare
@@ -723,7 +709,7 @@ appendBoxed sofar next =
   in if overlapsAny then sofar else sofar <> [next]
 
 
-renderLabels :: Array Label -> Context2D -> Eff _ Unit
+renderLabels :: Array Label -> Context2D -> Effect Unit
 renderLabels ls ctx = do
 
   boxed <- traverse (\l -> {text: l.text, rect: _} <$> labelBox ctx l) ls
@@ -731,7 +717,7 @@ renderLabels ls ctx = do
   let toRender = foldl appendBoxed [] boxed
 
   Canvas.withContext ctx do
-    _ <- Canvas.setFont labelFont ctx
+    _ <- Canvas.setFont ctx labelFont
 
     for_ toRender \box ->
       Canvas.fillText ctx box.text
@@ -743,22 +729,21 @@ type Renderable' r = { drawings :: Array { drawing :: Drawing
                     , labels :: Array Label | r }
 
 renderBrowser :: ∀ a b c.
-                 Warn "deprecated"
-              => Milliseconds
+                 Milliseconds
               -> BrowserCanvas
               -> Number
               -> { tracks     :: { snps :: Renderable' a
                                  , annotations :: Renderable' b }
                  , relativeUI :: Drawing
                  , fixedUI :: Drawing }
-             -> Aff _ Unit
+             -> Aff Unit
 renderBrowser d (BrowserCanvas bc) offset ui = do
 
   let
       labels = ui.tracks.snps.labels <> ui.tracks.annotations.labels
 
   -- Render the UI
-  liftEff do
+  liftEffect do
     staticOverlayCtx <- Canvas.getContext2D bc.staticOverlay
 
     clearCanvas staticOverlayCtx bc.dimensions
@@ -781,14 +766,14 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
       cnv = (unwrap bfr).front
 
   -- TODO extract functions `clearTrack` and `translateTrack` that bake in padding
-  ctx <- liftEff $ Canvas.getContext2D cnv
-  liftEff do
+  ctx <- liftEffect $ Canvas.getContext2D cnv
+  liftEffect do
     dim <- Canvas.getCanvasDimensions cnv
 
     translateBuffer {x: zero, y: zero} bfr
     clearCanvas ctx $ trackTotalDimensions dim
 
-  liftEff $ translateBuffer { x: trackInnerPad - offset
+  liftEffect $ translateBuffer { x: trackInnerPad - offset
                             , y: trackInnerPad } bfr
 
   let snpsTrack  = ui.tracks.snps.drawings
@@ -796,7 +781,7 @@ renderBrowser d (BrowserCanvas bc) offset ui = do
 
   for_ [snpsTrack, annotTrack] \t ->
     for_ t \s -> do
-      liftEff $ renderGlyphs bc.track s
+      liftEffect $ renderGlyphs bc.track s
       delay d
 
 
@@ -804,14 +789,14 @@ data LayerCanvas =
     Static Canvas.CanvasElement
   | Buffer BufferedCanvas
 
-instance isNodeLayerCanvas :: IsNode LayerCanvas where
-  toNode :: LayerCanvas -> Node
-  toNode lc = unsafeCoerce $ lc ^. _FrontCanvas
+-- instance isNodeLayerCanvas :: IsNode LayerCanvas where
+--   toNode :: LayerCanvas -> Node
+--   toNode lc = unsafeCoerce $ lc ^. _FrontCanvas
 
-  fromNode :: Node -> Maybe LayerCanvas
-  fromNode n = do
-    (node :: HTMLCanvasElement) <- fromNode n
-    pure $ Static $ unsafeCoerce node
+--   fromNode :: Node -> Maybe LayerCanvas
+--   fromNode n = do
+--     (node :: HTMLCanvasElement) <- fromNode n
+--     pure $ Static $ unsafeCoerce node
 
 _FrontCanvas :: Getter' LayerCanvas CanvasElement
 _FrontCanvas = to case _ of
@@ -858,7 +843,7 @@ type RenderableLayerHotspots c a =
 -- | This returns a function that can be used to render to the layer maybe idk????
 -- | If the layer already existed, overwrites it
 createAndAddLayer :: ∀ m c a.
-                     MonadEff _ m
+                     MonadEffect m
                   => BrowserContainer
                   -> String
                   -> RenderableLayerHotspots c a
@@ -873,7 +858,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 
       {size, pos} = { size: slots.full.size,   pos: { left: 0.0, top: 0.0 } }
 
-  canvas <- liftEff do
+  canvas <- liftEffect do
     cv <- case lt of
       Fixed     -> Static <$> createCanvas         size name
       Scrolling -> Buffer <$> createBufferedCanvas size name
@@ -881,16 +866,16 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
     pure cv
 
 
-  hotspotsRef <- liftEff $ Ref.newRef { offset: 0.0, hotspots: (\r p -> []) }
-  let lastHotspots = liftEff do
-        { offset, hotspots } <- Ref.readRef hotspotsRef
+  hotspotsRef <- liftEffect $ Ref.new { offset: 0.0, hotspots: (\r p -> []) }
+  let lastHotspots = liftEffect do
+        { offset, hotspots } <- Ref.read hotspotsRef
         pure \r {x, y} -> hotspots r {x: x+offset, y}
 
   -- 2. add the canvas to the browsercontainer & DOM
   let layerRef :: _
       layerRef = _.layers $ unwrap bc
-  liftEff do
-    Ref.modifyRef layerRef $ Map.insert name canvas
+  liftEffect do
+    Ref.modify_ (Map.insert name canvas) layerRef
     appendCanvasElem (unwrap bc).element $ canvas ^. _FrontCanvas
 
   -- 3. create the rendering function
@@ -909,7 +894,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
               CBottom  _ -> slots'.bottom.size
 
 
-        liftEff $ Ref.modifyRef hotspotsRef $ _ { hotspots = toRender.hotspots }
+        liftEffect $ Ref.modify_ (_ { hotspots = toRender.hotspots }) hotspotsRef
 
         pure toRender.renderables
 
@@ -918,7 +903,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
       drawOnCanvas offset renderables = do
         layers <- getLayers bc
 
-        liftEff $ Ref.modifyRef hotspotsRef $ _ { offset = offset }
+        liftEffect $ Ref.modify_ ( _ { offset = offset }) hotspotsRef
         -- TODO handle exceptions!!! :|
         el  <- case Map.lookup name layers of
                  Nothing -> unsafeCrashWith $ "Tried to render layer '" <> name <> "', but it did not exist!"
@@ -927,7 +912,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
         dims' <- getDimensions bc
         ctx <- slotContext layer dims' el
 
-        liftEff $ Canvas.withContext ctx do
+        liftEffect $ Canvas.withContext ctx do
           setContextTranslation {x: zero, y: zero} ctx
           void $ Canvas.clearRect ctx { x: 0.0, y: 0.0
                                       , w: slots.full.size.width
@@ -935,19 +920,19 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 
         -- temporary hack to offset scrolling tracks as needed
 
-        _ <- liftEff $ Canvas.translate { translateX: -offset, translateY: 0.0 } ctx
+        _ <- liftEffect $ Canvas.translate ctx { translateX: -offset, translateY: 0.0 }
         -- use the List Renderable to draw to the canvas
         let
             static :: Drawing -> m _
-            static d = liftEff $ Drawing.render ctx d
+            static d = liftEffect $ Drawing.render ctx d
 
             drawings :: Array { drawing :: Drawing, points :: Array Point }
                      -> m _
-            drawings ds = liftEff $ for_ ds
+            drawings ds = liftEffect $ for_ ds
                             $ renderGlyphs' (_.glyphBuffer $ unwrap bc) ctx
 
             labels :: Array _ -> m _
-            labels ls = liftEff $ renderLabels ls ctx
+            labels ls = liftEffect $ renderLabels ls ctx
 
         for_ renderables
           $ case_ # onMatch { static, drawings, labels }
@@ -958,7 +943,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 
 -- | Used for layers that don't contain clickable features
 createAndAddLayer_ :: ∀ m c.
-                     MonadEff _ m
+                     MonadEffect m
                   => BrowserContainer
                   -> String
                   -> RenderableLayer c
