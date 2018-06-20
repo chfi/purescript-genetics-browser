@@ -333,6 +333,17 @@ peakHTML disp peak =
         $ show (length tail + 1) <> " annotations"
 
 
+annoPeakHTML :: Peak _ _ _
+             -> String
+annoPeakHTML peak =
+  case Array.uncons peak.elements of
+    Nothing               -> ""
+    Just {head, tail: []} -> annotationHTMLAll head
+    Just {head, tail}     -> wrapWith "div"
+                             ( wrapWith "p" "Annotations:"
+                             <> foldMap annotationHTMLShort peak.elements)
+
+
 -- | Given a function to transform the data in the annotation's "rest" field
 -- | to text (or Nothing if the field should not be displayed), produce a
 -- | function that generates HTML from annotations
@@ -366,13 +377,17 @@ annotationHTMLDefault = annotationHTML \x -> pure case x of
      "p_lrt: " <> (unsafeCoerce value) ^. _NegLog10 <<< _Newtype <<< _prec 4
   fv -> showAnnotationField fv
 
+annotationHTMLShort :: Annotation () -> String
+annotationHTMLShort {feature} = wrapWith "p" anchor
+  where
+        name' = fromMaybe (feature.name)
+                          (feature.gene)
 
--- | Example HTML generator that only shows the "anno" field
-annotationHTMLAnnoOnly :: Annotation () -> String
-annotationHTMLAnnoOnly = annotationHTML disp
-  where disp fv
-          | fv.field == "anno" = pure $ showAnnotationField fv
-          | otherwise          = Nothing
+        showOther fv = fv.field <> ": " <> (unsafeCoerce fv.value)
+
+        anchor = case feature.url of
+          Nothing  -> name'
+          Just url -> "<a target='_blank' href='" <> url <> "'>" <> name' <> "</a>"
 
 
 
@@ -505,9 +520,10 @@ runBrowser config bc = launchAff $ do
               Just g  -> do
                 cmdInfoBox IBoxShow
                 cmdInfoBox $ IBoxSetX $ Int.round p.x
+                cmdInfoBox $ IBoxSetY $ Int.round p.y
                 cmdInfoBox $ IBoxSetContents
                   $ snpHTML g
-                  <> foldMap (peakHTML annotationHTMLDefault) (annotAround annoPeaks g)
+                  <> foldMap annoPeakHTML (annotAround annoPeaks g)
 
 
     browserClickHandler bc
@@ -639,6 +655,4 @@ mouseChrSizes =
       , Tuple "17"  "94987271"
       , Tuple "18"  "90702639"
       , Tuple "19"  "61431566"
-      , Tuple "X"   "171031299"
-      , Tuple "Y"   "91744698"
       ]

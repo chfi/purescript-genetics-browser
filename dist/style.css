@@ -16,13 +16,14 @@ html, body {
     min-height: 100px;
     min-width: 10px;
     max-width:  80%;
-    margin-top: -2.2em;
+    margin-top: 9.7em;
 
     font-family: sans-serif;
 }
 
 #infoBox > div {
-    margin: 1.0em 0.5em;
+    float: left;
+    margin: 1.0em 1.2em;
 }
 
 
