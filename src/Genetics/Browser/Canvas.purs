@@ -1,7 +1,27 @@
 -- | This module provides a HTML5 canvas interface for the genetics browser,
 -- | which wraps and optimizes all rendering calls
 
-module Genetics.Browser.Canvas where
+module Genetics.Browser.Canvas
+       ( BrowserContainer
+       , Renderable
+       , RenderableLayer
+       , RenderableLayerHotspots
+       , Label
+       , LabelPlace(..)
+       , _static
+       , _drawings
+       , _labels
+       , createAndAddLayer
+       , createAndAddLayer_
+       , getDimensions
+       , _Container
+       , dragScroll
+       , wheelZoom
+       , browserClickHandler
+       , browserContainer
+       , setBrowserContainerSize
+       , setElementStyle
+       ) where
 
 
 import Prelude
@@ -10,8 +30,7 @@ import Data.Either (Either(..))
 import Data.Filterable (filterMap)
 import Data.Foldable (any, foldl, for_, length)
 import Data.Int as Int
-import Data.Lens (Getter', Lens', Prism', iso, preview, prism', to, view, (^.))
-import Data.Lens.Iso (Iso')
+import Data.Lens (Getter', Lens', Prism', preview, prism', to, (^.))
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Lens.Record as Lens
 import Data.List (List)
@@ -44,9 +63,6 @@ import Web.DOM (Element)
 import Web.DOM.Node as DOM
 
 
-_Element :: Iso' CanvasElement Element
-_Element = iso unsafeCoerce unsafeCoerce
-
 -- | Create a new CanvasElement, not attached to the DOM, with the provided String as its CSS class
 foreign import createCanvas :: { width :: Number, height :: Number }
                             -> String
@@ -68,14 +84,14 @@ setElementStyles el =
   traverse_ (uncurry $ setElementStyle el)
 
 setCanvasStyles :: CanvasElement -> Array (Tuple String String) -> Effect Unit
-setCanvasStyles = setElementStyles <<< view _Element
+setCanvasStyles = setElementStyles <<< unsafeCoerce
 
 
 setCanvasStyle :: CanvasElement
                -> String
                -> String
                -> Effect Unit
-setCanvasStyle ce = setElementStyle (ce ^. _Element)
+setCanvasStyle = setElementStyle <<< unsafeCoerce
 
 setCanvasZIndex :: CanvasElement -> Int -> Effect Unit
 setCanvasZIndex ce i = setCanvasStyle ce "z-index" (show i)
@@ -318,32 +334,6 @@ setTrackCanvasSize dim (TrackCanvas tc) = do
     $ tc { dimensions = dim }
 
 
--- TODO change name to BrowserPadding
-type TrackPadding =
-  { left :: Number, right :: Number
-  , top :: Number, bottom :: Number }
-
--- | A `BrowserCanvas` consists of a double-buffered `track`
--- | which is what the genetics browser view is rendered onto,
--- | and a transparent `staticOverlay` canvas the UI is rendered onto,
--- | with a (also transparent) `trackOverlay` that scrolls with the track view.
-
--- | The `dimensions`, `trackPadding`, and track.width/height are
--- | related such that
--- | track.width + horizontal.left + horizontal.right = dimensions.width
--- | track.height + vertical.top + vertical.bottom = dimensions.height
-newtype BrowserCanvas =
-  BrowserCanvas { track         :: TrackCanvas
-                , trackPadding  :: TrackPadding
-                , dimensions    :: Canvas.Dimensions
-                , staticOverlay :: CanvasElement
-                , trackOverlay  :: BufferedCanvas
-                , container :: Element
-                }
-
-
-derive instance newtypeBrowserCanvas :: Newtype BrowserCanvas _
-
 newtype BrowserContainer =
   BrowserContainer { layers      :: Ref (Map String LayerCanvas)
                    , dimensions  :: Ref BrowserDimensions
@@ -370,71 +360,20 @@ _Container :: Lens' BrowserContainer Element
 _Container = _Newtype <<< Lens.prop (SProxy :: SProxy "element")
 
 
-_Track :: Lens' BrowserCanvas TrackCanvas
-_Track = _Newtype <<< Lens.prop (SProxy :: SProxy "track")
+-- type UISlot = { offset :: Point
+--               , size   :: Canvas.Dimensions }
+
+-- data UISlotGravity = UILeft | UIRight | UITop | UIBottom
+
+-- derive instance eqUISlotGravity :: Eq UISlotGravity
+-- derive instance ordUISlotGravity :: Ord UISlotGravity
+
+-- type UISlots = { left   :: UISlot
+--                , right  :: UISlot
+--                , top    :: UISlot
+--                , bottom :: UISlot }
 
 
-foreign import debugBrowserCanvas :: String
-                                  -> BrowserCanvas
-                                  -> Effect Unit
-
-
-subtractPadding :: Canvas.Dimensions
-                -> TrackPadding
-                -> Canvas.Dimensions
-subtractPadding {width, height} pad =
-  { width:  width - pad.left - pad.right
-  , height: height - pad.top - pad.bottom }
-
-
-type UISlot = { offset :: Point
-              , size   :: Canvas.Dimensions }
-
-data UISlotGravity = UILeft | UIRight | UITop | UIBottom
-
-derive instance eqUISlotGravity :: Eq UISlotGravity
-derive instance ordUISlotGravity :: Ord UISlotGravity
-
-type UISlots = { left   :: UISlot
-               , right  :: UISlot
-               , top    :: UISlot
-               , bottom :: UISlot }
-
-
-uiSlots :: BrowserCanvas
-        -> UISlots
-uiSlots (BrowserCanvas bc) =
-  let track   = subtractPadding bc.dimensions bc.trackPadding
-      browser = bc.dimensions
-      pad     = bc.trackPadding
-  in { left:   { offset: { x: 0.0, y: pad.top }
-               , size:   { height: track.height, width: pad.left }}
-     , right:  { offset: { x: browser.width - pad.right, y: pad.top }
-               , size:   { height: track.height, width: pad.right }}
-     , top:    { offset: { x: pad.left, y: 0.0 }
-               , size:   { height: pad.top, width: track.width }}
-     , bottom: { offset: { x: browser.width  - pad.right
-                         , y: browser.height - pad.bottom }
-               , size:   { height: pad.bottom, width: track.width }}
-    }
-
-
-setBrowserCanvasSize :: Canvas.Dimensions
-                     -> BrowserCanvas
-                     -> Effect BrowserCanvas
-setBrowserCanvasSize dim (BrowserCanvas bc) = do
-
-  setContainerStyle bc.container dim
-  let trackDim = subtractPadding dim bc.trackPadding
-
-  track <- setTrackCanvasSize trackDim bc.track
-
-  setBufferedCanvasSize dim bc.trackOverlay
-  _ <- Canvas.setCanvasDimensions bc.staticOverlay dim
-
-  pure $ BrowserCanvas
-       $ bc { dimensions = dim
-            , track = track }
 
 
 setBrowserContainerSize :: ∀ m.
@@ -447,50 +386,6 @@ setBrowserContainerSize dim bc'@(BrowserContainer bc) = liftEffect $ do
   setContainerStyle bc.element dim
   traverse_ (resizeLayer dim) =<< getLayers bc'
 
-
--- | Creates a `BrowserCanvas` and appends it to the provided element.
--- | Resizes the container element to fit.
-browserCanvas :: Canvas.Dimensions
-              -> TrackPadding
-              -> Element
-              -> Effect BrowserCanvas
-browserCanvas dimensions trackPadding el = do
-
-  setContainerStyle el dimensions
-
-  let trackDim = subtractPadding dimensions trackPadding
-  track   <- trackCanvas trackDim
-
-  trackOverlay  <- createBufferedCanvas { width: trackDim.width
-                                        , height: dimensions.height } "track"
-
-  staticOverlay <- createCanvas dimensions "staticOverlay"
-
-  let trackEl = _.front  $ unwrap
-                $ _.canvas $ unwrap $ track
-
-      trackOverlayEl = _.front $ unwrap $ trackOverlay
-
-  setCanvasZIndex trackEl 10
-  setCanvasZIndex trackOverlayEl 20
-  setCanvasZIndex staticOverlay 30
-
-  -- TODO handle this nicer maybe idk
-  let trackElPosition = { left: trackPadding.left - trackInnerPad
-                        , top:  trackPadding.top  - trackInnerPad }
-
-  setCanvasPosition trackElPosition trackEl
-  setCanvasPosition { left: trackPadding.left, top: 0.0 } trackOverlayEl
-  setCanvasPosition { left: 0.0, top: 0.0} staticOverlay
-
-  appendCanvasElem el trackEl
-  appendCanvasElem el trackOverlayEl
-  appendCanvasElem el staticOverlay
-
-  pure $ BrowserCanvas { dimensions
-                       , track, trackPadding
-                       , trackOverlay, staticOverlay
-                       , container: el}
 
 
 -- TODO calculate based on glyph bounding boxes

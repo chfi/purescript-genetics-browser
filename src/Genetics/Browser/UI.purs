@@ -25,18 +25,19 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Effect (Effect)
-import Effect.Aff (Aff, Fiber, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_)
+import Effect.Aff (Aff, Fiber, Milliseconds(..), delay, forkAff, killFiber, launchAff, launchAff_)
 import Effect.Aff.AVar (AVar)
 import Effect.Aff.AVar as AVar
 import Effect.Class (liftEffect)
 import Effect.Console (log)
 import Effect.Exception (error, throw)
+import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (LegendConfig, Peak, VScale, pixelSegments)
-import Genetics.Browser.Canvas (BrowserContainer, TrackPadding, _Container, browserClickHandler, browserContainer, dragScroll, getDimensions, getLayers, setBrowserContainerSize, setElementStyle, wheelZoom)
+import Genetics.Browser.Canvas (BrowserContainer, _Container, browserClickHandler, browserContainer, dragScroll, getDimensions, setBrowserContainerSize, setElementStyle, wheelZoom)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, _Segments, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, SNPConfig, AnnotationsConfig, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
-import Genetics.Browser.Layer (Component(Padded), browserSlots)
+import Genetics.Browser.Layer (Component(Padded), BrowserPadding, browserSlots)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
@@ -116,7 +117,7 @@ initializeBrowser cSys renderFuns initView bc = do
       lastHotspots = renderFuns.hotspots
 
     -- hardcoded timeout for now
-  queueUpdateView <- uiViewUpdate cSys (wrap 100.0) {view: viewVar, uiCmd: uiCmdVar}
+  queueUpdateView <- liftEffect $ uiViewUpdate cSys (wrap 30.0) {view: viewVar, uiCmd: uiCmdVar}
 
   let mainLoop = do
         uiCmd <- AVar.take uiCmdVar
@@ -144,7 +145,6 @@ initializeBrowser cSys renderFuns initView bc = do
         -- fork a new renderFiber
         renderFiber <- forkAff $ liftEffect do
           log $ "rendering with offset: " <> show offset
-          log <<< show =<< Map.keys <$> getLayers bc
 
           renderFuns.chrs        offset csView
           renderFuns.annotations offset csView
@@ -201,47 +201,40 @@ queueCmd :: ∀ a. AVar a -> a -> Effect Unit
 queueCmd av cmd = launchAff_ $ AVar.put cmd av
 
 
+foreign import onTimeout
+  :: Milliseconds
+  -> Effect Unit
+  -> Effect { run    :: Effect Unit
+            , cancel :: Effect Unit }
+
 -- | Provided with the AVar containing the view state (which is updated atomically)
 -- | and the UICmd AVar queue (which is only written to),
--- | return a function that queues view updates using the provided timeout.
+-- | return a function that combines multiple view updates within a period,
+-- | updating the browser view once a timeout is reached.
 uiViewUpdate :: ∀ c r.
                 CoordSys c BigInt
              -> Milliseconds
              -> { view  :: AVar CoordSysView
                 , uiCmd :: AVar (Variant UICmdR) | r }
-             -> Aff (UpdateView -> Effect Unit)
+             -> Effect (UpdateView -> Effect Unit)
 uiViewUpdate cs timeout { view, uiCmd } = do
-  viewCmd <- AVar.empty
 
-  curCmdVar <- AVar.new (ModView identity)
 
   let normView = normalizeView cs (BigInt.fromInt 200000)
-      loop' updater = do
-        cmd <- AVar.take viewCmd
+  viewDeltaRef <- Ref.new (ModView identity)
 
-        killFiber (error "Resetting view update") updater
-        liftEffect $ log $ "forking view update"
+  comms <- onTimeout timeout do
+    vD <- Ref.read viewDeltaRef
+    Ref.write mempty viewDeltaRef
+    launchAff_ do
+      vr <- AVar.take view
+      let vr' = normView $ updateViewFold vD vr
+      AVar.put vr' view
+      AVar.put (inj _render unit) uiCmd
 
-        curCmd <- AVar.take curCmdVar
-        let cmd' = curCmd <> cmd
-        AVar.put cmd' curCmdVar
-
-        updater' <- forkAff do
-            delay timeout
-            liftEffect $ log "Running view update"
-
-            vr <- AVar.take view
-            let vr' = normView $ updateViewFold cmd' vr
-            AVar.put vr' view
-
-            AVar.put (inj _render unit) uiCmd
-            AVar.take curCmdVar *> AVar.put mempty curCmdVar
-
-        loop' updater'
-
-  _ <- forkAff $ loop' (pure unit)
-
-  pure $ queueCmd viewCmd
+  pure \cmd -> do
+    Ref.modify_ (_ <> cmd) viewDeltaRef
+    comms.run
 
 
 
@@ -476,7 +469,7 @@ runBrowser config bc = launchAff $ do
     resizeEvent \d ->
       launchAff_ $ browser.queueCommand $ inj _docResize d
 
-    let btnMods = { scrollMod: 0.05, zoomMod: 0.1 }
+    let btnMods = { scrollMod: 0.10, zoomMod: 0.15 }
     btnUI btnMods browser.queueUpdateView
 
     buttonEvent "reset"
@@ -544,7 +537,7 @@ type DataURLs = { snps        :: Maybe String
 
 type Conf =
   { browserHeight :: Number
-  , trackPadding :: TrackPadding
+  , padding :: BrowserPadding
   , score :: { min :: Number, max :: Number, sig :: Number }
   , urls :: DataURLs
   , chrLabels :: { fontSize :: Int }
@@ -581,58 +574,11 @@ main rawConfig = do
 
               {width} <- windowInnerSize
               let dimensions = { width, height: c.browserHeight }
-              bc <- browserContainer dimensions c.trackPadding el
+              bc <- browserContainer dimensions c.padding el
 
               log $ unsafeStringify c
               void $ runBrowser c bc
 
-
-
--- TODO this could almost certainly be done better
--- chunkConsumer :: ∀ m a.
---                  Foldable m
---               => Monoid (m a)
---               => AVar (m a)
---               -> Consumer (m a) (Aff) Unit
--- chunkConsumer av = Co.consumer \m ->
---   if null m
---     then pure $ Just unit
---     else do
---       sofar <- AVar.take av
---       AVar.put (sofar <> m) av
---       delay (wrap 20.0)
---       pure Nothing
-
-
--- type TrackVar a = AVar (Map ChrId (Array a))
--- type TrackProducer eff a = Producer (Map ChrId (Array a)) (Aff eff) Unit
-
--- Feels like this one takes care of a bit too much...
--- fetchLoop1 :: ∀ a.
---               (Maybe (Aff (TrackProducer _ a)))
---            -> Aff (TrackVar a)
--- fetchLoop1 Nothing = AVar.empty
--- fetchLoop1 (Just startProd) = do
---   prod <- startProd
---   avar <- AVar.new mempty
---   _ <- forkAff $ runProcess $ prod `connect` chunkConsumer avar
---   pure avar
-
--- | Starts threads that fetch & parse each of the provided tracks,
--- | filling an AVar over time per track, which can be used by other parts of the application
--- | (read only, should be a newtype)
-{-
-fetchLoop :: CoordSys ChrId BigInt
-          -> DataURLs
-          -> Aff
-               { gwas :: TrackVar (GWASFeature ())
-               , genes :: TrackVar BedFeature
-               }
-fetchLoop cs urls = do
-  gwas <-        fetchLoop1 $ produceGWAS   cs <$> urls.gwas
-  genes <-       fetchLoop1 $ produceGenes  cs <$> urls.genes
-  pure { gwas, genes }
--}
 
 
 mouseChrSizes :: Array (Tuple ChrId BigInt)
