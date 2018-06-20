@@ -48,7 +48,7 @@ import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Genetics.Browser (LegendConfig, Peak, VScale, pixelSegments)
 import Genetics.Browser.Canvas (BrowserContainer, TrackPadding, _Container, browserClickHandler, browserContainer, dragScroll, getDimensions, getLayers, setBrowserContainerSize, setElementStyle, wheelZoom)
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, _Segments, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, SNPConfig, AnnotationsConfig, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Padded), browserSlots)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
@@ -447,7 +447,13 @@ runBrowser config bc = launchAff $ do
 
   let cSys :: CoordSys ChrId BigInt
       cSys = coordSys mouseChrSizes
-      initialView = wrap $ Pair zero (cSys^._TotalSize)
+
+      initialView = fromMaybe (wrap $ Pair zero (cSys^._TotalSize)) do
+        {left, right} <- config.initialChrs
+        (Pair l _) <- Map.lookup (wrap left) $ cSys^._Segments
+        (Pair _ r) <- Map.lookup (wrap right) $ cSys^._Segments
+        pure $ wrap $ Pair l r
+
       clickRadius = 1.0
 
   liftEff $ initDebugDiv clickRadius
@@ -550,6 +556,7 @@ type Conf =
   , annotationsConfig :: AnnotationsConfig
   , legend :: LegendConfig ()
   , vscale :: VScale ()
+  , initialChrs :: Maybe { left :: String, right :: String }
   }
 
 foreign import setWindow :: ∀ e a. String -> a -> Eff e Unit
