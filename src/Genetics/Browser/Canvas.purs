@@ -19,17 +19,14 @@ import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
-import Data.Monoid (mempty)
 import Data.Newtype (class Newtype, unwrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Symbol (SProxy(..))
-import Data.Time.Duration (Milliseconds)
 import Data.Traversable (traverse, traverse_)
 import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
 import Effect (Effect)
-import Effect.Aff (Aff, delay)
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
@@ -42,7 +39,6 @@ import Graphics.Drawing (render, translate) as Drawing
 import Graphics.Drawing.Font (font, fontString) as Drawing
 import Graphics.Drawing.Font (sansSerif)
 import Partial.Unsafe (unsafeCrashWith)
-import Prim.TypeError (class Warn)
 import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM (Element)
 import Web.DOM.Node as DOM
@@ -109,8 +105,7 @@ foreign import drawCopies :: EffectFn4
                              Unit
 
 
-foreign import setCanvasTranslation :: ∀ e.
-                                       Point
+foreign import setCanvasTranslation :: Point
                                     -> CanvasElement
                                     -> Effect Unit
 
@@ -162,7 +157,7 @@ scrollBrowser (BrowserContainer bc) pt = do
   -- | Filter out all layers that don't scroll
   let scrolling = filterMap (preview _Buffer) layers
   -- | then... scroll them
-  for_ scrolling \bc -> scrollCanvas bc pt
+  for_ scrolling \bc' -> scrollCanvas bc' pt
 
 
 
@@ -294,8 +289,8 @@ trackInnerPad = 5.0
 
 derive instance newtypeTrackCanvas :: Newtype TrackCanvas _
 
-_Dimensions :: ∀ n r1 r2.
-               Newtype n { dimensions :: Canvas.Dimensions | r1 }
+_Dimensions :: ∀ n r.
+               Newtype n { dimensions :: Canvas.Dimensions | r }
             => Lens' n Canvas.Dimensions
 _Dimensions = _Newtype <<< Lens.prop (SProxy :: SProxy "dimensions")
 
@@ -379,8 +374,7 @@ _Track :: Lens' BrowserCanvas TrackCanvas
 _Track = _Newtype <<< Lens.prop (SProxy :: SProxy "track")
 
 
-foreign import debugBrowserCanvas :: ∀ e.
-                                     String
+foreign import debugBrowserCanvas :: String
                                   -> BrowserCanvas
                                   -> Effect Unit
 
@@ -728,75 +722,12 @@ type Renderable' r = { drawings :: Array { drawing :: Drawing
                                         , points :: Array Point }
                     , labels :: Array Label | r }
 
-renderBrowser :: ∀ a b c.
-                 Milliseconds
-              -> BrowserCanvas
-              -> Number
-              -> { tracks     :: { snps :: Renderable' a
-                                 , annotations :: Renderable' b }
-                 , relativeUI :: Drawing
-                 , fixedUI :: Drawing }
-             -> Aff Unit
-renderBrowser d (BrowserCanvas bc) offset ui = do
-
-  let
-      labels = ui.tracks.snps.labels <> ui.tracks.annotations.labels
-
-  -- Render the UI
-  liftEffect do
-    staticOverlayCtx <- Canvas.getContext2D bc.staticOverlay
-
-    clearCanvas staticOverlayCtx bc.dimensions
-    Drawing.render staticOverlayCtx ui.fixedUI
-
-    translateBuffer {x: zero, y: zero} bc.trackOverlay
-    blankBuffer bc.trackOverlay
-
-    translateBuffer {x: (-offset), y: zero} bc.trackOverlay
-    trackOverlayCtx <- getBufferedContext bc.trackOverlay
-
-    Drawing.render trackOverlayCtx ui.relativeUI
-
-    translateBuffer {x: (-offset), y: bc.trackPadding.top} bc.trackOverlay
-    renderLabels labels trackOverlayCtx
-
-
-  -- Render the tracks
-  let bfr = (unwrap bc.track).canvas
-      cnv = (unwrap bfr).front
-
-  -- TODO extract functions `clearTrack` and `translateTrack` that bake in padding
-  ctx <- liftEffect $ Canvas.getContext2D cnv
-  liftEffect do
-    dim <- Canvas.getCanvasDimensions cnv
-
-    translateBuffer {x: zero, y: zero} bfr
-    clearCanvas ctx $ trackTotalDimensions dim
-
-  liftEffect $ translateBuffer { x: trackInnerPad - offset
-                            , y: trackInnerPad } bfr
-
-  let snpsTrack  = ui.tracks.snps.drawings
-      annotTrack = ui.tracks.annotations.drawings
-
-  for_ [snpsTrack, annotTrack] \t ->
-    for_ t \s -> do
-      liftEffect $ renderGlyphs bc.track s
-      delay d
 
 
 data LayerCanvas =
     Static Canvas.CanvasElement
   | Buffer BufferedCanvas
 
--- instance isNodeLayerCanvas :: IsNode LayerCanvas where
---   toNode :: LayerCanvas -> Node
---   toNode lc = unsafeCoerce $ lc ^. _FrontCanvas
-
---   fromNode :: Node -> Maybe LayerCanvas
---   fromNode n = do
---     (node :: HTMLCanvasElement) <- fromNode n
---     pure $ Static $ unsafeCoerce node
 
 _FrontCanvas :: Getter' LayerCanvas CanvasElement
 _FrontCanvas = to case _ of
@@ -872,8 +803,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
         pure \r {x, y} -> hotspots r {x: x+offset, y}
 
   -- 2. add the canvas to the browsercontainer & DOM
-  let layerRef :: _
-      layerRef = _.layers $ unwrap bc
+  let layerRef = _.layers $ unwrap bc
   liftEffect do
     Ref.modify_ (Map.insert name canvas) layerRef
     appendCanvasElem (unwrap bc).element $ canvas ^. _FrontCanvas
@@ -923,15 +853,15 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
         _ <- liftEffect $ Canvas.translate ctx { translateX: -offset, translateY: 0.0 }
         -- use the List Renderable to draw to the canvas
         let
-            static :: Drawing -> m _
+            static :: Drawing -> m Unit
             static d = liftEffect $ Drawing.render ctx d
 
             drawings :: Array { drawing :: Drawing, points :: Array Point }
-                     -> m _
+                     -> m Unit
             drawings ds = liftEffect $ for_ ds
                             $ renderGlyphs' (_.glyphBuffer $ unwrap bc) ctx
 
-            labels :: Array _ -> m _
+            labels :: Array Label -> m Unit
             labels ls = liftEffect $ renderLabels ls ctx
 
         for_ renderables

@@ -2,24 +2,20 @@ module Genetics.Browser.UI where
 
 import Prelude
 
-import Control.Coroutine (Consumer, Producer, connect, runProcess)
-import Control.Coroutine as Co
 import Data.Array as Array
 import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
 import Data.Filterable (filterMap)
-import Data.Foldable (class Foldable, foldMap, length, null)
+import Data.Foldable (foldMap, length)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
 import Data.Lens ((^.))
 import Data.Lens.Iso.Newtype (_Newtype)
-import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
-import Data.Monoid (class Monoid, mempty)
 import Data.Newtype (over, unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
@@ -29,7 +25,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Effect (Effect)
-import Effect.Aff (Aff, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_)
+import Effect.Aff (Aff, Fiber, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_)
 import Effect.Aff.AVar (AVar)
 import Effect.Aff.AVar as AVar
 import Effect.Class (liftEffect)
@@ -57,29 +53,26 @@ import Web.DOM.Element as Element
 import Web.DOM.Node (appendChild)
 import Web.DOM.ParentNode (querySelector) as DOM
 import Web.HTML (window) as DOM
-import Web.HTML.HTMLDocument as DOM
+import Web.HTML.HTMLDocument (toDocument) as DOM
 import Web.HTML.Window (document) as DOM
 import Web.UIEvent.KeyboardEvent (KeyboardEvent)
 import Web.UIEvent.KeyboardEvent (key) as DOM
 
 
-foreign import windowInnerSize :: ∀ e. Effect Canvas.Dimensions
+foreign import windowInnerSize :: Effect Canvas.Dimensions
 
 -- | Set an event to fire on the given button id
-foreign import buttonEvent :: ∀ e.
-                              String
+foreign import buttonEvent :: String
                            -> Effect Unit
                            -> Effect Unit
 
-foreign import keydownEvent :: ∀ e.
-                                Element
-                             -> (KeyboardEvent -> Effect Unit)
-                             -> Effect Unit
+foreign import keydownEvent :: Element
+                            -> (KeyboardEvent -> Effect Unit)
+                            -> Effect Unit
 
 -- | Set callback to run after the window has resized (see UI.js for
 -- | time waited), providing it with the new window size.
-foreign import resizeEvent :: ∀ e.
-                              ({ width  :: Number
+foreign import resizeEvent :: ({ width  :: Number
                                , height :: Number } -> Effect Unit)
                            -> Effect Unit
 
@@ -97,8 +90,8 @@ type BrowserInterface a
 
 -- | Creates the browser using the provided initial data, returning
 -- | a BrowserInterface for reading state & sending commands to it
-initializeBrowser :: ∀ r.
-                     CoordSys _ _
+initializeBrowser :: ∀ c r.
+                     CoordSys c BigInt
                   -> { snps        :: Number -> CoordSysView -> Effect Unit
                      , annotations :: Number -> CoordSysView -> Effect Unit
                      , chrs        :: Number -> CoordSysView -> Effect Unit
@@ -211,8 +204,8 @@ queueCmd av cmd = launchAff_ $ AVar.put cmd av
 -- | Provided with the AVar containing the view state (which is updated atomically)
 -- | and the UICmd AVar queue (which is only written to),
 -- | return a function that queues view updates using the provided timeout.
-uiViewUpdate :: ∀ r.
-                CoordSys _ BigInt
+uiViewUpdate :: ∀ c r.
+                CoordSys c BigInt
              -> Milliseconds
              -> { view  :: AVar CoordSysView
                 , uiCmd :: AVar (Variant UICmdR) | r }
@@ -281,9 +274,10 @@ _render = SProxy :: SProxy "render"
 _docResize = SProxy :: SProxy "docResize"
 
 
-debugView :: BrowserInterface _
-          -> Effect { get :: _
-                   , set :: _ }
+debugView :: ∀ a.
+             BrowserInterface a
+          -> Effect { get :: String -> Effect Unit
+                    , set :: { l :: Number, r :: Number } -> Effect Unit }
 debugView s = unsafePartial do
   let get name = launchAff_ do
          view <- s.getView
@@ -322,9 +316,9 @@ snpHTML {position, feature} = wrapWith "div" contents
             ]
 
 
-peakHTML :: ∀ a.
+peakHTML :: ∀ a b c.
             (a -> String)
-         -> Peak _ _ a
+         -> Peak b c a
          -> String
 peakHTML disp peak =
   case Array.uncons peak.elements of
@@ -335,7 +329,8 @@ peakHTML disp peak =
         $ show (length tail + 1) <> " annotations"
 
 
-annoPeakHTML :: Peak _ _ _
+annoPeakHTML :: ∀ a b.
+                Peak a b (Annotation ())
              -> String
 annoPeakHTML peak =
   case Array.uncons peak.elements of
@@ -393,12 +388,12 @@ annotationHTMLShort {feature} = wrapWith "p" anchor
 
 
 
-foreign import initDebugDiv :: ∀ e. Number -> Effect Unit
-foreign import setDebugDivVisibility :: ∀ e. String -> Effect Unit
-foreign import setDebugDivPoint :: ∀ e. Point -> Effect Unit
+foreign import initDebugDiv :: Number -> Effect Unit
+foreign import setDebugDivVisibility :: String -> Effect Unit
+foreign import setDebugDivPoint :: Point -> Effect Unit
 
 
-foreign import setElementContents :: ∀ e. Element -> String -> Effect Unit
+foreign import setElementContents :: Element -> String -> Effect Unit
 
 data InfoBoxF
   = IBoxShow
@@ -444,7 +439,7 @@ initInfoBox = do
   pure $ updateInfoBox el
 
 
-runBrowser :: Conf -> BrowserContainer -> Effect _
+runBrowser :: Conf -> BrowserContainer -> Effect (Fiber Unit)
 runBrowser config bc = launchAff $ do
 
   let cSys :: CoordSys ChrId BigInt
@@ -509,10 +504,9 @@ runBrowser config bc = launchAff $ do
           Array.find (\a -> a.covers `pairsOverlap` snp.position)
             =<< Map.lookup snp.feature.chrId pks
 
-        glyphClick :: _
+        glyphClick :: Point -> Effect Unit
         glyphClick p = launchAff_ do
           v  <- browser.getView
-          bc <- browser.getBrowserCanvas
 
           trackDims <- _.padded <<< browserSlots <$> getDimensions bc
           let segs = pixelSegments { segmentPadding: 12.0 } cSys trackDims.size v

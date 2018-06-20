@@ -22,7 +22,6 @@ import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Nothing, Just), fromMaybe)
-import Data.Monoid (mempty)
 import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
@@ -51,8 +50,8 @@ import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineCol
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
-import Network.HTTP.Affjax as Affjax
-import Network.HTTP.Affjax.Response as Affjax
+import Network.HTTP.Affjax (get) as Affjax
+import Network.HTTP.Affjax.Response (json) as Affjax
 import Record (insert) as Record
 import Record.Builder (build, insert, merge, modify)
 import Record.Extra (class Keys)
@@ -166,7 +165,7 @@ parseSNP cSys a = do
   raw <- Simple.read' a
 
   let
-      snp :: { chr :: _, ps :: _, p_wald :: _, rs :: _ }
+      snp :: { chr :: String, ps :: Number, p_wald :: Number, rs :: String }
       snp = raw
 
       feature :: Record (SNPRow ChrId Number ())
@@ -396,6 +395,12 @@ placeScored vs s =
     }
 
 
+normYLogScore :: ∀ r.
+                 { min :: Number
+                 , max :: Number
+                 | r }
+              -> Number
+              -> Number
 normYLogScore s =
   normalize s.min s.max <<< unwrap <<< view _NegLog10
 
@@ -442,7 +447,7 @@ defaultSNPConfig =
   }
 
 
-renderSNPs :: ∀ m r1 rC.
+renderSNPs :: ∀ r1 rC.
               Map ChrId (Array (SNP ()))
            -> { threshold  :: { min  :: Number, max :: Number | r1 }
               , snpsConfig :: SNPConfig | rC }
@@ -522,22 +527,21 @@ annotationsForScale cSys snps annots =
     pure $ f <$> peaks rad segSnps
 
 
-renderAnnotationPeaks :: ∀ r r1 r2.
+renderAnnotationPeaks :: ∀ r1 r2.
                          CoordSys ChrId BigInt
                       -> { min :: Number, max :: Number | r1 }
                       -> AnnotationsConfig
                       -> Map ChrId (Array (Peak Bp Number (Annotation r2)))
                       -> Canvas.Dimensions
                       -> Map ChrId (Pair Number)
-                      -> { drawings :: _, labels :: _ }
+                      -> { drawings :: Array DrawingN, labels :: Array Label }
 renderAnnotationPeaks cSys vScale conf annoPks cdim =
   let
 
       curAnnotPeaks :: Map ChrId (Pair Number)
                     -> Map ChrId (Array (Peak Number Number (Annotation r2)))
       curAnnotPeaks segs = mapWithIndex f annoPks
-        where f :: ChrId -> Array (Peak _ _ _) -> Array (Peak _ _ (Annotation r2))
-              f chr pks = fromMaybe [] do
+        where f chr pks = fromMaybe [] do
                   frameSize <- (wrap <<< BigInt.toNumber <<< pairSize)
                              <$> (Map.lookup chr $ cSys ^. _Segments)
                   pxSeg@(Pair l _) <- Map.lookup chr segs
@@ -616,7 +620,7 @@ renderAnnotationPeaks cSys vScale conf annoPks cdim =
 
 
 renderAnnotations :: ∀ r1 r2 rC.
-                    CoordSys _ _
+                    CoordSys ChrId BigInt
                  -> Map ChrId (Array (SNP ()))
                  -> Map ChrId (Array (Annotation r1))
                  -> { threshold :: { min :: Number, max :: Number | r2 }
@@ -727,7 +731,6 @@ addDemoLayers cSys config trackData =
           rRuler.render { rulerColor: wrap red, threshold } >>= rRuler.drawOnCanvas 0.0
 
 
-        snps :: _
         snps o v = do
           snpsDrawings <-
             rSNPs.render { snps: { threshold
@@ -735,17 +738,14 @@ addDemoLayers cSys config trackData =
                          , view: v }
           rSNPs.drawOnCanvas o snpsDrawings
 
-        hotspots :: _
         hotspots = rSNPs.lastHotspots
 
-        annotations :: _
         annotations o v =
           rAnnos.render { annotations: { threshold
                                 , annotationsConfig: config.annotationsConfig }
                  , view: v } >>= rAnnos.drawOnCanvas o
 
 
-        chrs :: _
         chrs o v = do
           rBG.render { config: { bg1: HexColor white, bg2: HexColor lightgray
                                , segmentPadding }
