@@ -31,11 +31,12 @@ import Effect.Aff.AVar as AVar
 import Effect.Class (liftEffect)
 import Effect.Console (log)
 import Effect.Exception (error, throw)
+import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (LegendConfig, Peak, VScale, pixelSegments)
 import Genetics.Browser.Canvas (BrowserContainer, _Container, browserClickHandler, browserContainer, dragScroll, getDimensions, setBrowserContainerSize, setElementStyle, wheelZoom)
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView(CoordSysView), _TotalSize, _Segments, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, SNPConfig, AnnotationsConfig, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Padded), BrowserPadding, browserSlots)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
@@ -78,11 +79,12 @@ foreign import resizeEvent :: ({ width  :: Number
                            -> Effect Unit
 
 
+
 -- | The value returned by the function that initializes the genome browser;
 -- | provides an interface to the running browser instance.
 type BrowserInterface a
-  = { getView          :: Aff CoordSysView
-    , getBrowserCanvas :: Aff BrowserContainer
+  = { getView          :: Effect CoordSysView
+    , container        :: BrowserContainer
     , lastHotspots     :: Effect (Number -> Point -> Array a)
     , queueCommand     :: Variant UICmdR -> Aff Unit
     , queueUpdateView  :: UpdateView -> Effect Unit
@@ -105,19 +107,18 @@ initializeBrowser cSys renderFuns initView bc = do
 
   renderFiberVar <- AVar.empty
 
-  viewVar <- AVar.new initView
+  browserView <- liftEffect $ Ref.new initView
   bcVar <- AVar.new bc
 
   uiCmdVar <- AVar.empty
   lastHotspotsVar <- AVar.empty
 
-  let getView = AVar.read viewVar
-      getBrowserCanvas = AVar.read bcVar
+  let getView = Ref.read browserView
       queueCommand = flip AVar.put uiCmdVar
       lastHotspots = renderFuns.hotspots
 
     -- hardcoded timeout for now
-  queueUpdateView <- liftEffect $ uiViewUpdate cSys (wrap 30.0) {view: viewVar, uiCmd: uiCmdVar}
+  queueUpdateView <- liftEffect $ uiViewUpdate cSys (wrap 30.0) {view: browserView, uiCmd: uiCmdVar}
 
   let mainLoop = do
         uiCmd <- AVar.take uiCmdVar
@@ -133,10 +134,9 @@ initializeBrowser cSys renderFuns initView bc = do
         traverse_ (killFiber (error "Resetting renderer"))
           =<< AVar.tryTake renderFiberVar
 
-        csView <- getView
-        canvas <- getBrowserCanvas
+        csView <- liftEffect $ getView
 
-        currentDims <- getDimensions canvas
+        currentDims <- getDimensions bc
 
         let trackDims = _.padded $ browserSlots currentDims
             currentScale = viewScale trackDims.size csView
@@ -159,7 +159,7 @@ initializeBrowser cSys renderFuns initView bc = do
   queueCommand $ inj _render unit
 
   pure { getView
-       , getBrowserCanvas
+       , container: bc
        , lastHotspots
        , queueCommand
        , queueUpdateView }
@@ -206,34 +206,42 @@ foreign import onTimeout
   -> Effect { run    :: Effect Unit
             , cancel :: Effect Unit }
 
--- | Provided with the AVar containing the view state (which is updated atomically)
--- | and the UICmd AVar queue (which is only written to),
--- | return a function that combines multiple view updates within a period,
--- | updating the browser view once a timeout is reached.
+
+animateDelta :: ∀ a a'.
+                Monoid a'
+             => (a' -> a -> a)
+             -> (a -> Effect Unit)
+             -> { current  :: Ref a
+                , velocity :: Ref a'
+                }
+             -> Milliseconds
+             -> Effect (a' -> Effect Unit)
+animateDelta update done refs timeout = do
+
+  comms <- onTimeout timeout do
+    vD <- Ref.read refs.velocity
+    Ref.write mempty refs.velocity
+    launchAff_ $ liftEffect do
+      Ref.modify (update vD) refs.current >>= done
+
+  pure \cmd -> do
+    Ref.modify_ (_ <> cmd) refs.velocity
+    comms.run
+
 uiViewUpdate :: ∀ c r.
                 CoordSys c BigInt
              -> Milliseconds
-             -> { view  :: AVar CoordSysView
+             -> { view  :: Ref CoordSysView
                 , uiCmd :: AVar (Variant UICmdR) | r }
              -> Effect (UpdateView -> Effect Unit)
-uiViewUpdate cs timeout { view, uiCmd } = do
+uiViewUpdate cs timeout {view, uiCmd} = do
+  let update vD = normalizeView cs (BigInt.fromInt 200000)
+                 <<< updateViewFold vD
+      done _ = launchAff_ $ AVar.put (inj _render unit) uiCmd
 
+  velocity <- Ref.new mempty
+  animateDelta update done { current: view, velocity } timeout
 
-  let normView = normalizeView cs (BigInt.fromInt 200000)
-  viewDeltaRef <- Ref.new (ModView identity)
-
-  comms <- onTimeout timeout do
-    vD <- Ref.read viewDeltaRef
-    Ref.write mempty viewDeltaRef
-    launchAff_ do
-      vr <- AVar.take view
-      let vr' = normView $ updateViewFold vD vr
-      AVar.put vr' view
-      AVar.put (inj _render unit) uiCmd
-
-  pure \cmd -> do
-    Ref.modify_ (_ <> cmd) viewDeltaRef
-    comms.run
 
 
 
@@ -272,7 +280,7 @@ debugView :: ∀ a.
                     , set :: { l :: Number, r :: Number } -> Effect Unit }
 debugView s = unsafePartial do
   let get name = launchAff_ do
-         view <- s.getView
+         view <- liftEffect $ s.getView
          liftEffect do
            log $ "CoordSysView: " <> show (map BigInt.toString $ unwrap view)
            setWindow name $ (\(Pair l r) -> {l,r}) $ unwrap view
@@ -498,7 +506,7 @@ runBrowser config bc = launchAff $ do
 
         glyphClick :: Point -> Effect Unit
         glyphClick p = launchAff_ do
-          v  <- browser.getView
+          v  <- liftEffect $ browser.getView
 
           trackDims <- _.padded <<< browserSlots <$> getDimensions bc
           let segs = pixelSegments { segmentPadding: 12.0 } cSys trackDims.size v
