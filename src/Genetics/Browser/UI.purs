@@ -93,9 +93,9 @@ type BrowserInterface a
 -- | a BrowserInterface for reading state & sending commands to it
 initializeBrowser :: ∀ c r.
                      CoordSys c BigInt
-                  -> { snps        :: Number -> CoordSysView -> Effect Unit
-                     , annotations :: Number -> CoordSysView -> Effect Unit
-                     , chrs        :: Number -> CoordSysView -> Effect Unit
+                  -> { snps        :: Pair Number -> CoordSysView -> Effect Unit
+                     , annotations :: Pair Number -> CoordSysView -> Effect Unit
+                     , chrs        :: Pair Number -> CoordSysView -> Effect Unit
                      , hotspots    :: Effect (Number -> Point -> Array (SNP ()))
                      , fixedUI     :: Effect Unit | r}
                   -> CoordSysView
@@ -140,15 +140,14 @@ initializeBrowser cSys renderFuns initView bc = do
 
         let trackDims = _.padded $ browserSlots currentDims
             currentScale = viewScale trackDims.size csView
-            offset = scaleToScreen  currentScale (Pair.fst $ unwrap $ csView)
+            pxView = scaleToScreen currentScale <$> (unwrap csView)
 
         -- fork a new renderFiber
         renderFiber <- forkAff $ liftEffect do
-          log $ "rendering with offset: " <> show offset
 
-          renderFuns.chrs        offset csView
-          renderFuns.annotations offset csView
-          renderFuns.snps        offset csView
+          renderFuns.chrs        pxView csView
+          renderFuns.annotations pxView csView
+          renderFuns.snps        pxView csView
           renderFuns.fixedUI
 
         AVar.put renderFiber renderFiberVar

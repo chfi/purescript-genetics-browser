@@ -38,8 +38,9 @@ import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
-import Data.Newtype (class Newtype, unwrap)
+import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
+import Data.Pair (Pair(..))
 import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse, traverse_)
 import Data.TraversableWithIndex (forWithIndex)
@@ -49,7 +50,7 @@ import Effect (Effect)
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
-import Effect.Uncurried (EffectFn2, EffectFn3, EffectFn4, runEffectFn2, runEffectFn3, runEffectFn4)
+import Effect.Uncurried (EffectFn2, EffectFn3, EffectFn5, runEffectFn2, runEffectFn3, runEffectFn5)
 import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, Component(CBottom, CRight, CLeft, CTop, Padded, Full), Layer(Layer), LayerType(Scrolling, Fixed), _Component, asSlot, browserSlots, setContextTranslation, slotContext, slotRelative)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
@@ -61,6 +62,7 @@ import Partial.Unsafe (unsafeCrashWith)
 import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM (Element)
 import Web.DOM.Node as DOM
+
 
 
 -- | Create a new CanvasElement, not attached to the DOM, with the provided String as its CSS class
@@ -116,9 +118,14 @@ foreign import appendCanvasElem :: Element
 foreign import setContainerStyle :: Element -> Canvas.Dimensions -> Effect Unit
 
 
-foreign import drawCopies :: EffectFn4
-                             CanvasElement Canvas.Dimensions Context2D (Array Point)
-                             Unit
+foreign import drawCopies
+  :: EffectFn5
+     CanvasElement
+     Canvas.Dimensions
+     Context2D
+     (Point -> Boolean)
+     (Array Point)
+     Unit
 
 
 foreign import setCanvasTranslation :: Point
@@ -338,7 +345,7 @@ newtype BrowserContainer =
   BrowserContainer { layers      :: Ref (Map String LayerCanvas)
                    , dimensions  :: Ref BrowserDimensions
                    , element     :: Element
-                   , glyphBuffer :: CanvasElement}
+                   , glyphBuffer :: CanvasElement }
 
 
 derive instance newtypeBrowserContainer :: Newtype BrowserContainer _
@@ -489,32 +496,14 @@ deleteLayer bc name = liftEffect do
   Ref.modify_ (Map.delete name) $ (bc ^. _Layers)
 
 
-renderGlyphs :: TrackCanvas
+
+
+renderGlyphs :: CanvasElement
+             -> Canvas.Context2D
+             -> Pair Number
              -> { drawing :: Drawing, points :: Array Point }
              -> Effect Unit
-renderGlyphs (TrackCanvas tc) {drawing, points} = do
-  glyphBfr <- Canvas.getContext2D tc.glyphBuffer
-  ctx <- getBufferedContext tc.canvas
-
-  let w = glyphBufferSize.width
-      h = glyphBufferSize.height
-      x0 = w / 2.0
-      y0 = h / 2.0
-
-  clearCanvas glyphBfr glyphBufferSize
-
-  Drawing.render glyphBfr
-    $ Drawing.translate x0 y0 drawing
-
-  runEffectFn4 drawCopies tc.glyphBuffer glyphBufferSize ctx points
-
-
-renderGlyphs' :: CanvasElement
-              -- -> LayerContainer
-              -> Canvas.Context2D
-              -> { drawing :: Drawing, points :: Array Point }
-              -> Effect Unit
-renderGlyphs' glyphBuffer ctx {drawing, points} = do
+renderGlyphs glyphBuffer ctx (Pair l r) {drawing, points}  = do
   glyphCtx <- Canvas.getContext2D glyphBuffer
 
   let w = glyphBufferSize.width
@@ -527,7 +516,9 @@ renderGlyphs' glyphBuffer ctx {drawing, points} = do
   Drawing.render glyphCtx
     $ Drawing.translate x0 y0 drawing
 
-  runEffectFn4 drawCopies glyphBuffer glyphBufferSize ctx points
+  let pred {x} = x >= l && x <= r
+
+  runEffectFn5 drawCopies glyphBuffer glyphBufferSize ctx pred points
 
 
 type Label = { text :: String, point :: Point, gravity :: LabelPlace }
@@ -674,7 +665,7 @@ createAndAddLayer :: ∀ m c a.
                   -> String
                   -> RenderableLayerHotspots c a
                   -> m { render :: c -> m (List Renderable)
-                       , drawOnCanvas :: Number -> List Renderable -> m Unit
+                       , drawOnCanvas :: Pair Number -> List Renderable -> m Unit
                        , lastHotspots :: m (Number -> Point -> Array a) }
 createAndAddLayer bc name layer@(Layer lt _ com) = do
 
@@ -724,11 +715,11 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
         pure toRender.renderables
 
 
-      drawOnCanvas :: Number -> List Renderable -> m Unit
-      drawOnCanvas offset renderables = do
+      drawOnCanvas :: Pair Number -> List Renderable -> m Unit
+      drawOnCanvas (Pair l r) renderables = do
         layers <- getLayers bc
 
-        liftEffect $ Ref.modify_ ( _ { offset = offset }) hotspotsRef
+        liftEffect $ Ref.modify_ ( _ { offset = l }) hotspotsRef
         -- TODO handle exceptions!!! :|
         el  <- case Map.lookup name layers of
                  Nothing -> unsafeCrashWith $ "Tried to render layer '" <> name <> "', but it did not exist!"
@@ -745,7 +736,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 
         -- temporary hack to offset scrolling tracks as needed
 
-        _ <- liftEffect $ Canvas.translate ctx { translateX: -offset, translateY: 0.0 }
+        _ <- liftEffect $ Canvas.translate ctx { translateX: -l, translateY: 0.0 }
         -- use the List Renderable to draw to the canvas
         let
             static :: Drawing -> m Unit
@@ -754,7 +745,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
             drawings :: Array { drawing :: Drawing, points :: Array Point }
                      -> m Unit
             drawings ds = liftEffect $ for_ ds
-                            $ renderGlyphs' (_.glyphBuffer $ unwrap bc) ctx
+                            $ renderGlyphs (_.glyphBuffer $ unwrap bc) ctx (Pair l r)
 
             labels :: Array Label -> m Unit
             labels ls = liftEffect $ renderLabels ls ctx
@@ -773,7 +764,7 @@ createAndAddLayer_ :: ∀ m c.
                   -> String
                   -> RenderableLayer c
                   -> m { render :: c -> m (List Renderable)
-                       , drawOnCanvas :: Number -> List Renderable -> m Unit }
+                       , drawOnCanvas :: Pair Number -> List Renderable -> m Unit }
 createAndAddLayer_ bc name layer@(Layer lt _ com) = do
   -- silly solution to avoid code duping createAndAddLayer
   let layer' :: ∀ a. RenderableLayerHotspots c a

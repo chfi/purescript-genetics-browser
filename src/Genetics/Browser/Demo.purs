@@ -16,6 +16,7 @@ import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Lens (re, view, (^.), (^?))
+import Data.Lens.Lens.Tuple (_2)
 import Data.Lens.Index (ix)
 import Data.List (List)
 import Data.List as List
@@ -456,10 +457,7 @@ renderSNPs :: ∀ r1 rC.
            -> { renderables :: List Renderable
               , hotspots :: Number -> Point -> Array (SNP ()) }
 renderSNPs snpData { snpsConfig, threshold } =
-  let features :: Array (SNP ())
-      features = fold snpData
-
-      snps = snpsConfig
+  let snps = snpsConfig
       radius = snps.radius
 
       drawing =
@@ -471,8 +469,8 @@ renderSNPs snpData { snpsConfig, threshold } =
           in out <> fill
 
       drawings :: Array (Tuple (SNP ()) Point) -> Array DrawingN
-      drawings pts = let (Tuple _ points) = Array.unzip pts
-                     in [{ drawing, points }]
+      drawings pts = [{ drawing, points: view _2 <$> pts }]
+
 
       npointed :: Map ChrId (Array (Tuple (SNP ()) NPoint))
       npointed = (map <<< map)
@@ -629,9 +627,7 @@ renderAnnotations :: ∀ r1 r2 rC.
                  -> Canvas.Dimensions
                  -> List Renderable
 renderAnnotations cSys sigSnps allAnnots conf =
-  let features = fold allAnnots
-      annoPeaks = annotationsForScale cSys sigSnps allAnnots
-
+  let annoPeaks = annotationsForScale cSys sigSnps allAnnots
 
   in \seg size ->
         let {drawings, labels} =
@@ -655,11 +651,11 @@ addDemoLayers :: ∀ r r2.
              -> { snps        :: Map ChrId (Array (SNP ()))
                 , annotations :: Map ChrId (Array (Annotation ())) | r2 }
              -> BrowserContainer
-             -> Effect { snps        :: Number -> CoordSysView -> Effect Unit
-                      , annotations :: Number -> CoordSysView -> Effect Unit
-                      , chrs        :: Number -> CoordSysView -> Effect Unit
-                      , hotspots    :: Effect (Number -> Point -> Array (SNP ()))
-                      , fixedUI  :: Effect Unit }
+             -> Effect { snps        :: Pair Number -> CoordSysView -> Effect Unit
+                       , annotations :: Pair Number -> CoordSysView -> Effect Unit
+                       , chrs        :: Pair Number -> CoordSysView -> Effect Unit
+                       , hotspots    :: Effect (Number -> Point -> Array (SNP ()))
+                       , fixedUI     :: Effect Unit }
 addDemoLayers cSys config trackData =
   let threshold = config.score
       vscale = build (merge config.vscale) threshold
@@ -726,9 +722,9 @@ addDemoLayers cSys config trackData =
 
 
     let fixedUI = do
-          rVScale.render unit >>= rVScale.drawOnCanvas 0.0
-          rLegend.render unit >>= rLegend.drawOnCanvas 0.0
-          rRuler.render { rulerColor: wrap red, threshold } >>= rRuler.drawOnCanvas 0.0
+          rVScale.render unit >>= rVScale.drawOnCanvas (Pair 0.0 0.0)
+          rLegend.render unit >>= rLegend.drawOnCanvas (Pair 0.0 0.0)
+          rRuler.render { rulerColor: wrap red, threshold } >>= rRuler.drawOnCanvas (Pair 0.0 0.0)
 
 
         snps o v = do

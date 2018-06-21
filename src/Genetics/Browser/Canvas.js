@@ -7,6 +7,11 @@ exports.createCanvas = function(size) {
             c.width  = size.width;
             c.height = size.height;
             c.className = className;
+
+            var ctx = c.getContext("2d");
+            if (ctx.imageSmoothingEnabled === true) {
+                ctx.imageSmoothingEnabled = false;
+            };
             return c;
         };
     };
@@ -39,13 +44,16 @@ exports.setContainerStyle = function(e) {
 };
 
 
-exports.drawCopies = function(bfr, bfrDim, ctx, ps) {
+exports.drawCopies = function(bfr, bfrDim, ctx, pred, ps) {
     var w = Math.round(bfrDim.width);
     var h = Math.round(bfrDim.height);
+
     ps.forEach(function(p) {
-        ctx.drawImage(bfr,
-                      Math.floor(p.x - (bfrDim.width  / 2.0)),
-                      Math.floor(p.y - (bfrDim.height / 2.0)));
+        if (pred(p)) {
+            ctx.drawImage(bfr,
+                          Math.floor(p.x - (bfrDim.width  / 2.0)),
+                          Math.floor(p.y - (bfrDim.height / 2.0)));
+        }
     });
 };
 
@@ -72,18 +80,18 @@ exports.elementClickImpl = function(el, cb) {
 
 // scrolls a canvas, given a "back buffer" canvas to copy the current context to
 exports.scrollCanvasImpl = function(backCanvas, canvas, p) {
-    // for some reason, doing this in newCanvas() below doesn't stick
-    backCanvas.width = canvas.width;
-    backCanvas.height = canvas.height;
 
     var bCtx = backCanvas.getContext('2d');
+    bCtx.save();
+    bCtx.globalCompositeOperation = "copy";
+    bCtx.drawImage(canvas, 0, 0);
+    bCtx.restore();
+
     var ctx = canvas.getContext('2d');
 
-    bCtx.drawImage(canvas, 0, 0);
-
     ctx.save();
+    ctx.globalCompositeOperation = "copy";
     ctx.setTransform(1,0,0,1,0,0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(backCanvas, p.x, p.y);
     ctx.restore();
 };
