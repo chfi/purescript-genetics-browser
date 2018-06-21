@@ -16,8 +16,8 @@ import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Lens (re, view, (^.), (^?))
-import Data.Lens.Lens.Tuple (_2)
 import Data.Lens.Index (ix)
+import Data.Lens.Lens.Tuple (_2)
 import Data.List (List)
 import Data.List as List
 import Data.Map (Map)
@@ -472,23 +472,20 @@ renderSNPs snpData { snpsConfig, threshold } =
       drawings pts = [{ drawing, points: view _2 <$> pts }]
 
 
-      npointed :: Map ChrId (Array (Tuple (SNP ()) NPoint))
-      npointed = (map <<< map)
-        (fanout identity (\s ->
-           { x: featureNormX s
-           , y: wrap $ normYLogScore threshold s.feature.score })) snpData
-
-
       pointed :: Canvas.Dimensions
               -> Map ChrId (Pair Number)
               -> Array (Tuple (SNP ()) Point)
-      pointed size = foldMapWithIndex scaleSegs
-        where rescale seg@(Pair offset _) npoint =
-                  { x: offset + (pairSize seg) * (unwrap npoint.x)
-                  , y: size.height * (one - unwrap npoint.y) }
+      pointed size = foldMapWithIndex placeSeg
+        where
+              place :: Pair Number -> SNP () -> Point
+              place seg@(Pair offset _) s =
+                { x: offset + (pairSize seg) * (unwrap $ featureNormX s)
+                , y: size.height * (one - normYLogScore threshold s.feature.score) }
 
-              scaleSegs chrId seg = foldMap (map <<< map $ rescale seg)
-                                      $ Map.lookup chrId npointed
+              placeSeg :: ChrId -> Pair Number -> Array (Tuple (SNP ()) Point)
+              placeSeg chrId seg = foldMap (map $ fanout identity (place seg))
+                                    $ Map.lookup chrId snpData
+
 
       hotspots :: Array (Tuple (SNP ()) Point)
                -> Number -> Point
