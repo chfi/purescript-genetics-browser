@@ -557,7 +557,7 @@ renderAnnotationPeaks cSys vScale conf annoPks cdim =
       drawingCovers :: ∀ a.
                        Peak Number Number a
                     -> Canvas.Rectangle
-      drawingCovers aPeak = {x,y,w,h}
+      drawingCovers aPeak = {x, y, width: w, height: h}
         where (Pair x _) = aPeak.covers
               w = 14.0  -- hardcoded glyph width in pixels
               gH = (11.0 - iconYOffset) -- hardcoded height

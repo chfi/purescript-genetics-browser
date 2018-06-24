@@ -59,6 +59,7 @@ import Graphics.Drawing (render, translate) as Drawing
 import Graphics.Drawing.Font (font, fontString) as Drawing
 import Graphics.Drawing.Font (sansSerif)
 import Partial.Unsafe (unsafeCrashWith)
+import Record as Record
 import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM (Element)
 import Web.DOM.Node as DOM
@@ -211,12 +212,11 @@ dragScroll :: BrowserContainer
            -> (Point -> Effect Unit)
            -> Effect Unit
 dragScroll bc'@(BrowserContainer {element}) cb =
-  canvasDrag (unsafeCoerce element) f -- actually safe
-  where f = case _ of
-              Left  p   -> cb p
-              Right {x} -> do
-                let p' = {x: -x, y: 0.0}
-                scrollBrowser bc' p'
+  canvasDrag (unsafeCoerce element) case _ of
+    Left  p   -> cb p
+    Right {x} -> do
+      let p' = {x: -x, y: 0.0}
+      scrollBrowser bc' p'
 
 
 -- | Takes a BrowserContainer and a callback function that is called with each
@@ -233,7 +233,7 @@ wheelZoom bc cb =
 -- | Helper function for erasing the contents of a canvas context given its dimensions
 clearCanvas :: Context2D -> Canvas.Dimensions -> Effect Unit
 clearCanvas ctx {width, height} =
-  void $ Canvas.clearRect ctx { x: 0.0, y: 0.0, w: width, h: height }
+  void $ Canvas.clearRect ctx { x: 0.0, y: 0.0, width, height }
 
 
 
@@ -365,22 +365,6 @@ _Layers = _Newtype <<< Lens.prop (SProxy :: SProxy "layers")
 
 _Container :: Lens' BrowserContainer Element
 _Container = _Newtype <<< Lens.prop (SProxy :: SProxy "element")
-
-
--- type UISlot = { offset :: Point
---               , size   :: Canvas.Dimensions }
-
--- data UISlotGravity = UILeft | UIRight | UITop | UIBottom
-
--- derive instance eqUISlotGravity :: Eq UISlotGravity
--- derive instance ordUISlotGravity :: Ord UISlotGravity
-
--- type UISlots = { left   :: UISlot
---                , right  :: UISlot
---                , top    :: UISlot
---                , bottom :: UISlot }
-
-
 
 
 setBrowserContainerSize :: ∀ m.
@@ -556,7 +540,7 @@ labelBox ctx {text, point, gravity} = do
 
   pure $ { x
          , y: point.y - height
-         , w: width, h: height }
+         , width, height }
 
 
 -- | Returns `true` if the input rectangles overlap
@@ -564,17 +548,10 @@ isOverlapping :: Canvas.Rectangle
               -> Canvas.Rectangle
               -> Boolean
 isOverlapping r1 r2 =
-     r1.x < r2.x + r2.w
-  && r1.x + r1.w > r2.x
-  && r1.y < r2.y + r2.h
-  && r1.h + r1.y > r2.y
-
-eqRectangle :: Canvas.Rectangle
-            -> Canvas.Rectangle
-            -> Boolean
-eqRectangle {x,y,w,h} r =
-     x == r.x && y == r.y
-  && w == r.w && h == r.h
+     r1.x             < r2.x + r2.width
+  && r1.x + r1.width  > r2.x
+  && r1.y             < r2.y + r2.height
+  && r1.height + r1.y > r2.y
 
 
 appendBoxed :: ∀ r.
@@ -584,7 +561,7 @@ appendBoxed :: ∀ r.
 appendBoxed sofar next =
   let overlapsAny :: Boolean
       overlapsAny = any overlaps sofar
-        where overlaps r' = (not $ eqRectangle next.rect r'.rect)
+        where overlaps r' = (not $ next.rect == r'.rect)
                             && next.rect `isOverlapping` r'.rect
   in if overlapsAny then sofar else sofar <> [next]
 
@@ -601,7 +578,7 @@ renderLabels ls ctx = do
 
     for_ toRender \box ->
       Canvas.fillText ctx box.text
-        (box.rect.x - (box.rect.w / 2.0))
+        (box.rect.x - (box.rect.width / 2.0))
         box.rect.y
 
 type Renderable' r = { drawings :: Array { drawing :: Drawing
@@ -730,9 +707,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 
         liftEffect $ Canvas.withContext ctx do
           setContextTranslation {x: zero, y: zero} ctx
-          void $ Canvas.clearRect ctx { x: 0.0, y: 0.0
-                                      , w: slots.full.size.width
-                                      , h: slots.full.size.height }
+          void $ Canvas.clearRect ctx $ Record.merge {x: 0.0, y: 0.0} slots.full.size
 
         -- temporary hack to offset scrolling tracks as needed
 

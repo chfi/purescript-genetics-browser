@@ -513,10 +513,11 @@ runBrowser config bc = launchAff $ do
               annoPeaks = annotationsForScale cSys sigSnps
                             trackData.annotations segs
 
-          lastHotspots' <- liftEffect $ browser.lastHotspots
           liftEffect do
-            let clicked = (lastHotspots' clickRadius p)
-            printSNPInfo clicked
+
+            lastHotspots' <- browser.lastHotspots
+            let clicked = lastHotspots' clickRadius p
+
             case Array.head clicked of
               Nothing -> cmdInfoBox IBoxHide
               Just g  -> do
