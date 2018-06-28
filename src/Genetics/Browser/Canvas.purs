@@ -2,7 +2,7 @@
 -- | which wraps and optimizes all rendering calls
 
 module Genetics.Browser.Canvas
-       ( BrowserContainer
+       ( TrackContainer
        , Renderable
        , RenderableLayer
        , RenderableLayerHotspots
@@ -17,9 +17,9 @@ module Genetics.Browser.Canvas
        , _Container
        , dragScroll
        , wheelZoom
-       , browserClickHandler
-       , browserContainer
-       , setBrowserContainerSize
+       , trackClickHandler
+       , trackContainer
+       , setTrackContainerSize
        , setElementStyle
        ) where
 
@@ -51,7 +51,7 @@ import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Effect.Uncurried (EffectFn2, EffectFn3, EffectFn5, runEffectFn2, runEffectFn3, runEffectFn5)
-import Genetics.Browser.Layer (BrowserDimensions, BrowserPadding, Component(CBottom, CRight, CLeft, CTop, Padded, Full), Layer(Layer), LayerType(Scrolling, Fixed), _Component, asSlot, browserSlots, setContextTranslation, slotContext, slotRelative)
+import Genetics.Browser.Layer (TrackDimensions, TrackPadding, Component(CBottom, CRight, CLeft, CTop, Padded, Full), Layer(Layer), LayerType(Scrolling, Fixed), _Component, asSlot, browserSlots, setContextTranslation, slotContext, slotRelative)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -115,7 +115,7 @@ foreign import appendCanvasElem :: Element
                                 -> Effect Unit
 
 
--- | Sets some of the browser container's CSS to reasonable defaults
+-- | Sets some of the track container's CSS to reasonable defaults
 foreign import setContainerStyle :: Element -> Canvas.Dimensions -> Effect Unit
 
 
@@ -143,15 +143,15 @@ elementClick :: Element
 elementClick e = runEffectFn2 elementClickImpl e
 
 
--- | Attaches a callback to the browsercontainer, to be called when
--- | the browser element is clicked. The callback is called with
+-- | Attaches a callback to the trackcontainer, to be called when
+-- | the track element is clicked. The callback is called with
 -- | coordinates relative to the provided component slot.
-browserClickHandler :: ∀ m.
+trackClickHandler :: ∀ m.
                        MonadEffect m
-                    => BrowserContainer
+                    => TrackContainer
                     -> Component (Point -> Effect Unit)
                     -> m Unit
-browserClickHandler bc com = liftEffect do
+trackClickHandler bc com = liftEffect do
   dims <- getDimensions bc
 
   let cb = com ^. _Component
@@ -173,10 +173,10 @@ scrollCanvas :: BufferedCanvas
 scrollCanvas (BufferedCanvas bc) = runEffectFn3 scrollCanvasImpl bc.back bc.front
 
 -- | Scroll all buffered canvases in a container
-scrollBrowser :: BrowserContainer
+scrollTrack :: TrackContainer
               -> Point
               -> Effect Unit
-scrollBrowser (BrowserContainer bc) pt = do
+scrollTrack (TrackContainer bc) pt = do
   layers <- Ref.read bc.layers
   -- | Filter out all layers that don't scroll
   let scrolling = filterMap (preview _Buffer) layers
@@ -206,23 +206,23 @@ canvasDrag el f =
   in canvasDragImpl el (toEither f)
 
 
--- | Takes a BrowserContainer and a callback function that is called with the
+-- | Takes a TrackContainer and a callback function that is called with the
 -- | total dragged distance when a click & drag action is completed.
-dragScroll :: BrowserContainer
+dragScroll :: TrackContainer
            -> (Point -> Effect Unit)
            -> Effect Unit
-dragScroll bc'@(BrowserContainer {element}) cb =
+dragScroll bc'@(TrackContainer {element}) cb =
   canvasDrag (unsafeCoerce element) case _ of
     Left  p   -> cb p
     Right {x} -> do
       let p' = {x: -x, y: 0.0}
-      scrollBrowser bc' p'
+      scrollTrack bc' p'
 
 
--- | Takes a BrowserContainer and a callback function that is called with each
+-- | Takes a TrackContainer and a callback function that is called with each
 -- | wheel scroll `deltaY`. Callback is provided with only the sign of `deltaY`
 -- | as to be `deltaMode` agnostic.
-wheelZoom :: BrowserContainer
+wheelZoom :: TrackContainer
           -> (Number -> Effect Unit)
           -> Effect Unit
 wheelZoom bc cb =
@@ -238,7 +238,7 @@ clearCanvas ctx {width, height} =
 
 
 
--- TODO browser background color shouldn't be hardcoded
+-- TODO track background color shouldn't be hardcoded
 backgroundColor :: String
 backgroundColor = "white"
 
@@ -295,84 +295,36 @@ blankBuffer bc@(BufferedCanvas {back, front}) = do
     $ flip clearCanvas dim <=< Canvas.getContext2D
 
 
-
-
--- | The `width` & `height` of the TrackCanvas is the area glyphs render to;
--- | the browser shows a `width` pixels slice of the whole coordinate system.
--- | `glyphBuffer` is what individual glyphs can be rendered to and copied from, for speed.
-newtype TrackCanvas =
-  TrackCanvas { canvas      :: BufferedCanvas
-              , dimensions  :: Canvas.Dimensions
-              , glyphBuffer :: CanvasElement
-              }
-
--- | using hardcoded inner padding for now; makes it look a bit better
-trackInnerPad :: Number
-trackInnerPad = 5.0
-
-derive instance newtypeTrackCanvas :: Newtype TrackCanvas _
-
-_Dimensions :: ∀ n r.
-               Newtype n { dimensions :: Canvas.Dimensions | r }
-            => Lens' n Canvas.Dimensions
-_Dimensions = _Newtype <<< Lens.prop (SProxy :: SProxy "dimensions")
-
-trackTotalDimensions :: Canvas.Dimensions -> Canvas.Dimensions
-trackTotalDimensions d = { width:  d.width  + extra
-                         , height: d.height + extra }
-  where extra = 2.0 * trackInnerPad
-
-
-trackCanvas :: Canvas.Dimensions
-            -> Effect TrackCanvas
-trackCanvas dim = do
-  canvas <- createBufferedCanvas (trackTotalDimensions dim) "track"
-  glyphBuffer <- createCanvas glyphBufferSize "glyphBuffer"
-
-  pure $ TrackCanvas { dimensions: dim
-                     , canvas, glyphBuffer }
-
-setTrackCanvasSize :: Canvas.Dimensions
-                   -> TrackCanvas
-                   -> Effect TrackCanvas
-setTrackCanvasSize dim (TrackCanvas tc) = do
-  setBufferedCanvasSize (trackTotalDimensions dim) tc.canvas
-  pure $ TrackCanvas
-    $ tc { dimensions = dim }
-
-
-newtype BrowserContainer =
-  BrowserContainer { layers      :: Ref (Map String LayerCanvas)
-                   , dimensions  :: Ref BrowserDimensions
+newtype TrackContainer =
+  TrackContainer { layers      :: Ref (Map String LayerCanvas)
+                   , dimensions  :: Ref TrackDimensions
                    , element     :: Element
                    , glyphBuffer :: CanvasElement }
 
 
-derive instance newtypeBrowserContainer :: Newtype BrowserContainer _
-
-
+derive instance newtypeTrackContainer :: Newtype TrackContainer _
 
 
 getDimensions :: ∀ m.
                  MonadEffect m
-              => BrowserContainer
-              -> m BrowserDimensions
-getDimensions (BrowserContainer {dimensions}) =
+              => TrackContainer
+              -> m TrackDimensions
+getDimensions (TrackContainer {dimensions}) =
   liftEffect $ Ref.read dimensions
 
-_Layers :: Lens' BrowserContainer (Ref (Map String LayerCanvas))
+_Layers :: Lens' TrackContainer (Ref (Map String LayerCanvas))
 _Layers = _Newtype <<< Lens.prop (SProxy :: SProxy "layers")
 
-_Container :: Lens' BrowserContainer Element
+_Container :: Lens' TrackContainer Element
 _Container = _Newtype <<< Lens.prop (SProxy :: SProxy "element")
 
 
-setBrowserContainerSize :: ∀ m.
+setTrackContainerSize :: ∀ m.
                            MonadEffect m
                         => Canvas.Dimensions
-                        -> BrowserContainer
+                        -> TrackContainer
                         -> m Unit
-setBrowserContainerSize dim bc'@(BrowserContainer bc) = liftEffect $ do
+setTrackContainerSize dim bc'@(TrackContainer bc) = liftEffect $ do
   Ref.modify_ (_ { size = dim }) bc.dimensions
   setContainerStyle bc.element dim
   traverse_ (resizeLayer dim) =<< getLayers bc'
@@ -383,12 +335,12 @@ setBrowserContainerSize dim bc'@(BrowserContainer bc) = liftEffect $ do
 glyphBufferSize :: Canvas.Dimensions
 glyphBufferSize = { width: 15.0, height: 300.0 }
 
--- | Creates an *empty* BrowserContainer, to which layers can be added
-browserContainer :: Canvas.Dimensions
-                 -> BrowserPadding
+-- | Creates an *empty* TrackContainer, to which layers can be added
+trackContainer :: Canvas.Dimensions
+                 -> TrackPadding
                  -> Element
-                 -> Effect BrowserContainer
-browserContainer size padding element = do
+                 -> Effect TrackContainer
+trackContainer size padding element = do
 
   setContainerStyle element size
 
@@ -398,23 +350,23 @@ browserContainer size padding element = do
   layers     <- Ref.new mempty
 
   pure $
-    BrowserContainer
+    TrackContainer
       { layers, dimensions, element, glyphBuffer }
 
 
--- | Set the CSS z-indices of the Layers in the browser, so their
+-- | Set the CSS z-indices of the Layers in the track, so their
 -- | canvases are drawn in the correct order (i.e. as the
--- | BrowserContainer layer list is ordered)
+-- | TrackContainer layer list is ordered)
 zIndexLayers :: ∀ m.
                 MonadEffect m
-             => BrowserContainer
+             => TrackContainer
              -> List String
              -> m Unit
-zIndexLayers (BrowserContainer bc) order = liftEffect do
+zIndexLayers (TrackContainer bc) order = liftEffect do
   layers <- Ref.read bc.layers
   let layerNames = Map.keys layers
       n = length layerNames :: Int
-  -- if order does not have the same layer names as the BrowserContainer, fail
+  -- if order does not have the same layer names as the TrackContainer, fail
   if List.null (List.difference order $ List.fromFoldable layerNames)
     then do
       void $ forWithIndex order \i ln ->
@@ -427,9 +379,9 @@ zIndexLayers (BrowserContainer bc) order = liftEffect do
 
 getLayers :: ∀ m.
              MonadEffect m
-          => BrowserContainer
+          => TrackContainer
           -> m (Map String LayerCanvas)
-getLayers (BrowserContainer bc) =
+getLayers (TrackContainer bc) =
   liftEffect $ Ref.read bc.layers
 
 
@@ -443,12 +395,12 @@ resizeLayer dims lc = liftEffect do
     Static e -> void $ Canvas.setCanvasDimensions e dims
     Buffer b -> setBufferedCanvasSize dims b
 
--- | Add a LayerCanvas with the provided name to the browser container
+-- | Add a LayerCanvas with the provided name to the track container
 -- | and its element. The LayerCanvas' front element is added without
 -- | a Z-index, and replaces any existing layer with the same name!
 addLayer :: ∀ m.
             MonadEffect m
-         => BrowserContainer
+         => TrackContainer
          -> String
          -> LayerCanvas
          -> m Unit
@@ -462,11 +414,11 @@ addLayer bc name lc = liftEffect do
     Just oldL  -> DOM.replaceChild (toNode lc) (toNode oldL) (unsafeCoerce $ bc ^. _Container)
     Nothing    -> DOM.appendChild  (toNode lc)               (unsafeCoerce $ bc ^. _Container)
 
--- | Delete a LayerCanvas by name from the browser container, and the
+-- | Delete a LayerCanvas by name from the track container, and the
 -- | container DOM element.
 deleteLayer :: ∀ m.
                MonadEffect m
-            => BrowserContainer
+            => TrackContainer
             -> String
             -> m Unit
 deleteLayer bc name = liftEffect do
@@ -477,7 +429,7 @@ deleteLayer bc name = liftEffect do
     Nothing -> pure unit
     Just l  -> void $ DOM.removeChild (toNode l) (unsafeCoerce $ bc ^. _Container)
 
-  Ref.modify_ (Map.delete name) $ (bc ^. _Layers)
+  Ref.modify_ (Map.delete name) $ bc ^. _Layers
 
 
 
@@ -626,19 +578,19 @@ type RenderableLayerHotspots c a =
             , hotspots :: Number -> Point -> Array a })
 
 -- | A renderable `Layer` contains all the "DOM agnostic" parts required to define *any* layer;
--- | by providing a BrowserContainer (which has a BrowserDimensions), a "physical"
+-- | by providing a TrackContainer (which has a TrackDimensions), a "physical"
 -- | canvas with all the required bits can be created, which can then be rendered
 -- | by providing a configuration!
 
 
 
 
--- | Provided a BrowserContainer, we can initialize and add a named layer.
+-- | Provided a TrackContainer, we can initialize and add a named layer.
 -- | This returns a function that can be used to render to the layer maybe idk????
 -- | If the layer already existed, overwrites it
 createAndAddLayer :: ∀ m c a.
                      MonadEffect m
-                  => BrowserContainer
+                  => TrackContainer
                   -> String
                   -> RenderableLayerHotspots c a
                   -> m { render :: c -> m (List Renderable)
@@ -665,7 +617,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
         { offset, hotspots } <- Ref.read hotspotsRef
         pure \r {x, y} -> hotspots r {x: x+offset, y}
 
-  -- 2. add the canvas to the browsercontainer & DOM
+  -- 2. add the canvas to the trackcontainer & DOM
   let layerRef = _.layers $ unwrap bc
   liftEffect do
     Ref.modify_ (Map.insert name canvas) layerRef
@@ -735,7 +687,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 -- | Used for layers that don't contain clickable features
 createAndAddLayer_ :: ∀ m c.
                      MonadEffect m
-                  => BrowserContainer
+                  => TrackContainer
                   -> String
                   -> RenderableLayer c
                   -> m { render :: c -> m (List Renderable)

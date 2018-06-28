@@ -35,10 +35,10 @@ import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (LegendConfig, Peak, VScale, pixelSegments)
-import Genetics.Browser.Canvas (BrowserContainer, _Container, browserClickHandler, browserContainer, dragScroll, getDimensions, setBrowserContainerSize, setElementStyle, wheelZoom)
+import Genetics.Browser.Canvas (TrackContainer, _Container, trackClickHandler, trackContainer, dragScroll, getDimensions, setTrackContainerSize, setElementStyle, wheelZoom)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, SNPConfig, AnnotationsConfig, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
-import Genetics.Browser.Layer (Component(Padded), BrowserPadding, browserSlots)
+import Genetics.Browser.Layer (Component(Padded), TrackPadding, trackSlots)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
@@ -81,19 +81,19 @@ foreign import resizeEvent :: ({ width  :: Number
 
 
 -- | The value returned by the function that initializes the genome browser;
--- | provides an interface to the running browser instance.
-type BrowserInterface a
+-- | provides an interface to the running track instance.
+type TrackInterface a
   = { getView          :: Effect CoordSysView
-    , container        :: BrowserContainer
+    , container        :: TrackContainer
     , lastHotspots     :: Effect (Number -> Point -> Array a)
     , queueCommand     :: Variant UICmdR -> Aff Unit
     , queueUpdateView  :: UpdateView -> Effect Unit
     }
 
 
--- | Creates the browser using the provided initial data, returning
--- | a BrowserInterface for reading state & sending commands to it
-initializeBrowser :: ∀ c r.
+-- | Creates the track using the provided initial data, returning
+-- | a TrackInterface for reading state & sending commands to it
+initializeTrack :: ∀ c r.
                      CoordSys c BigInt
                   -> { snps        :: Pair Number -> CoordSysView -> Effect Unit
                      , annotations :: Pair Number -> CoordSysView -> Effect Unit
@@ -101,31 +101,31 @@ initializeBrowser :: ∀ c r.
                      , hotspots    :: Effect (Number -> Point -> Array (SNP ()))
                      , fixedUI     :: Effect Unit | r}
                   -> CoordSysView
-                  -> BrowserContainer
-                  -> Aff (BrowserInterface (SNP ()))
-initializeBrowser cSys renderFuns initView bc = do
+                  -> TrackContainer
+                  -> Aff (TrackInterface (SNP ()))
+initializeTrack cSys renderFuns initView bc = do
 
   renderFiberVar <- AVar.empty
 
-  browserView <- liftEffect $ Ref.new initView
+  trackView <- liftEffect $ Ref.new initView
   bcVar <- AVar.new bc
 
   uiCmdVar <- AVar.empty
   lastHotspotsVar <- AVar.empty
 
-  let getView = Ref.read browserView
+  let getView = Ref.read trackView
       queueCommand = flip AVar.put uiCmdVar
       lastHotspots = renderFuns.hotspots
 
     -- hardcoded timeout for now
-  queueUpdateView <- liftEffect $ uiViewUpdate cSys (wrap 30.0) {view: browserView, uiCmd: uiCmdVar}
+  queueUpdateView <- liftEffect $ uiViewUpdate cSys (wrap 30.0) {view: trackView, uiCmd: uiCmdVar}
 
   let mainLoop = do
         uiCmd <- AVar.take uiCmdVar
         case_ # V.on _render (\_ -> pure unit)
               # V.on _docResize (\ {width} -> do
                       {height} <- _.size <$> getDimensions bc
-                      setBrowserContainerSize {width, height} bc
+                      setTrackContainerSize {width, height} bc
                       queueCommand $ inj _render unit
                       mainLoop)
               $ uiCmd
@@ -275,7 +275,7 @@ _docResize = SProxy :: SProxy "docResize"
 
 
 debugView :: ∀ a.
-             BrowserInterface a
+             TrackInterface a
           -> Effect { get :: String -> Effect Unit
                     , set :: { l :: Number, r :: Number } -> Effect Unit }
 debugView s = unsafePartial do
@@ -439,7 +439,7 @@ initInfoBox = do
   pure $ updateInfoBox el
 
 
-runBrowser :: Conf -> BrowserContainer -> Effect (Fiber Unit)
+runBrowser :: Conf -> TrackContainer -> Effect (Fiber Unit)
 runBrowser config bc = launchAff $ do
 
   let cSys :: CoordSys ChrId BigInt
@@ -468,33 +468,33 @@ runBrowser config bc = launchAff $ do
   render <- liftEffect
             $ addDemoLayers cSys config trackData bc
 
-  browser <-
-    initializeBrowser cSys render initialView bc
+  track <-
+    initializeTrack cSys render initialView bc
 
 
   liftEffect do
     resizeEvent \d ->
-      launchAff_ $ browser.queueCommand $ inj _docResize d
+      launchAff_ $ track.queueCommand $ inj _docResize d
 
     let btnMods = { scrollMod: 0.10, zoomMod: 0.15 }
-    btnUI btnMods browser.queueUpdateView
+    btnUI btnMods track.queueUpdateView
 
     buttonEvent "reset"
-      $ browser.queueUpdateView
+      $ track.queueUpdateView
         (ModView (const $ unwrap initialView))
 
-    keyUI (bc ^. _Container) { scrollMod: 0.075 } browser.queueUpdateView
+    keyUI (bc ^. _Container) { scrollMod: 0.075 } track.queueUpdateView
 
     dragScroll bc \ {x,y} ->
       -- only do anything when scrolling at least a pixel
       when (Math.abs x >= one) do
-        trackDims <- _.padded <<< browserSlots <$> getDimensions bc
-        browser.queueUpdateView
+        trackDims <- _.center <<< trackSlots <$> getDimensions bc
+        track.queueUpdateView
          $ ScrollView $ (-x) / trackDims.size.width
 
     let scrollZoomScale = 0.06
     wheelZoom bc \dY ->
-       browser.queueUpdateView
+       track.queueUpdateView
          $ ZoomView $ 1.0 + scrollZoomScale * dY
 
 
@@ -506,7 +506,7 @@ runBrowser config bc = launchAff $ do
 
         glyphClick :: Point -> Effect Unit
         glyphClick p = launchAff_ do
-          v  <- liftEffect $ browser.getView
+          v  <- liftEffect $ track.getView
 
           trackDims <- _.padded <<< browserSlots <$> getDimensions bc
           let segs = pixelSegments { segmentPadding: 12.0 } cSys trackDims.size v
@@ -515,7 +515,7 @@ runBrowser config bc = launchAff $ do
 
           liftEffect do
 
-            lastHotspots' <- browser.lastHotspots
+            lastHotspots' <- track.lastHotspots
             let clicked = lastHotspots' clickRadius p
 
             case Array.head clicked of
@@ -529,8 +529,8 @@ runBrowser config bc = launchAff $ do
                   <> foldMap annoPeakHTML (annotAround annoPeaks g)
 
 
-    browserClickHandler bc
       $ Padded 5.0 glyphClick
+    trackClickHandler bc
 
   pure unit
 
@@ -544,8 +544,8 @@ type DataURLs = { snps        :: Maybe String
 
 
 type Conf =
-  { browserHeight :: Number
-  , padding :: BrowserPadding
+  { trackHeight :: Number
+  , padding :: TrackPadding
   , score :: { min :: Number, max :: Number, sig :: Number }
   , urls :: DataURLs
   , chrLabels :: { fontSize :: Int }
@@ -581,8 +581,8 @@ main rawConfig = do
         Right c   -> do
 
               {width} <- windowInnerSize
-              let dimensions = { width, height: c.browserHeight }
-              bc <- browserContainer dimensions c.padding el
+              let dimensions = { width, height: c.trackHeight }
+              bc <- trackContainer dimensions c.padding el
 
               log $ unsafeStringify c
               void $ runBrowser c bc

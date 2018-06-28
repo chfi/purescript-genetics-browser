@@ -20,17 +20,17 @@ foreign import setContextTranslation :: Point
 
 type Point = { x :: Number, y :: Number }
 
-type BrowserPadding =
+type TrackPadding =
   { top  :: Number, bottom :: Number
   , left :: Number, right  :: Number }
 
-type BrowserDimensions =
+type TrackDimensions =
   { size    :: Canvas.Dimensions
-  , padding :: BrowserPadding }
+  , padding :: TrackPadding }
 
 data Component a =
     Full   a
-  | Padded Number a
+  | Center a
   | CTop a
   | CRight a
   | CBottom a
@@ -39,7 +39,7 @@ data Component a =
 _Component :: ∀ a. Getter' (Component a) a
 _Component = to case _ of
   Full     a -> a
-  Padded _ a -> a
+  Center a -> a
   CTop     a -> a
   CRight   a -> a
   CBottom  a -> a
@@ -84,25 +84,25 @@ derive instance eqLayerMask :: Eq LayerMask
 type ComponentSlot = { offset :: Point
                      , size   :: Canvas.Dimensions }
 
-type BrowserSlots a =
+type TrackSlots a =
   ( full   :: a
-  , padded :: a
+  , center :: a
   , top    :: a
   , right  :: a
   , bottom :: a
   , left   :: a )
 
 _full   = SProxy :: SProxy "full"
-_padded = SProxy :: SProxy "padded"
+_center = SProxy :: SProxy "center"
 _top    = SProxy :: SProxy "top"
 _right  = SProxy :: SProxy "right"
 _bottom = SProxy :: SProxy "bottom"
 _left   = SProxy :: SProxy "left"
 
-asSlot :: ∀ a. Component a -> Variant (BrowserSlots a)
+asSlot :: ∀ a. Component a -> Variant (TrackSlots a)
 asSlot = case _ of
   Full     a -> inj _full   a
-  Padded _ a -> inj _padded a
+  Center   a -> inj _center a
   CTop     a -> inj _top    a
   CRight   a -> inj _right  a
   CBottom  a -> inj _bottom a
@@ -183,14 +183,14 @@ browserSlots {size,padding} =
 slotContext :: ∀ m a.
                 MonadEffect m
              => Layer a
-             -> BrowserDimensions
+             -> TrackDimensions
              -> CanvasElement
              -> m Context2D
 slotContext (Layer _ mask com) dims el = liftEffect do
 
   ctx <- Canvas.getContext2D el
 
-  let slots = browserSlots dims
+  let slots = trackSlots dims
       clipMask p0 p1 = do
         _ <- beginPath ctx
         _ <- moveTo ctx p0.x p0.y

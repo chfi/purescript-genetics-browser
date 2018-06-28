@@ -42,7 +42,7 @@ import Foreign.Index (readProp) as Foreign
 import Foreign.Keys (keys) as Foreign
 import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderHotspots, renderTrack, thresholdRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
-import Genetics.Browser.Canvas (BrowserContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, _drawings, _labels, createAndAddLayer, createAndAddLayer_, getDimensions)
+import Genetics.Browser.Canvas (TrackContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, _drawings, _labels, createAndAddLayer, createAndAddLayer_, getDimensions)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
 import Genetics.Browser.Layer (Component(Padded, CRight, CLeft), Layer(..), LayerMask(..), LayerType(..))
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
@@ -647,7 +647,7 @@ addDemoLayers :: ∀ r r2.
                 , annotationsConfig :: AnnotationsConfig | r }
              -> { snps        :: Map ChrId (Array (SNP ()))
                 , annotations :: Map ChrId (Array (Annotation ())) | r2 }
-             -> BrowserContainer
+             -> TrackContainer
              -> Effect { snps        :: Pair Number -> CoordSysView -> Effect Unit
                        , annotations :: Pair Number -> CoordSysView -> Effect Unit
                        , chrs        :: Pair Number -> CoordSysView -> Effect Unit
