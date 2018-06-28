@@ -421,6 +421,11 @@ type TrackHotspotsRenderer a =
   -> { renderables :: List Renderable
      , hotspots :: Number -> Point -> Array a }
 
+type TrackLike a =
+     Map ChrId (Pair Number)
+  -> Canvas.Dimensions
+  -> a
+
 type Renderer a =
      Map ChrId (Array a)
   -> Map ChrId (Pair Number)
@@ -438,56 +443,25 @@ pixelSegments conf cSys trackDim csView =
   aroundPair (-conf.segmentPadding)
        <$> scaledSegments cSys (viewScale trackDim csView)
 
-
-renderHotspots :: ∀ a b l rC r1 r2.
+renderTrackLike :: ∀ a b l rC r1 r2.
                IsSymbol l
             => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
             => { segmentPadding :: Number | rC }
             -> CoordSys ChrId BigInt
             -> SProxy l
-            -> Component (b -> TrackHotspotsRenderer a)
-            -> RenderableLayerHotspots (Record ( view :: CoordSysView | r2 )) a
-renderHotspots conf cSys name com =
-  let
-      segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
+            -> Component (b -> TrackLike a)
+            -> ContentLayer (Record ( view :: CoordSysView | r2 )) a
+renderTrackLike conf cSys name com =
+  let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
       segs = pixelSegments conf cSys
-  in case com of
-        Full     r ->
-          Layer Scrolling NoMask
-            $ Full     \c d -> r (get name c) (segs d c.view) d
-
-        Padded p r ->
-          Layer Scrolling Masked
-            $ Padded p \c d -> r (get name c) (segs d c.view) d
-
-        _ -> unsafeCrashWith "renderTrack' does not support UI slots yet"
-
-renderTrack :: ∀ a b l rC r1 r2.
-               IsSymbol l
-            => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
-            => { segmentPadding :: Number | rC }
-            -> CoordSys ChrId BigInt
-            -> SProxy l
-            -> Component (b -> TrackRenderer)
-            -> RenderableLayer (Record ( view :: CoordSysView | r2 ))
-renderTrack conf cSys name com =
-  let
-      segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
-      segs = pixelSegments conf cSys
-  in case com of
-        Full     r ->
-          Layer Scrolling NoMask
-            $ Full     \c d -> r (get name c) (segs d c.view) d
-
-        Padded p r ->
-          Layer Scrolling Masked
-            $ Padded p \c d -> r (get name c) (segs d c.view) d
-
-        _ -> unsafeCrashWith "renderTrack' does not support UI slots yet"
+  in Layer Scrolling (Masked 5.0)
+       $ (\r c d -> r (get name c) (segs d c.view) d)
+      <$> com
 
 
-renderFixedUI :: Component (Canvas.Dimensions -> Drawing)
-              -> RenderableLayer Unit
+renderFixedUI :: ∀ c.
+                 Component (Canvas.Dimensions -> Drawing)
+              -> RenderableLayer c
 renderFixedUI com = Layer Fixed NoMask $ map f com
   where f draw = \_ d -> pure $ inj _static (draw d)
 

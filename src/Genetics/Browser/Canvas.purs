@@ -4,6 +4,7 @@
 module Genetics.Browser.Canvas
        ( TrackContainer
        , Renderable
+       , ContentLayer
        , RenderableLayer
        , RenderableLayerHotspots
        , Label
@@ -13,6 +14,7 @@ module Genetics.Browser.Canvas
        , _labels
        , createAndAddLayer
        , createAndAddLayer_
+       , renderLayer
        , getDimensions
        , _Container
        , dragScroll
@@ -569,19 +571,16 @@ _static   = SProxy :: SProxy "static"
 _drawings = SProxy :: SProxy "drawings"
 _labels   = SProxy :: SProxy "labels"
 
-type RenderableLayer c = Layer (c -> Canvas.Dimensions -> List Renderable)
 
+
+-- | A `ContentLayer` represents anything that can be produced in the
+-- | context of a Layer with a Canvas, and some sort of additional configuration.
+type ContentLayer c a = Layer (c -> Canvas.Dimensions -> a)
+
+type RenderableLayer c = ContentLayer c (List Renderable)
 type RenderableLayerHotspots c a =
-  Layer (c
-         -> Canvas.Dimensions
-         -> { renderables :: List Renderable
-            , hotspots :: Number -> Point -> Array a })
-
--- | A renderable `Layer` contains all the "DOM agnostic" parts required to define *any* layer;
--- | by providing a TrackContainer (which has a TrackDimensions), a "physical"
--- | canvas with all the required bits can be created, which can then be rendered
--- | by providing a configuration!
-
+  ContentLayer c { renderables :: List Renderable
+                 , hotspots :: Number -> Point -> Array a }
 
 
 
@@ -690,3 +689,17 @@ createAndAddLayer_ bc name layer@(Layer lt _ com) = do
 
   { render, drawOnCanvas } <- createAndAddLayer bc name layer'
   pure { render, drawOnCanvas }
+
+
+
+-- | Convenience function for rendering layers when manipulating the
+-- | Renderable contents isn't desired.
+renderLayer :: ∀ m c r.
+               MonadEffect m
+            => Pair Number
+            -> c
+            -> { render :: c -> m (List Renderable)
+               , drawOnCanvas :: Pair Number -> List Renderable -> m Unit
+               | r }
+            -> m Unit
+renderLayer p c l = l.render c >>= l.drawOnCanvas p

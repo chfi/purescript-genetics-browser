@@ -11,7 +11,7 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
 import Data.Filterable (filter, filterMap, partition, partitionMap)
-import Data.Foldable (class Foldable, fold, foldMap, foldr, length, minimumBy, sequence_)
+import Data.Foldable (class Foldable, fold, foldMap, foldr, length, minimumBy, sequence_, traverse_)
 import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
@@ -40,7 +40,7 @@ import Foreign (F, Foreign, ForeignError(ForeignError))
 import Foreign (readArray) as Foreign
 import Foreign.Index (readProp) as Foreign
 import Foreign.Keys (keys) as Foreign
-import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderHotspots, renderTrack, thresholdRuler, trackLegend)
+import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrackLike, thresholdRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
 import Genetics.Browser.Canvas (Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _drawings, _labels, createAndAddLayer, createAndAddLayer_, getDimensions, renderLayer)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
@@ -421,13 +421,14 @@ filterSig {sig} = map (filter
 
 
 
-snpsUI :: VScale (VScaleRow ())
-       -> RenderableLayer Unit
+snpsUI :: ∀ c.
+          VScale (VScaleRow ())
+       -> RenderableLayer c
 snpsUI vscale = renderFixedUI (CLeft $ drawVScaleInSlot vscale)
 
-annotationsUI :: ∀ r.
-                LegendConfig (entries :: Array LegendEntry | r)
-             -> RenderableLayer Unit
+annotationsUI :: ∀ r c.
+                 LegendConfig (entries :: Array LegendEntry | r)
+              -> RenderableLayer c
 annotationsUI legend = renderFixedUI (CRight $ drawLegendInSlot legend)
 
 
@@ -671,13 +672,13 @@ addDemoLayers cSys config trackData =
                                              , segmentPadding :: Number }
                                  , view :: CoordSysView | r' }
       bgLayer =
-        renderTrack conf cSys (SProxy :: SProxy "config")
+        renderTrackLike conf cSys (SProxy :: SProxy "config")
           (Center chrBackgroundLayer)
 
 
       snpLayer :: RenderableLayerHotspots _ _
       snpLayer =
-        renderHotspots conf cSys _snps
+        renderTrackLike conf cSys _snps
           (Center $ renderSNPs trackData.snps)
 
       annotationLayer :: RenderableLayer
@@ -686,7 +687,7 @@ addDemoLayers cSys config trackData =
                               , annotationsConfig :: AnnotationsConfig }
                          , view :: CoordSysView }
       annotationLayer =
-        renderTrack conf cSys _annotations
+        renderTrackLike conf cSys _annotations
           (Center $ renderAnnotations cSys sigSnps trackData.annotations)
 
 
@@ -719,33 +720,33 @@ addDemoLayers cSys config trackData =
 
 
     let fixedUI = do
-          rVScale.render unit >>= rVScale.drawOnCanvas (Pair 0.0 0.0)
-          rLegend.render unit >>= rLegend.drawOnCanvas (Pair 0.0 0.0)
-          rRuler.render { rulerColor: wrap red, threshold } >>= rRuler.drawOnCanvas (Pair 0.0 0.0)
+          let uiConf = { rulerColor: wrap red, threshold }
+
+          traverse_ (renderLayer (Pair 0.0 0.0) uiConf)
+                      [ rVScale, rLegend, rRuler ]
 
 
         snps o v = do
-          snpsDrawings <-
-            rSNPs.render { snps: { threshold
-                                 , snpsConfig: config.snpsConfig }
-                         , view: v }
-          rSNPs.drawOnCanvas o snpsDrawings
+          renderLayer o { snps: { threshold
+                                      , snpsConfig: config.snpsConfig }
+                              , view: v } rSNPs
 
         hotspots = rSNPs.lastHotspots
 
         annotations o v =
-          rAnnos.render { annotations: { threshold
-                                , annotationsConfig: config.annotationsConfig }
-                 , view: v } >>= rAnnos.drawOnCanvas o
+          renderLayer o { annotations: { threshold
+                                       , annotationsConfig: config.annotationsConfig }
+                        , view: v } rAnnos
 
 
         chrs o v = do
-          rBG.render { config: { bg1: HexColor white, bg2: HexColor lightgray
-                               , segmentPadding }
-                     , view: v } >>= rBG.drawOnCanvas o
+          let bgConf = { config: { bg1: HexColor white
+                                 , bg2: HexColor lightgray
+                                 , segmentPadding }
+                       , view: v }
+          traverse_ (renderLayer o bgConf)
+                      [rBG, rChrLabels]
 
-          rChrLabels.render { view: v }
-            >>= rChrLabels.drawOnCanvas o
 
     pure { snps
          , annotations
