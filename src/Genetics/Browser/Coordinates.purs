@@ -27,7 +27,7 @@ import Partial.Unsafe (unsafePartial)
 
 
 -- | Helper function to calculate the size of the stretch covered by a pair.
-pairSize :: forall c.
+pairSize :: ∀ c.
             Ring c
          => Pair c
          -> c
@@ -35,7 +35,7 @@ pairSize (Pair l r) = r - l
 
 
 -- | Helper function for defining predicates on pairs that contain a given point.
-inPair :: forall c.
+inPair :: ∀ c.
           Ord c
        => c
        -> Pair c
@@ -46,7 +46,7 @@ inPair p (Pair l r) = l <= p && p <= r
 -- TODO test this one
 
 -- | Helper function for defining predicates on pairs that overlap with a given pair.
-pairsOverlap :: forall c.
+pairsOverlap :: ∀ c.
                 Ord c
              => Pair c
              -> Pair c
@@ -56,14 +56,14 @@ pairsOverlap (Pair l1 r1) (Pair l2 r2) =
       (Pair l2' r2') = Pair (max l1 l2) (max r1 r2)
   in r1' >= l2'
 
-around :: forall c.
+around :: ∀ c.
           Ring c
        => c
        -> c
        -> Pair c
 around radius point = Pair (point - radius) (point + radius)
 
-aroundPair :: forall c.
+aroundPair :: ∀ c.
               Ring c
            => c
            -> Pair c
@@ -123,7 +123,7 @@ derive instance newtypeCoordSys :: Newtype (CoordSys i c) _
 derive instance genericCoordSys :: Generic (CoordSys i c) _
 
 -- | Lens to the segments in a coordinate system.
-_Segments :: forall i c j d.
+_Segments :: ∀ i c j d.
              Lens
              (CoordSys i c) (CoordSys j d)
              (Segments i c) (Segments j d)
@@ -131,7 +131,7 @@ _Segments = _Newtype
 
 
 -- | A Getter' to retrieve the total size of the coordinate system by summing its parts.
-_TotalSize :: forall i c.
+_TotalSize :: ∀ i c.
               Ring c
            => Getter' (CoordSys i c) c
 _TotalSize = _Segments
@@ -139,7 +139,7 @@ _TotalSize = _Segments
 
 
 -- | A Getter' into the size of a segment.
-_SegmentSize :: forall i c.
+_SegmentSize :: ∀ i c.
                 Ring c
              => Getter' (Segment i c) c
 _SegmentSize = _2 <<< to pairSize
@@ -149,7 +149,7 @@ _SegmentSize = _2 <<< to pairSize
 -- | A coordinate system is created by providing an array of pairs of
 -- | chromosome/segment name (often in the ChrId newtype) and their
 -- | respective sizes.
-coordSys :: forall i c.
+coordSys :: ∀ i c.
             Ord i
          => Semiring c
          => Array (Tuple i c)
@@ -165,7 +165,7 @@ coordSys segs = CoordSys $ Map.fromFoldable
 
 
 -- | Given a coordinate system and a point, find the segment that contains the point, if any.
-lookupSegment :: forall i c.
+lookupSegment :: ∀ i c.
                  Ord c
               => CoordSys i c
               -> c
@@ -178,7 +178,7 @@ lookupSegment cs x = findOf folded pred array
 
 
 -- | Given a coordinate system and a range, find the segments that overlap, even partially, with the range.
-segmentsInPair :: forall i c.
+segmentsInPair :: ∀ i c.
                   Ord i
                => Ord c
                => CoordSys i c
@@ -209,7 +209,7 @@ setViewWidth newW p@(Pair l r) =
   in  Pair (l - d) (r + d)
 
 -- TODO test that this is idempotent
-normalizeView :: forall i.
+normalizeView :: ∀ i.
                  CoordSys i BigInt
               -> BigInt
               -> CoordSysView
@@ -232,7 +232,7 @@ normalizeView cs minWidth csv =
 
 
 
-viewScale :: forall r.
+viewScale :: ∀ r.
              { width :: Number | r } -> CoordSysView -> ViewScale
 viewScale {width} (CoordSysView csView) =
   let coordWidth = pairSize csView
@@ -259,7 +259,7 @@ scaleToScreen (ViewScale {pixelWidth, coordWidth}) x =
 
 -- | Given a coordinate system and browser scale,
 -- | return the browser segments scaled to canvas coordinates.
-scaledSegments :: forall i.
+scaledSegments :: ∀ i.
                   CoordSys i BigInt
                -> ViewScale
                -> Segments i Number

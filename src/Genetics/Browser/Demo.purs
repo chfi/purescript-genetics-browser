@@ -11,7 +11,7 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
 import Data.Filterable (filter, filterMap, partition, partitionMap)
-import Data.Foldable (class Foldable, fold, foldMap, foldr, length, minimumBy, sequence_, traverse_)
+import Data.Foldable (class Foldable, foldMap, foldr, length, minimumBy, sequence_, traverse_)
 import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
@@ -53,12 +53,12 @@ import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
 import Network.HTTP.Affjax (get) as Affjax
 import Network.HTTP.Affjax.Response (json) as Affjax
-import Record (insert) as Record
+import Record as Record
 import Record.Builder (build, insert, merge, modify)
 import Record.Extra (class Keys)
 import Record.Extra (keys) as Record
 import Simple.JSON as Simple
-import Type.Prelude (class RowToList, SProxy(SProxy))
+import Type.Prelude (class IsSymbol, class RowToList, SProxy(SProxy))
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -449,24 +449,23 @@ defaultSNPConfig =
   }
 
 
-renderSNPs :: ∀ r1 rC.
+renderSNPs :: ∀ r1.
               Map ChrId (Array (SNP ()))
            -> { threshold  :: { min  :: Number, max :: Number | r1 }
-              , snpsConfig :: SNPConfig | rC }
+              , render :: SNPConfig }
            -> Map ChrId (Pair Number)
            -> Canvas.Dimensions
            -> { renderables :: List Renderable
               , hotspots :: Number -> Point -> Array (SNP ()) }
-renderSNPs snpData { snpsConfig, threshold } =
-  let snps = snpsConfig
-      radius = snps.radius
+renderSNPs snpData { render, threshold } =
+  let radius = render.radius
 
       drawing =
-          let {x,y} = snps.pixelOffset
+          let {x,y} = render.pixelOffset
               c     = circle x y radius
-              out   = outlined (outlineColor (unwrap snps.color.outline) <>
-                                lineWidth snps.lineWidth) c
-              fill  = filled   (fillColor    $ unwrap snps.color.fill)    c
+              out   = outlined (outlineColor (unwrap render.color.outline) <>
+                                lineWidth render.lineWidth) c
+              fill  = filled   (fillColor    $ unwrap render.color.fill)    c
           in out <> fill
 
       drawings :: Array (Tuple (SNP ()) Point) -> Array DrawingN
@@ -620,7 +619,7 @@ renderAnnotations :: ∀ r1 r2 rC.
                  -> Map ChrId (Array (SNP ()))
                  -> Map ChrId (Array (Annotation r1))
                  -> { threshold :: { min :: Number, max :: Number | r2 }
-                    , annotationsConfig :: AnnotationsConfig | rC }
+                    , render :: AnnotationsConfig | rC }
                  -> Map ChrId (Pair Number)
                  -> Canvas.Dimensions
                  -> List Renderable
@@ -629,7 +628,7 @@ renderAnnotations cSys sigSnps allAnnots conf =
 
   in \seg size ->
         let {drawings, labels} =
-              renderAnnotationPeaks cSys conf.threshold conf.annotationsConfig (annoPeaks seg) size seg
+              renderAnnotationPeaks cSys conf.threshold conf.render (annoPeaks seg) size seg
         in List.fromFoldable
            [ inj _drawings $ drawings
            , inj _labels   $ labels ]
@@ -639,13 +638,13 @@ _snps = SProxy :: SProxy "snps"
 _annotations = SProxy :: SProxy "annotations"
 
 addDemoLayers :: ∀ r r2.
-                CoordSys ChrId BigInt
-             -> { score :: { min :: Number, max :: Number, sig :: Number }
+                { score :: { min :: Number, max :: Number, sig :: Number }
                 , legend :: LegendConfig ()
                 , vscale :: VScale ()
                 , chrLabels :: { fontSize :: Int }
-                , snpsConfig :: SNPConfig
-                , annotationsConfig :: AnnotationsConfig | r }
+                , snps :: SNPConfig
+                , annotations :: AnnotationsConfig
+                , coordinateSystem :: CoordSys ChrId BigInt | r }
              -> { snps        :: Map ChrId (Array (SNP ()))
                 , annotations :: Map ChrId (Array (Annotation ())) | r2 }
              -> TrackContainer
@@ -654,25 +653,27 @@ addDemoLayers :: ∀ r r2.
                        , chrs        :: Pair Number -> CoordSysView -> Effect Unit
                        , hotspots    :: Effect (Number -> Point -> Array (SNP ()))
                        , fixedUI     :: Effect Unit }
-addDemoLayers cSys config trackData =
+addDemoLayers config trackData =
   let threshold = config.score
       vscale = build (merge config.vscale) threshold
 
       sigSnps = filterSig config.score trackData.snps
       legend = Record.insert (SProxy :: SProxy "entries")
-               (annotationLegendTest config.annotationsConfig
+               (annotationLegendTest
+                 config.annotations
                  trackData.annotations) config.legend
 
       segmentPadding = 12.0
       conf = { segmentPadding }
+      cSys = config.coordinateSystem
 
       bgLayer :: ∀ r'.
-                 RenderableLayer { config :: { bg1 :: HexColor
-                                             , bg2 :: HexColor
-                                             , segmentPadding :: Number }
+                 RenderableLayer { background :: { bg1 :: HexColor
+                                                 , bg2 :: HexColor
+                                                 , segmentPadding :: Number }
                                  , view :: CoordSysView | r' }
       bgLayer =
-        renderTrackLike conf cSys (SProxy :: SProxy "config")
+        renderTrackLike conf cSys (SProxy :: SProxy "background")
           (Center chrBackgroundLayer)
 
 
@@ -684,7 +685,7 @@ addDemoLayers cSys config trackData =
       annotationLayer :: RenderableLayer
                          { annotations
                            :: { threshold :: Threshold
-                              , annotationsConfig :: AnnotationsConfig }
+                              , render :: AnnotationsConfig }
                          , view :: CoordSysView }
       annotationLayer =
         renderTrackLike conf cSys _annotations
@@ -725,24 +726,21 @@ addDemoLayers cSys config trackData =
           traverse_ (renderLayer (Pair 0.0 0.0) uiConf)
                       [ rVScale, rLegend, rRuler ]
 
-
         snps o v = do
-          renderLayer o { snps: { threshold
-                                      , snpsConfig: config.snpsConfig }
-                              , view: v } rSNPs
+          renderLayer o { snps: { threshold, render: config.snps }
+                        , view: v } rSNPs
 
         hotspots = rSNPs.lastHotspots
 
         annotations o v =
-          renderLayer o { annotations: { threshold
-                                       , annotationsConfig: config.annotationsConfig }
+          renderLayer o { annotations: { threshold, render: config.annotations }
                         , view: v } rAnnos
 
 
         chrs o v = do
-          let bgConf = { config: { bg1: HexColor white
-                                 , bg2: HexColor lightgray
-                                 , segmentPadding }
+          let bgConf = { background: { bg1: HexColor white
+                                     , bg2: HexColor lightgray
+                                     , segmentPadding }
                        , view: v }
           traverse_ (renderLayer o bgConf)
                       [rBG, rChrLabels]

@@ -28,14 +28,13 @@ import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Number.Format as Num
 import Data.Pair (Pair(..))
 import Data.String as String
-import Data.Symbol (SProxy)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Foreign (F, Foreign, ForeignError(..), readString)
-import Genetics.Browser.Canvas (Renderable, RenderableLayer, RenderableLayerHotspots, ContentLayer, _static)
+import Genetics.Browser.Canvas (ContentLayer, Renderable, RenderableLayer, _static)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), aroundPair, normalize, pairSize, scaledSegments, viewScale, xPerPixel)
-import Genetics.Browser.Layer (Component(Center, Full, CBottom), Layer(Layer), LayerMask(NoMask, Masked), LayerType(Fixed, Scrolling))
+import Genetics.Browser.Layer (Component(CBottom), Layer(Layer), LayerMask(NoMask, Masked), LayerType(Fixed, Scrolling))
 import Genetics.Browser.Types (Bp, ChrId, _exp)
 import Graphics.Canvas (Dimensions) as Canvas
 import Graphics.Drawing (Drawing, Point, Shape, fillColor, filled, lineWidth, outlineColor, outlined, translate)
@@ -43,11 +42,11 @@ import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math (pow)
 import Math as Math
-import Partial.Unsafe (unsafeCrashWith)
 import Prim.Row as Row
 import Record (get)
 import Simple.JSON (class ReadForeign)
-import Type.Prelude (class IsSymbol)
+import Type.Prelude (class IsSymbol, SProxy)
+
 
 
 
@@ -121,7 +120,7 @@ thresholdRuler {threshold: {sig,min,max}, rulerColor} slot =
        , inj _static label ]
 
 
-chrLabels :: ∀ r1 r2 a.
+chrLabels :: ∀ r1 r2.
                { segmentPadding :: Number
                , fontSize :: Int | r1 }
             -> CoordSys ChrId BigInt
@@ -164,7 +163,7 @@ chrLabels conf cSys =
          $ pixelSegments conf cSys dim view
 
 
-chrBackgroundLayer :: ∀ r a.
+chrBackgroundLayer :: ∀ r.
                       { bg1 :: HexColor
                       , bg2 :: HexColor
                       , segmentPadding :: Number | r }
@@ -326,7 +325,7 @@ type Padding = { vertical :: Number
                }
 
 
-groupToMap :: forall i a f rData.
+groupToMap :: ∀ i a f.
               Monoid (f a)
            => Ord i
            => Foldable f
@@ -340,7 +339,7 @@ groupToMap f = foldl (\grp a -> Map.alter (add a) (f a) grp ) mempty
 
 
 
-trackLegend :: forall f a.
+trackLegend :: ∀ f a.
                Foldable f
             => Functor f
             => (a -> LegendEntry)
@@ -350,7 +349,7 @@ trackLegend f as = Array.nubBy (compare `on` _.text) $ Array.fromFoldable $ map 
 
 
 
-horPlaceOnSegment :: forall r.
+horPlaceOnSegment :: ∀ r.
                      Pair Number
                   -> { horPos :: Variant HorPlaceR | r }
                   -> Number
@@ -361,7 +360,7 @@ horPlaceOnSegment segmentPixels o =
   $ o.horPos
 
 
-finalizeNormDrawing :: forall r.
+finalizeNormDrawing :: ∀ r.
                        Pair Number
                     -> { drawing :: DrawingV | r }
                     -> { drawing :: Unit -> Drawing, width :: Number }
@@ -392,7 +391,7 @@ rescaleNormSingleGlyphs height seg =
   map (renderNormalized1 height seg)
 
 
-withPixelSegments :: forall r m.
+withPixelSegments :: ∀ r m.
                      Monoid m
                   => CoordSys ChrId BigInt
                   -> { width :: Number | r }
@@ -443,20 +442,23 @@ pixelSegments conf cSys trackDim csView =
   aroundPair (-conf.segmentPadding)
        <$> scaledSegments cSys (viewScale trackDim csView)
 
+
+
 renderTrackLike :: ∀ a b l rC r1 r2.
-               IsSymbol l
-            => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
-            => { segmentPadding :: Number | rC }
-            -> CoordSys ChrId BigInt
-            -> SProxy l
-            -> Component (b -> TrackLike a)
-            -> ContentLayer (Record ( view :: CoordSysView | r2 )) a
+                   IsSymbol l
+                => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
+                => { segmentPadding :: Number | rC }
+                -> CoordSys ChrId BigInt
+                -> SProxy l
+                -> Component (b -> TrackLike a)
+                -> ContentLayer (Record ( view :: CoordSysView | r2 )) a
 renderTrackLike conf cSys name com =
   let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
       segs = pixelSegments conf cSys
   in Layer Scrolling (Masked 5.0)
        $ (\r c d -> r (get name c) (segs d c.view) d)
       <$> com
+
 
 
 renderFixedUI :: ∀ c.

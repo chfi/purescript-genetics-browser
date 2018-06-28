@@ -37,7 +37,7 @@ data Component a =
 _Component :: ∀ a. Getter' (Component a) a
 _Component = to case _ of
   Full     a -> a
-  Center a -> a
+  Center   a -> a
   CTop     a -> a
   CRight   a -> a
   CBottom  a -> a

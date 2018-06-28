@@ -45,6 +45,7 @@ import Graphics.Canvas as Canvas
 import Graphics.Drawing (Point)
 import Math as Math
 import Partial.Unsafe (unsafePartial)
+import Record (insert)
 import Simple.JSON (read)
 import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM (Element)
@@ -464,9 +465,9 @@ runBrowser config bc = launchAff $ do
     <*> foldMap (getSNPs        cSys) config.urls.snps
     <*> foldMap (getAnnotations cSys) config.urls.annotations
 
-
   render <- liftEffect
-            $ addDemoLayers cSys config trackData bc
+            $ addDemoLayers (insert (SProxy :: SProxy "coordinateSystem") cSys config)
+                             trackData bc
 
   track <-
     initializeTrack cSys render initialView bc
@@ -549,8 +550,8 @@ type Conf =
   , score :: { min :: Number, max :: Number, sig :: Number }
   , urls :: DataURLs
   , chrLabels :: { fontSize :: Int }
-  , snpsConfig        :: SNPConfig
-  , annotationsConfig :: AnnotationsConfig
+  , snps        :: SNPConfig
+  , annotations :: AnnotationsConfig
   , legend :: LegendConfig ()
   , vscale :: VScale ()
   , initialChrs :: Maybe { left :: String, right :: String }
