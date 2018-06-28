@@ -38,7 +38,7 @@ import Genetics.Browser (LegendConfig, Peak, VScale, pixelSegments)
 import Genetics.Browser.Canvas (TrackContainer, _Container, trackClickHandler, trackContainer, dragScroll, getDimensions, setTrackContainerSize, setElementStyle, wheelZoom)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, SNPConfig, AnnotationsConfig, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
-import Genetics.Browser.Layer (Component(Padded), TrackPadding, trackSlots)
+import Genetics.Browser.Layer (Component(Center), TrackPadding, trackSlots)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
@@ -138,7 +138,7 @@ initializeTrack cSys renderFuns initView bc = do
 
         currentDims <- getDimensions bc
 
-        let trackDims = _.padded $ browserSlots currentDims
+        let trackDims = _.center $ trackSlots currentDims
             currentScale = viewScale trackDims.size csView
             pxView = scaleToScreen currentScale <$> (unwrap csView)
 
@@ -508,7 +508,7 @@ runBrowser config bc = launchAff $ do
         glyphClick p = launchAff_ do
           v  <- liftEffect $ track.getView
 
-          trackDims <- _.padded <<< browserSlots <$> getDimensions bc
+          trackDims <- _.center <<< trackSlots <$> getDimensions bc
           let segs = pixelSegments { segmentPadding: 12.0 } cSys trackDims.size v
               annoPeaks = annotationsForScale cSys sigSnps
                             trackData.annotations segs
@@ -529,8 +529,8 @@ runBrowser config bc = launchAff $ do
                   <> foldMap annoPeakHTML (annotAround annoPeaks g)
 
 
-      $ Padded 5.0 glyphClick
     trackClickHandler bc
+      $ Center glyphClick
 
   pure unit
 

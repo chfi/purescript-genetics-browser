@@ -51,7 +51,7 @@ import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Effect.Uncurried (EffectFn2, EffectFn3, EffectFn5, runEffectFn2, runEffectFn3, runEffectFn5)
-import Genetics.Browser.Layer (TrackDimensions, TrackPadding, Component(CBottom, CRight, CLeft, CTop, Padded, Full), Layer(Layer), LayerType(Scrolling, Fixed), _Component, asSlot, browserSlots, setContextTranslation, slotContext, slotRelative)
+import Genetics.Browser.Layer (Component(CBottom, CRight, CLeft, CTop, Center, Full), Layer(Layer), LayerType(Scrolling, Fixed), TrackDimensions, TrackPadding, _Component, asSlot, setContextTranslation, slotContext, slotOffset, slotSize, trackSlots)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -155,7 +155,7 @@ trackClickHandler bc com = liftEffect do
   dims <- getDimensions bc
 
   let cb = com ^. _Component
-      translate = slotRelative dims (asSlot com)
+      translate p = p - (slotOffset dims $ asSlot com)
 
   elementClick (bc ^. _Container) (cb <<< translate)
 
@@ -598,11 +598,10 @@ createAndAddLayer :: ∀ m c a.
                        , lastHotspots :: m (Number -> Point -> Array a) }
 createAndAddLayer bc name layer@(Layer lt _ com) = do
 
-  dims <- getDimensions bc
   -- 1. create the layercanvas
-  let slots = browserSlots dims
 
-      {size, pos} = { size: slots.full.size,   pos: { left: 0.0, top: 0.0 } }
+  size <- _.size <$> getDimensions bc
+  let pos = { left: 0.0, top: 0.0 }
 
   canvas <- liftEffect do
     cv <- case lt of
@@ -626,18 +625,9 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
   -- 3. create the rendering function
   let render :: c -> m (List Renderable)
       render c = do
-        dims' <- getDimensions bc
+        dims <- getDimensions bc
 
-        let slots' = browserSlots dims'
-
-            toRender = (com ^. _Component) c $ case com of
-              Full     _ -> slots'.full.size
-              Padded _ _ -> slots'.padded.size
-              CTop     _ -> slots'.top.size
-              CLeft    _ -> slots'.left.size
-              CRight   _ -> slots'.right.size
-              CBottom  _ -> slots'.bottom.size
-
+        let toRender = (com ^. _Component) c $ slotSize dims (asSlot com)
 
         liftEffect $ Ref.modify_ (_ { hotspots = toRender.hotspots }) hotspotsRef
 
@@ -654,16 +644,17 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
                  Nothing -> unsafeCrashWith $ "Tried to render layer '" <> name <> "', but it did not exist!"
                  Just e  -> pure $ e ^. _FrontCanvas
 
-        dims' <- getDimensions bc
-        ctx <- slotContext layer dims' el
+        dims <- getDimensions bc
+        ctx <- slotContext layer dims el
 
         liftEffect $ Canvas.withContext ctx do
           setContextTranslation {x: zero, y: zero} ctx
-          void $ Canvas.clearRect ctx $ Record.merge {x: 0.0, y: 0.0} slots.full.size
+          void $ Canvas.clearRect ctx $ Record.merge {x: 0.0, y: 0.0} dims.size
 
         -- temporary hack to offset scrolling tracks as needed
 
         _ <- liftEffect $ Canvas.translate ctx { translateX: -l, translateY: 0.0 }
+
         -- use the List Renderable to draw to the canvas
         let
             static :: Drawing -> m Unit

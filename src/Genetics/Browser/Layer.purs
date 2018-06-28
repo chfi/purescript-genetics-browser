@@ -2,13 +2,11 @@ module Genetics.Browser.Layer where
 
 import Prelude
 
+import Data.Generic.Rep (class Generic)
+import Data.Lens (Getter', to)
+import Data.Variant (Variant, case_, inj, onMatch)
 import Effect (Effect)
 import Effect.Class (class MonadEffect, liftEffect)
-import Data.Foldable (class Foldable, foldlDefault, foldrDefault)
-import Data.Generic.Rep (class Generic)
-import Data.Lens (Getter', to, (^.))
-import Data.Traversable (class Traversable, sequenceDefault)
-import Data.Variant (Variant, case_, inj, onMatch)
 import Graphics.Canvas (CanvasElement, Context2D, beginPath, clip, closePath, lineTo, moveTo)
 import Graphics.Canvas as Canvas
 import Type.Prelude (SProxy(..))
@@ -50,24 +48,6 @@ derive instance ordComponent :: Ord a => Ord (Component a)
 derive instance functorComponent :: Functor Component
 derive instance genericComponent :: Generic (Component a) _
 
-instance foldableComponent :: Foldable Component where
-  foldMap :: ∀ a m. Monoid m => (a -> m) -> Component a -> m
-  foldMap f c = f $ c ^. _Component
-  foldr f i c = foldrDefault f i c
-  foldl f i c = foldlDefault f i c
-
-instance traverseComponent :: Traversable Component where
-  traverse :: ∀ a b m. Applicative m => (a -> m b) -> Component a -> m (Component b)
-  traverse f = case _ of
-    Full     a -> Full     <$> f a
-    Padded r a -> Padded r <$> f a
-    CTop     a -> CTop     <$> f a
-    CRight   a -> CRight   <$> f a
-    CBottom  a -> CBottom  <$> f a
-    CLeft    a -> CLeft    <$> f a
-
-  sequence t = sequenceDefault t
-
 data Layer a = Layer LayerType LayerMask (Component a)
 
 derive instance functorLayer :: Functor Layer
@@ -77,7 +57,7 @@ data LayerType =
     Fixed
   | Scrolling
 
-data LayerMask = NoMask | Masked
+data LayerMask = NoMask | Masked Number
 
 derive instance eqLayerMask :: Eq LayerMask
 
@@ -108,77 +88,77 @@ asSlot = case _ of
   CBottom  a -> inj _bottom a
   CLeft    a -> inj _left   a
 
-
-slotOffset :: ∀ a.
-              BrowserDimensions
-           -> Variant (BrowserSlots a)
-           -> Point
-           -> Point
-slotOffset {size, padding} = case_ # onMatch
-  { full:   \_ -> \p -> p
-  , padded: \_ -> \p -> { x: p.x + padding.left, y: p.y + padding.top }
-  , top:    \_ -> \p -> { x: p.x + padding.left, y: p.y }
-  , right:  \_ -> \p -> { x: p.x + ( size.width - padding.right ), y: p.y }
-  , bottom: \_ -> \p -> { x: p.x + padding.left, y: p.y + ( size.height - padding.bottom ) }
-  , left:   \_ -> \p -> p
-  }
-
-slotRelative :: ∀ a.
-              BrowserDimensions
-           -> Variant (BrowserSlots a)
-           -> Point
-           -> Point
-slotRelative {size, padding} = case_ # onMatch
-  { full:   \_ -> \p -> p
-  , padded: \_ -> \p -> { x: p.x - padding.left, y: p.y - padding.top }
-  , top:    \_ -> \p -> { x: p.x - padding.left, y: p.y }
-  , right:  \_ -> \p -> { x: p.x - ( size.width - padding.right ), y: p.y }
-  , bottom: \_ -> \p -> { x: p.x - padding.left, y: p.y - ( size.height - padding.bottom ) }
-  , left:   \_ -> \p -> p
-  }
-
-
-
-browserSlots :: BrowserDimensions
-             -> Record (BrowserSlots ComponentSlot)
-browserSlots {size,padding} =
+slot :: ∀ a.
+        TrackDimensions
+     -> Variant (TrackSlots a)
+     -> ComponentSlot
+slot {size, padding} =
   let p0 = { x: 0.0, y: 0.0 }
       w  = size.width
       h  = size.height
       wC = w - padding.right - padding.left
-      full   = { offset: p0
-               , size }
-      left   = { offset: p0 { y = padding.top }
-               , size: { width:  padding.left
-                       , height: h - (padding.top + padding.bottom)
-                       } }
-      right  = { offset: { x: w - padding.right
-                         , y: padding.top }
-               , size: { width:  padding.right
-                       , height: h - (padding.top + padding.bottom)
-                       } }
-      top    = { offset: p0 { x = padding.left }
-               , size: { width:  wC
-                       , height: padding.top
-                       } }
-      bottom = { offset: { x:     padding.left
-                         , y: h - padding.bottom }
-               , size: { width:  wC
-                       , height: padding.bottom
-                       } }
-      padded = { offset: { x: padding.left
-                         , y: padding.top }
-               , size: { width:  wC
-                       , height: h - padding.top - padding.bottom
-                       } }
-  in { full, padded, top, right, bottom, left }
+  in case_ # onMatch
+       { full:   \_ -> { offset: p0, size }
+
+       , center: \_ -> { offset: { x: padding.left
+                                 , y: padding.top }
+                       , size: { width:  wC
+                               , height: h - padding.top - padding.bottom
+                               } }
+
+       , top:    \_ -> { offset: p0 { x = padding.left }
+                       , size: { width:  wC
+                               , height: padding.top
+                               } }
+
+       , right:  \_ ->  { offset: { x: w - padding.right
+                                  , y: padding.top }
+                        , size: { width:  padding.right
+                                , height: h - (padding.top + padding.bottom)
+                                } }
+
+       , bottom: \_ ->   { offset: { x:     padding.left
+                                   , y: h - padding.bottom }
+                         , size: { width:  wC
+                                 , height: padding.bottom
+                                 } }
+
+       , left:   \_ ->  { offset: p0 { y = padding.top }
+                        , size: { width:  padding.left
+                                , height: h - (padding.top + padding.bottom)
+                                } }
+
+       }
 
 
+slotOffset :: ∀ a.
+              TrackDimensions
+           -> Variant (TrackSlots a)
+           -> Point
+slotOffset sp = _.offset <<< slot sp
+
+slotSize :: ∀ a.
+            TrackDimensions
+         -> Variant (TrackSlots a)
+         -> Canvas.Dimensions
+slotSize sp = _.size <<< slot sp
+
+
+trackSlots :: TrackDimensions
+            -> Record (TrackSlots ComponentSlot)
+trackSlots sp =
+  { full:   slot sp $ inj _full unit
+  , center: slot sp $ inj _center unit
+  , top:    slot sp $ inj _top unit
+  , right:  slot sp $ inj _right unit
+  , bottom: slot sp $ inj _bottom unit
+  , left:   slot sp $ inj _left unit
+  }
 
 
 
 -- | Provided a component slot (contents irrelevant), and the
--- | dimensions & padding of the browser, `slotContext` provides a
+-- | dimensions & padding of the track, `slotContext` provides a
 -- | canvas context that has been translated to the relevant slot
 slotContext :: ∀ m a.
                 MonadEffect m
@@ -200,37 +180,15 @@ slotContext (Layer _ mask com) dims el = liftEffect do
         _ <- clip ctx
         void $ closePath ctx
 
-  -- TODO handle masking etc.
-  case com of
-    Full     _ -> pure ctx
-    Padded r _ -> do
-      -- the `r` padding is *not* part of the BrowserDimensions; it's just cosmetic
-      setContextTranslation { x: slots.padded.offset.x
-                            , y: slots.padded.offset.y } ctx
-      when (mask == Masked)
-        $ clipMask { x: -r, y: -r }
-                   { x: slots.padded.size.width  + r
-                   , y: slots.padded.size.height + r }
+  let offset = slotOffset dims (asSlot com)
+      size = slotSize dims (asSlot com)
 
-      pure ctx
-    CTop     _ -> do
-      setContextTranslation { x: slots.top.offset.x
-                            , y: slots.top.offset.y } ctx
-      pure ctx
-    CRight   _ -> do
-      setContextTranslation { x: slots.right.offset.x
-                            , y: slots.right.offset.y } ctx
-      pure ctx
-    CBottom  _ -> do
-      setContextTranslation { x: slots.bottom.offset.x
-                            , y: slots.bottom.offset.y } ctx
+  setContextTranslation offset ctx
 
-      when (mask == Masked)
-        $ clipMask { x: 0.0, y: 0.0 }
-                   { x: slots.bottom.size.width
-                   , y: slots.bottom.size.height }
-      pure ctx
-    CLeft    _ -> do
-      setContextTranslation { x: slots.left.offset.x
-                            , y: slots.left.offset.y } ctx
-      pure ctx
+  case mask of
+    NoMask -> pure unit
+    Masked r -> clipMask { x: -r, y: -r }
+                         { x: size.width  + r
+                         , y: size.height + r }
+
+  pure ctx

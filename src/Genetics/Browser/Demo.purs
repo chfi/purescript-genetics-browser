@@ -42,9 +42,9 @@ import Foreign.Index (readProp) as Foreign
 import Foreign.Keys (keys) as Foreign
 import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderHotspots, renderTrack, thresholdRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
-import Genetics.Browser.Canvas (TrackContainer, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, _drawings, _labels, createAndAddLayer, createAndAddLayer_, getDimensions)
+import Genetics.Browser.Canvas (Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _drawings, _labels, createAndAddLayer, createAndAddLayer_, getDimensions, renderLayer)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
-import Genetics.Browser.Layer (Component(Padded, CRight, CLeft), Layer(..), LayerMask(..), LayerType(..))
+import Genetics.Browser.Layer (Component(Center, CRight, CLeft), Layer(..), LayerMask(..), LayerType(..))
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
@@ -672,13 +672,13 @@ addDemoLayers cSys config trackData =
                                  , view :: CoordSysView | r' }
       bgLayer =
         renderTrack conf cSys (SProxy :: SProxy "config")
-          (Padded 5.0 $ chrBackgroundLayer)
+          (Center chrBackgroundLayer)
 
 
       snpLayer :: RenderableLayerHotspots _ _
       snpLayer =
         renderHotspots conf cSys _snps
-          (Padded 5.0 $ renderSNPs trackData.snps)
+          (Center $ renderSNPs trackData.snps)
 
       annotationLayer :: RenderableLayer
                          { annotations
@@ -687,7 +687,7 @@ addDemoLayers cSys config trackData =
                          , view :: CoordSysView }
       annotationLayer =
         renderTrack conf cSys _annotations
-          (Padded 5.0 $ renderAnnotations cSys sigSnps trackData.annotations)
+          (Center $ renderAnnotations cSys sigSnps trackData.annotations)
 
 
   in \bc -> do
@@ -698,7 +698,7 @@ addDemoLayers cSys config trackData =
 
     rRuler <-
       createAndAddLayer_ bc "ruler"
-      $ Layer Fixed NoMask (Padded 5.0 $ thresholdRuler)
+        $ Layer Fixed NoMask (Center thresholdRuler)
 
     rSNPs  <-
       createAndAddLayer  bc "snps" snpLayer

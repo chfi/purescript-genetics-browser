@@ -33,9 +33,9 @@ import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, inj, onMatch)
 import Foreign (F, Foreign, ForeignError(..), readString)
-import Genetics.Browser.Canvas (Renderable, RenderableLayer, RenderableLayerHotspots, _static)
+import Genetics.Browser.Canvas (Renderable, RenderableLayer, RenderableLayerHotspots, ContentLayer, _static)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), aroundPair, normalize, pairSize, scaledSegments, viewScale, xPerPixel)
-import Genetics.Browser.Layer (Component(Padded, Full, CBottom), Layer(Layer), LayerMask(NoMask, Masked), LayerType(Fixed, Scrolling))
+import Genetics.Browser.Layer (Component(Center, Full, CBottom), Layer(Layer), LayerMask(NoMask, Masked), LayerType(Fixed, Scrolling))
 import Genetics.Browser.Types (Bp, ChrId, _exp)
 import Graphics.Canvas (Dimensions) as Canvas
 import Graphics.Drawing (Drawing, Point, Shape, fillColor, filled, lineWidth, outlineColor, outlined, translate)
@@ -157,7 +157,7 @@ chrLabels conf cSys =
         in l' + ((r' - l') / 2.0)
 
 
-  in Layer Scrolling Masked
+  in Layer Scrolling (Masked 5.0)
      $ CBottom \ {view} dim ->
          map (inj _static <<< labelSeg dim view)
          $ Map.toUnfoldable
