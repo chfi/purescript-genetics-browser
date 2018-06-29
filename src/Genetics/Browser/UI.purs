@@ -25,7 +25,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Effect (Effect)
-import Effect.Aff (Aff, Fiber, Milliseconds(..), delay, forkAff, killFiber, launchAff, launchAff_)
+import Effect.Aff (Aff, Fiber, Milliseconds, forkAff, killFiber, launchAff, launchAff_)
 import Effect.Aff.AVar (AVar)
 import Effect.Aff.AVar as AVar
 import Effect.Class (liftEffect)
@@ -39,12 +39,14 @@ import Genetics.Browser.Canvas (TrackContainer, _Container, trackClickHandler, t
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, SNPConfig, AnnotationsConfig, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), TrackPadding, trackSlots)
+import Genetics.Browser.Track (class TrackRecord, makeTrack)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Point)
 import Math as Math
 import Partial.Unsafe (unsafePartial)
+import Prim.RowList (class RowToList)
 import Record (insert)
 import Simple.JSON (read)
 import Unsafe.Coerce (unsafeCoerce)
@@ -94,16 +96,14 @@ type TrackInterface a
 
 -- | Creates the track using the provided initial data, returning
 -- | a TrackInterface for reading state & sending commands to it
-initializeTrack :: ∀ c r.
-                     CoordSys c BigInt
-                  -> { snps        :: Pair Number -> CoordSysView -> Effect Unit
-                     , annotations :: Pair Number -> CoordSysView -> Effect Unit
-                     , chrs        :: Pair Number -> CoordSysView -> Effect Unit
-                     , hotspots    :: Effect (Number -> Point -> Array (SNP ()))
-                     , fixedUI     :: Effect Unit | r}
-                  -> CoordSysView
-                  -> TrackContainer
-                  -> Aff (TrackInterface (SNP ()))
+initializeTrack :: ∀ c r rl a.
+                   RowToList r rl
+                => TrackRecord rl r a
+                => CoordSys c BigInt
+                -> Record r
+                -> CoordSysView
+                -> TrackContainer
+                -> Aff (TrackInterface a)
 initializeTrack cSys renderFuns initView bc = do
 
   renderFiberVar <- AVar.empty
@@ -114,9 +114,10 @@ initializeTrack cSys renderFuns initView bc = do
   uiCmdVar <- AVar.empty
   lastHotspotsVar <- AVar.empty
 
+  track <- makeTrack renderFuns bc
+
   let getView = Ref.read trackView
       queueCommand = flip AVar.put uiCmdVar
-      lastHotspots = renderFuns.hotspots
 
     -- hardcoded timeout for now
   queueUpdateView <- liftEffect $ uiViewUpdate cSys (wrap 30.0) {view: trackView, uiCmd: uiCmdVar}
@@ -144,12 +145,8 @@ initializeTrack cSys renderFuns initView bc = do
             pxView = scaleToScreen currentScale <$> (unwrap csView)
 
         -- fork a new renderFiber
-        renderFiber <- forkAff $ liftEffect do
-
-          renderFuns.chrs        pxView csView
-          renderFuns.annotations pxView csView
-          renderFuns.snps        pxView csView
-          renderFuns.fixedUI
+        renderFiber <- forkAff
+                       $ track.render pxView csView
 
         AVar.put renderFiber renderFiberVar
 
@@ -161,7 +158,7 @@ initializeTrack cSys renderFuns initView bc = do
 
   pure { getView
        , container: bc
-       , lastHotspots
+       , lastHotspots: track.hotspots
        , queueCommand
        , queueUpdateView }
 
@@ -532,6 +529,7 @@ runBrowser config bc = launchAff $ do
 
     trackClickHandler bc
       $ Center glyphClick
+
 
   pure unit
 
