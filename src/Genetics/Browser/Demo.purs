@@ -35,7 +35,7 @@ import Data.Variant (inj)
 import Effect (Effect)
 import Effect.Aff (Aff, error)
 import Effect.Class (liftEffect)
-import Effect.Console (log)
+import Effect.Class.Console (log)
 import Foreign (F, Foreign, ForeignError(ForeignError))
 import Foreign (readArray) as Foreign
 import Foreign.Index (readProp) as Foreign

@@ -8,7 +8,7 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
 import Data.Filterable (filterMap)
-import Data.Foldable (foldMap, length)
+import Data.Foldable (foldMap, length, sum)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
@@ -29,7 +29,7 @@ import Effect.Aff (Aff, Fiber, Milliseconds, forkAff, killFiber, launchAff, laun
 import Effect.Aff.AVar (AVar)
 import Effect.Aff.AVar as AVar
 import Effect.Class (liftEffect)
-import Effect.Console (log)
+import Effect.Class.Console (log)
 import Effect.Exception (error, throw)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
@@ -442,11 +442,10 @@ runBrowser config bc = launchAff $ do
 
   let cSys :: CoordSys ChrId BigInt
       cSys = coordSys mouseChrSizes
-
       initialView = fromMaybe (wrap $ Pair zero (cSys^._TotalSize)) do
-        {left, right} <- config.initialChrs
-        (Pair l _) <- Map.lookup (wrap left) $ cSys^._Segments
-        (Pair _ r) <- Map.lookup (wrap right) $ cSys^._Segments
+        v <- config.initialChrs
+        (Pair l _) <- Map.lookup (wrap v.left) $ cSys^._Segments
+        (Pair _ r) <- Map.lookup (wrap v.right) $ cSys^._Segments
         pure $ wrap $ Pair l r
 
       clickRadius = 1.0
@@ -457,10 +456,27 @@ runBrowser config bc = launchAff $ do
 
 
   trackData <-
-    {genes:_, snps:_, annotations:_}
-    <$> foldMap (getGenes       cSys) config.urls.genes
-    <*> foldMap (getSNPs        cSys) config.urls.snps
+    {snps:_, annotations:_}
+    <$> foldMap (getSNPs        cSys) config.urls.snps
     <*> foldMap (getAnnotations cSys) config.urls.annotations
+
+  geneVar <- AVar.empty
+
+  _ <- forkAff do
+    case config.urls.genes of
+      Nothing  -> pure unit
+      Just url -> do
+        log $ "fetching genes"
+        genes <- getGenes cSys url
+        AVar.put genes geneVar
+
+
+  _ <- forkAff do
+    genes <- AVar.take geneVar
+    log $ "fetched and parsed genes!"
+    log $ "#: " <> show (sum $ Array.length <$> genes)
+
+
 
   render <- liftEffect
             $ addDemoLayers (insert (SProxy :: SProxy "coordinateSystem") cSys config)

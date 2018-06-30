@@ -129,57 +129,11 @@ fetchBed :: String -> Aff (Array ParsedLine)
 fetchBed url = do
   resp <- _.response <$> Affjax.get Affjax.json url
 
+  let throwParseError = throwError <<< error <<< foldMap (_ <> ", ")
+
   case runExcept $ readArray $ unsafeCoerce resp of
-    Left err -> Debug.trace "shit's fucked" \_ -> pure $ unsafeCoerce unit
-    -- Left err -> throw $ (error <<< foldMap (_ <> ", ") <<< renderForeignError <$> err)
+    Left err -> throwParseError $ map renderForeignError err
     Right ls -> do
-        unV (throwError <<< error <<< foldMap (_ <> ", "))
+        unV throwParseError
             pure
             $ validateBedChunk ls
-
-
-
--- chunkProducer :: forall a.
---                  Int
---               -> Array a
---               -> Producer (Array a) (Aff _) Unit
--- chunkProducer n input = Aff.produceAff \emit -> do
---   remaining <- AVar.new input
-
---   let prodLoop = do
-
---         unparsed <- AVar.take remaining
-
---         case Array.length unparsed of
---           0 -> emit $ Right unit
---           _ -> do
---             let chunk = Array.take n unparsed
---                 rest  = Array.drop n unparsed
-
---             AVar.put rest remaining
---             emit $ Left chunk
---             prodLoop
-
---   prodLoop
-
-
--- fetchForeignChunks :: String
---                    -> Aff _ (Producer (Array Foreign) (Aff _) Unit)
--- fetchForeignChunks url = do
---   resp <- _.response <$> Affjax.get url
-
---   case runExcept $ readArray resp of
---       -- TODO actually handle this failing : )
---     Left err -> Debug.trace "shit's fucked" \_ -> pure $ unsafeCoerce unit
---     Right ls ->
---       pure $ chunkProducer 512 ls
-
-
--- parsedLineTransformer :: Transformer
---                          (Array Foreign)
---                          (Array ParsedLine)
---                          (Aff _) Unit
--- parsedLineTransformer =
---   transform
---   -- TODO holy hell handle failure
---      $ unV (const mempty) id <<< validateBedChunk
