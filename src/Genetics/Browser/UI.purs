@@ -37,7 +37,7 @@ import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (LegendConfig, Peak, VScale, pixelSegments)
 import Genetics.Browser.Canvas (TrackContainer, _Container, trackClickHandler, trackContainer, dragScroll, getDimensions, setTrackContainerSize, setElementStyle, wheelZoom)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
-import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, SNPConfig, AnnotationsConfig, addDemoLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
+import Genetics.Browser.Demo (Annotation, AnnotationField, AnnotationsConfig, SNP, SNPConfig, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), TrackPadding, trackSlots)
 import Genetics.Browser.Track (class TrackRecord, makeTrack)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
@@ -471,16 +471,21 @@ runBrowser config bc = launchAff $ do
         AVar.put genes geneVar
 
 
-  _ <- forkAff do
-    genes <- AVar.take geneVar
-    log $ "fetched and parsed genes!"
-    log $ "#: " <> show (sum $ Array.length <$> genes)
+  -- _ <- forkAff do
+  genes <- AVar.take geneVar
+  log $ "fetched and parsed genes!"
+  log $ "#: " <> show (sum $ Array.length <$> genes)
 
+
+
+  -- render <- liftEffect
+  --           $ addGWASLayers (insert (SProxy :: SProxy "coordinateSystem") cSys config)
+  --                            trackData bc
 
 
   render <- liftEffect
-            $ addDemoLayers (insert (SProxy :: SProxy "coordinateSystem") cSys config)
-                             trackData bc
+            $ addGeneLayers (insert (SProxy :: SProxy "coordinateSystem") cSys config)
+                             {genes} bc
 
   track <-
     initializeTrack cSys render initialView bc

@@ -32,6 +32,7 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
+import Debug.Trace as Debug
 import Effect (Effect)
 import Effect.Aff (Aff, error)
 import Effect.Class (liftEffect)
@@ -103,16 +104,43 @@ getGenes :: CoordSys ChrId BigInt
 getGenes cs url = do
   ls <- fetchBed url
 
-  let fs = filterMap (bedToFeature cs) ls
+  -- let fs = filterMap (bedToFeature cs) ls
+
+  let n = 1000
+      fs = Debug.trace ("Using genes #" <> show n)
+           \_ -> filterMap (bedToFeature cs) $ Array.take n ls
 
   pure $ groupToMap _.feature.chrId $ fs
 
 
-bedDraw :: BedFeature
-        -> DrawingV
-bedDraw gene = inj (SProxy :: SProxy "range") \w ->
+renderGenes :: Map ChrId (Array BedFeature)
+            -> _
+            -> Map ChrId (Pair Number)
+            -> Canvas.Dimensions
+            -- -> { renderables :: List Renderable }
+            -> List Renderable
+renderGenes geneData _ segs size =
+  let
+      drawings = foldMapWithIndex f geneData
+        where f :: ChrId -> Array BedFeature -> List Renderable
+              f chr genes = fromMaybe mempty do
+                  -- 1. get segment pair
+                  seg <- Map.lookup chr segs
+                  -- let width = pairSize seg
+                  pure $ foldMap (pure <<< drawGene size seg) genes
+
+
+  in Debug.trace ("gene renders: " <> show (length drawings :: Int)) \_ -> drawings
+
+
+drawGene :: Canvas.Dimensions
+         -> Pair Number
+         -> BedFeature
+         -> Renderable
+drawGene size seg gene =
   let (Pair l r) = gene.position
-      toLocal x = w * (unwrap $ x / gene.frameSize)
+      segWidth = pairSize seg
+      toLocal x = segWidth * (unwrap $ x / gene.frameSize)
 
       width = toLocal (r - l)
 
@@ -133,20 +161,28 @@ bedDraw gene = inj (SProxy :: SProxy "range") \w ->
              (2.5) (35.0)
              (fillColor black) gene.feature.geneName
 
-      drawing =
-        if width < one
-        then mempty
-        else \_ -> introns unit
-                <> foldMap exon gene.feature.blocks
-                <> label unit
+      -- drawing =
+      --   if width < one
+      --   then mempty
+      --   else introns unit
+      drawing = introns unit
+             <> foldMap exon gene.feature.blocks
+             <> label unit
 
-  in { drawing, width }
 
-geneRenderer :: OldRenderer BedFeature
-geneRenderer = inj (SProxy :: SProxy "single") { draw: bedDraw, horPlace, verPlace: const (Normalized 0.10) }
-  where horPlace {position, frameSize} =
-          let f p = Normalized (unwrap $ p / frameSize)
-          in inj (SProxy :: SProxy "range") $ map f position
+      place :: BedFeature -> Point
+      place g =
+        let (Pair offset _) = seg
+        in { x: offset + (pairSize seg) * (unwrap $ featureNormX g)
+           , y: size.height * 0.5 }
+
+      point = place gene
+
+      -- placeSeg :: ChrId -> Pair Number -> Array (Tuple BedFeature Point)
+      -- placeSeg chrId seg = foldMap (map $ fanout identity (place seg))
+      --                        $ Map.lookup chrId snpData
+
+  in inj _drawings [{ drawing, points: [place gene] }]
 
 
 
@@ -637,23 +673,23 @@ renderAnnotations cSys sigSnps allAnnots conf =
 _snps = SProxy :: SProxy "snps"
 _annotations = SProxy :: SProxy "annotations"
 
-addDemoLayers :: ∀ r r2.
-                { score :: { min :: Number, max :: Number, sig :: Number }
-                , legend :: LegendConfig ()
-                , vscale :: VScale ()
-                , chrLabels :: { fontSize :: Int }
-                , snps :: SNPConfig
-                , annotations :: AnnotationsConfig
-                , coordinateSystem :: CoordSys ChrId BigInt | r }
-             -> { snps        :: Map ChrId (Array (SNP ()))
-                , annotations :: Map ChrId (Array (Annotation ())) | r2 }
-             -> TrackContainer
-             -> Effect { snps        :: Pair Number -> CoordSysView -> Effect Unit
-                       , annotations :: Pair Number -> CoordSysView -> Effect Unit
-                       , chrs        :: Pair Number -> CoordSysView -> Effect Unit
-                       , hotspots    :: Effect (Number -> Point -> Array (SNP ()))
-                       , fixedUI     :: Effect Unit }
-addDemoLayers config trackData =
+addGWASLayers :: ∀ r r2.
+                 { score :: { min :: Number, max :: Number, sig :: Number }
+                 , legend :: LegendConfig ()
+                 , vscale :: VScale ()
+                 , chrLabels :: { fontSize :: Int }
+                 , snps :: SNPConfig
+                 , annotations :: AnnotationsConfig
+                 , coordinateSystem :: CoordSys ChrId BigInt | r }
+              -> { snps        :: Map ChrId (Array (SNP ()))
+                 , annotations :: Map ChrId (Array (Annotation ())) | r2 }
+              -> TrackContainer
+              -> Effect { snps        :: Pair Number -> CoordSysView -> Effect Unit
+                        , annotations :: Pair Number -> CoordSysView -> Effect Unit
+                        , chrs        :: Pair Number -> CoordSysView -> Effect Unit
+                        , hotspots    :: Effect (Number -> Point -> Array (SNP ()))
+                        , fixedUI     :: Effect Unit }
+addGWASLayers config trackData =
   let threshold = config.score
       vscale = build (merge config.vscale) threshold
 
@@ -752,3 +788,57 @@ addDemoLayers config trackData =
          , fixedUI
          , chrs
          }
+
+
+
+addGeneLayers :: ∀ r r2.
+                 _
+              -> { genes        :: Map ChrId (Array BedFeature) | r2 }
+              -> TrackContainer
+              -> Effect { genes :: Pair Number -> CoordSysView -> Effect Unit
+                        , chrs  :: Pair Number -> CoordSysView -> Effect Unit }
+addGeneLayers config trackData tcont = do
+
+  let
+      segmentPadding = 12.0
+      conf = { segmentPadding }
+
+      bgLayer :: ∀ r'.
+                 RenderableLayer { background :: { bg1 :: HexColor
+                                                 , bg2 :: HexColor
+                                                 , segmentPadding :: Number }
+                                 , view :: CoordSysView | r' }
+      bgLayer =
+        renderTrackLike conf config.coordinateSystem (SProxy :: SProxy "background")
+          (Center chrBackgroundLayer)
+
+      geneLayer :: _
+      geneLayer =
+        renderTrackLike conf config.coordinateSystem (SProxy :: SProxy "genes")
+          (Center $ renderGenes trackData.genes)
+
+  rBG  <-
+    createAndAddLayer_ tcont "background" bgLayer
+
+  rChrLabels <-
+    createAndAddLayer_ tcont "chrLabels"
+      $ chrLabels { segmentPadding
+                  , fontSize: config.chrLabels.fontSize } config.coordinateSystem
+
+  rGenes <-
+    createAndAddLayer_ tcont "genes" geneLayer
+
+  let genes o v =
+        renderLayer o { genes: {}, view: v } rGenes
+
+
+      chrs o v = do
+        let bgConf = { background: { bg1: HexColor white
+                                   , bg2: HexColor lightgray
+                                   , segmentPadding }
+                     , view: v }
+        traverse_ (renderLayer o bgConf)
+                    [rBG, rChrLabels]
+
+  pure { genes
+       , chrs }
