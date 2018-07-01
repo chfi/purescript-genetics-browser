@@ -48,7 +48,7 @@ import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, aroundPa
 import Genetics.Browser.Layer (Component(Center, CRight, CLeft), Layer(..), LayerMask(..), LayerType(..))
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
+import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
@@ -106,7 +106,7 @@ getGenes cs url = do
 
   -- let fs = filterMap (bedToFeature cs) ls
 
-  let n = 1000
+  let n = 10000
       fs = Debug.trace ("Using genes #" <> show n)
            \_ -> filterMap (bedToFeature cs) $ Array.take n ls
 
@@ -117,26 +117,23 @@ renderGenes :: Map ChrId (Array BedFeature)
             -> _
             -> Map ChrId (Pair Number)
             -> Canvas.Dimensions
-            -- -> { renderables :: List Renderable }
             -> List Renderable
 renderGenes geneData _ segs size =
   let
-      drawings = foldMapWithIndex f geneData
-        where f :: ChrId -> Array BedFeature -> List Renderable
+      output = foldMapWithIndex f geneData
+        where f :: ChrId -> Array BedFeature -> _
               f chr genes = fromMaybe mempty do
-                  -- 1. get segment pair
                   seg <- Map.lookup chr segs
-                  -- let width = pairSize seg
-                  pure $ foldMap (pure <<< drawGene size seg) genes
+                  pure $ foldMap (drawGene size seg) genes
 
-
-  in Debug.trace ("gene renders: " <> show (length drawings :: Int)) \_ -> drawings
+  in  (inj _drawing <$> output.drawing)
+   <> (inj _labels  <$> (pure $ Array.fromFoldable output.label))
 
 
 drawGene :: Canvas.Dimensions
          -> Pair Number
          -> BedFeature
-         -> Renderable
+         -> { drawing :: List Drawing, label :: List Label }
 drawGene size seg gene =
   let (Pair l r) = gene.position
       segWidth = pairSize seg
@@ -156,18 +153,21 @@ drawGene size seg gene =
         <> filled   (fillColor black) s
 
       label _ =
-        Drawing.text
-          (font sansSerif 12 mempty)
-             (2.5) (35.0)
-             (fillColor black) gene.feature.geneName
+        if width < one
+        then mempty
+        else Drawing.text
+               (font sansSerif 12 mempty)
+                  (2.5) (35.0)
+                  (fillColor black) gene.feature.geneName
 
-      -- drawing =
-      --   if width < one
-      --   then mempty
-      --   else introns unit
-      drawing = introns unit
+
+      -- drawing = introns unit
+      --        <> foldMap exon gene.feature.blocks
+      drawing =
+        if width < one
+        then mempty
+        else introns unit
              <> foldMap exon gene.feature.blocks
-             <> label unit
 
 
       point :: Point
@@ -176,7 +176,10 @@ drawGene size seg gene =
         in { x: offset + (pairSize seg) * (unwrap $ featureNormX gene)
            , y: size.height * 0.5 }
 
-  in inj _drawing $ Drawing.translate point.x point.y drawing
+  in { drawing: pure (Drawing.translate point.x point.y drawing)
+     , label:  pure { text: gene.feature.geneName
+                      , point
+                      , gravity: LCenter }  }
 
 
 
