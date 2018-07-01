@@ -41,10 +41,10 @@ import Foreign (F, Foreign, ForeignError(ForeignError))
 import Foreign (readArray) as Foreign
 import Foreign.Index (readProp) as Foreign
 import Foreign.Keys (keys) as Foreign
-import Genetics.Browser (DrawingN, DrawingV, Feature, HexColor(..), LegendConfig, LegendEntry, NPoint, OldRenderer, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrackLike, thresholdRuler, trackLegend)
+import Genetics.Browser (Feature, HexColor(..), LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrackLike, thresholdRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
-import Genetics.Browser.Canvas (Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _drawings, _labels, createAndAddLayer, createAndAddLayer_, getDimensions, renderLayer)
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), _Segments, aroundPair, normalize, pairSize, pairsOverlap)
+import Genetics.Browser.Canvas (BatchDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _drawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, aroundPair, normalize, pairSize, pairsOverlap)
 import Genetics.Browser.Layer (Component(Center, CRight, CLeft), Layer(..), LayerMask(..), LayerType(..))
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
@@ -54,12 +54,12 @@ import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
 import Network.HTTP.Affjax (get) as Affjax
 import Network.HTTP.Affjax.Response (json) as Affjax
-import Record as Record
+import Record (insert) as Record
 import Record.Builder (build, insert, merge, modify)
 import Record.Extra (class Keys)
 import Record.Extra (keys) as Record
 import Simple.JSON as Simple
-import Type.Prelude (class IsSymbol, class RowToList, SProxy(SProxy))
+import Type.Prelude (class RowToList, SProxy(SProxy))
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -170,19 +170,13 @@ drawGene size seg gene =
              <> label unit
 
 
-      place :: BedFeature -> Point
-      place g =
+      point :: Point
+      point =
         let (Pair offset _) = seg
-        in { x: offset + (pairSize seg) * (unwrap $ featureNormX g)
+        in { x: offset + (pairSize seg) * (unwrap $ featureNormX gene)
            , y: size.height * 0.5 }
 
-      point = place gene
-
-      -- placeSeg :: ChrId -> Pair Number -> Array (Tuple BedFeature Point)
-      -- placeSeg chrId seg = foldMap (map $ fanout identity (place seg))
-      --                        $ Map.lookup chrId snpData
-
-  in inj _drawings [{ drawing, points: [place gene] }]
+  in inj _drawing $ Drawing.translate point.x point.y drawing
 
 
 
@@ -419,19 +413,6 @@ annotationLegendTest config fs = trackLegend (annotationLegendEntry config) as
              $ Array.fromFoldable <$> Map.values fs
 
 
-
------------- new renderers~~~~~~~~~
-
-placeScored :: ∀ r1 r2.
-               { min :: Number, max :: Number | r1 }
-            -> Feature { score :: Number | r2 }
-            -> NPoint
-placeScored vs s =
-    { x: featureNormX s
-    , y: wrap $ normYLogScore vs s.feature.score
-    }
-
-
 normYLogScore :: ∀ r.
                  { min :: Number
                  , max :: Number
@@ -504,7 +485,7 @@ renderSNPs snpData { render, threshold } =
               fill  = filled   (fillColor    $ unwrap render.color.fill)    c
           in out <> fill
 
-      drawings :: Array (Tuple (SNP ()) Point) -> Array DrawingN
+      drawings :: Array (Tuple (SNP ()) Point) -> Array BatchDrawing
       drawings pts = [{ drawing, points: view _2 <$> pts }]
 
 
@@ -534,7 +515,7 @@ renderSNPs snpData { render, threshold } =
 
   in \seg size ->
         let pts = pointed size seg
-        in { renderables: pure $ inj _drawings $ drawings pts
+        in { renderables: pure $ inj _drawingBatch $ drawings pts
            , hotspots: hotspots pts }
 
 
@@ -565,7 +546,7 @@ renderAnnotationPeaks :: ∀ r1 r2.
                       -> Map ChrId (Array (Peak Bp Number (Annotation r2)))
                       -> Canvas.Dimensions
                       -> Map ChrId (Pair Number)
-                      -> { drawings :: Array DrawingN, labels :: Array Label }
+                      -> { drawingBatch :: Array BatchDrawing, labels :: Array Label }
 renderAnnotationPeaks cSys vScale conf annoPks cdim =
   let
 
@@ -602,7 +583,7 @@ renderAnnotationPeaks cSys vScale conf annoPks cdim =
 
 
       drawAndLabel :: Peak Number Number (Annotation r2)
-                   -> Tuple (Array DrawingN) (Array Label)
+                   -> Tuple (Array BatchDrawing) (Array Label)
       drawAndLabel aPeak = Tuple [drawing] label
         where
               (Pair l r) = aPeak.covers
@@ -641,13 +622,13 @@ renderAnnotationPeaks cSys vScale conf annoPks cdim =
 
 
       drawAndLabelAll :: Map ChrId (Array (Peak _ _ _))
-                      -> Tuple (Array DrawingN) (Array Label)
+                      -> Tuple (Array BatchDrawing) (Array Label)
       drawAndLabelAll pks = foldMap (foldMap drawAndLabel) pks
 
 
-  in \segs -> let (Tuple drawings labels) =
+  in \segs -> let (Tuple drawingBatch labels) =
                     drawAndLabelAll $ curAnnotPeaks segs
-              in { drawings, labels }
+              in { drawingBatch, labels }
 
 
 renderAnnotations :: ∀ r1 r2 rC.
@@ -663,10 +644,10 @@ renderAnnotations cSys sigSnps allAnnots conf =
   let annoPeaks = annotationsForScale cSys sigSnps allAnnots
 
   in \seg size ->
-        let {drawings, labels} =
+        let {drawingBatch, labels} =
               renderAnnotationPeaks cSys conf.threshold conf.render (annoPeaks seg) size seg
         in List.fromFoldable
-           [ inj _drawings $ drawings
+           [ inj _drawingBatch $ drawingBatch
            , inj _labels   $ labels ]
 
 
@@ -729,7 +710,6 @@ addGWASLayers config trackData =
 
 
   in \bc -> do
-    dims <- getDimensions bc
 
     rBG  <-
       createAndAddLayer_ bc "chrBackground" bgLayer

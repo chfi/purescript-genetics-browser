@@ -14,7 +14,6 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (note)
 import Data.Foldable (class Foldable, fold, foldMap, foldl, length)
-import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Int as Int
@@ -30,14 +29,14 @@ import Data.Pair (Pair(..))
 import Data.String as String
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple), uncurry)
-import Data.Variant (Variant, case_, inj, onMatch)
+import Data.Variant (inj)
 import Foreign (F, Foreign, ForeignError(..), readString)
-import Genetics.Browser.Canvas (ContentLayer, Renderable, RenderableLayer, _static)
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized(Normalized), aroundPair, normalize, pairSize, scaledSegments, viewScale, xPerPixel)
+import Genetics.Browser.Canvas (ContentLayer, Renderable, RenderableLayer, _drawing)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized, aroundPair, normalize, scaledSegments, viewScale, xPerPixel)
 import Genetics.Browser.Layer (Component(CBottom), Layer(Layer), LayerMask(NoMask, Masked), LayerType(Fixed, Scrolling))
 import Genetics.Browser.Types (Bp, ChrId, _exp)
 import Graphics.Canvas (Dimensions) as Canvas
-import Graphics.Drawing (Drawing, Point, Shape, fillColor, filled, lineWidth, outlineColor, outlined, translate)
+import Graphics.Drawing (Drawing, Shape, fillColor, filled, lineWidth, outlineColor, outlined, translate)
 import Graphics.Drawing as Drawing
 import Graphics.Drawing.Font (font, sansSerif)
 import Math (pow)
@@ -48,49 +47,75 @@ import Simple.JSON (class ReadForeign)
 import Type.Prelude (class IsSymbol, SProxy)
 
 
-
-
 type Feature a = { position  :: Pair Bp
                  , frameSize :: Bp
                  , feature   :: a }
 
-featureNormX :: Feature _ -> Normalized Number
-featureNormX { frameSize, position: (Pair l _) } = wrap $ unwrap (l / frameSize)
+
+featureNormX :: ∀ a. Feature a -> Normalized Number
+featureNormX { frameSize, position: (Pair l _) } =
+  wrap $ unwrap (l / frameSize)
 
 
 
-type NPoint = { x :: Normalized Number
-              , y :: Normalized Number }
 
-type DrawingR  = ( point :: Drawing
-                 , range :: Number
-                         -> { drawing :: Unit -> Drawing
-                            , width :: Number } )
-type DrawingV  = Variant DrawingR
+type TrackLike a =
+     Map ChrId (Pair Number)
+  -> Canvas.Dimensions
+  -> a
 
-type HorPlaceR = ( point :: Normalized Number
-                 , range :: Pair (Normalized Number) )
-type HPos = Variant HorPlaceR
+type Peak x y r = { covers :: Pair x
+                  , y :: y
+                  , elements :: Array r }
 
 
-type BatchRenderer a = { drawing :: Drawing
-                       , place :: a -> Normalized Point }
+groupToMap :: ∀ i a f.
+              Monoid (f a)
+           => Ord i
+           => Foldable f
+           => Applicative f
+           => (a -> i)
+           -> f a
+           -> Map i (f a)
+groupToMap f = foldl (\grp a -> Map.alter (add a) (f a) grp ) mempty
+  where add :: a -> Maybe (f a) -> Maybe (f a)
+        add x xs = (pure $ pure x) <> xs
 
-type SingleRenderer a = { draw  :: a -> DrawingV
-                        , horPlace :: a -> HPos
-                        , verPlace :: a -> Normalized Number }
 
-type OldRenderer a = Variant ( batch :: BatchRenderer a
-                             , single :: SingleRenderer a )
+pixelSegments :: ∀ r c.
+                 { segmentPadding :: Number | r }
+              -> CoordSys c BigInt
+              -> Canvas.Dimensions
+              -> CoordSysView
+              -> Map c (Pair Number)
+pixelSegments conf cSys trackDim csView =
+  aroundPair (-conf.segmentPadding)
+       <$> scaledSegments cSys (viewScale trackDim csView)
 
 
-type NormalizedGlyph = { drawing :: Variant DrawingR
-                       , horPos  :: Variant HorPlaceR
-                       , verPos  :: Normalized Number
-                       }
 
-type SingleGlyph = { drawing :: Unit -> Drawing, point :: Point, width :: Number }
+renderTrackLike :: ∀ a b l rC r1 r2.
+                   IsSymbol l
+                => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
+                => { segmentPadding :: Number | rC }
+                -> CoordSys ChrId BigInt
+                -> SProxy l
+                -> Component (b -> TrackLike a)
+                -> ContentLayer (Record ( view :: CoordSysView | r2 )) a
+renderTrackLike conf cSys name com =
+  let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
+      segs = pixelSegments conf cSys
+  in Layer Scrolling (Masked 5.0)
+       $ (\r c d -> r (get name c) (segs d c.view) d)
+      <$> com
 
+
+
+renderFixedUI :: ∀ c.
+                 Component (Canvas.Dimensions -> Drawing)
+              -> RenderableLayer c
+renderFixedUI com = Layer Fixed NoMask $ map f com
+  where f draw = \_ d -> pure $ inj _drawing (draw d)
 
 
 thresholdRuler :: ∀ r r1.
@@ -116,8 +141,8 @@ thresholdRuler {threshold: {sig,min,max}, rulerColor} slot =
               (fillColor $ unwrap rulerColor) text
 
   in List.fromFoldable
-       [ inj _static rulerDrawing
-       , inj _static label ]
+       [ inj _drawing rulerDrawing
+       , inj _drawing label ]
 
 
 chrLabels :: ∀ r1 r2.
@@ -158,7 +183,7 @@ chrLabels conf cSys =
 
   in Layer Scrolling (Masked 5.0)
      $ CBottom \ {view} dim ->
-         map (inj _static <<< labelSeg dim view)
+         map (inj _drawing <<< labelSeg dim view)
          $ Map.toUnfoldable
          $ pixelSegments conf cSys dim view
 
@@ -184,7 +209,7 @@ chrBackgroundLayer conf seg size =
              (l   -     conf.segmentPadding) (-5.0)
              (r-l + 2.0*conf.segmentPadding) (size.height+10.0))
 
-  in map (inj _static
+  in map (inj _drawing
           <<< uncurry \c s -> filled (fillColor c) s)
      $ evalState (traverse segBG $ Map.values seg) false
 
@@ -319,26 +344,6 @@ drawLegendInSlot c@{entries} size =
   in fold ds
 
 
-
-type Padding = { vertical :: Number
-               , horizontal :: Number
-               }
-
-
-groupToMap :: ∀ i a f.
-              Monoid (f a)
-           => Ord i
-           => Foldable f
-           => Applicative f
-           => (a -> i)
-           -> f a
-           -> Map i (f a)
-groupToMap f = foldl (\grp a -> Map.alter (add a) (f a) grp ) mempty
-  where add :: a -> Maybe (f a) -> Maybe (f a)
-        add x xs = (pure $ pure x) <> xs
-
-
-
 trackLegend :: ∀ f a.
                Foldable f
             => Functor f
@@ -346,130 +351,3 @@ trackLegend :: ∀ f a.
             -> f a
             -> Array LegendEntry
 trackLegend f as = Array.nubBy (compare `on` _.text) $ Array.fromFoldable $ map f as
-
-
-
-horPlaceOnSegment :: ∀ r.
-                     Pair Number
-                  -> { horPos :: Variant HorPlaceR | r }
-                  -> Number
-horPlaceOnSegment segmentPixels o =
-    case_
-  # onMatch { point: \(Normalized x) -> x * pairSize segmentPixels
-            , range: \(Pair l r)     -> unwrap l * pairSize segmentPixels }
-  $ o.horPos
-
-
-finalizeNormDrawing :: ∀ r.
-                       Pair Number
-                    -> { drawing :: DrawingV | r }
-                    -> { drawing :: Unit -> Drawing, width :: Number }
-finalizeNormDrawing seg o =
-    case_
-  # onMatch { point: \x -> { drawing: \_ -> x, width: 1.0 }
-            , range: (_ $ pairSize seg) }
-  $ o.drawing
-
-
-
-renderNormalized1 :: Number
-                  -> Pair Number
-                  -> NormalizedGlyph
-                  -> SingleGlyph
-renderNormalized1 height seg@(Pair l _) ng =
-  let x = horPlaceOnSegment seg ng + l
-      y = height * (one - unwrap ng.verPos)
-      {drawing, width} = finalizeNormDrawing seg ng
-  in { point: {x,y}, drawing, width }
-
-
-rescaleNormSingleGlyphs :: Number
-                        -> Pair Number
-                        -> Array NormalizedGlyph
-                        -> Array SingleGlyph
-rescaleNormSingleGlyphs height seg =
-  map (renderNormalized1 height seg)
-
-
-withPixelSegments :: ∀ r m.
-                     Monoid m
-                  => CoordSys ChrId BigInt
-                  -> { width :: Number | r }
-                  -> Pair BigInt
-                  -> (ChrId -> Pair Number -> m)
-                  -> m
-withPixelSegments cs cdim bView =
-  let scale = viewScale cdim (wrap bView)
-  in flip foldMapWithIndex (scaledSegments cs scale)
-
-
---------------------------
-
-
-type DrawingN = { drawing :: Drawing, points :: Array Point }
-
--- TODO this will be handled much more nicely using type classes
-type TrackRenderer =
-     Map ChrId (Pair Number)
-  -> Canvas.Dimensions
-  -> List Renderable
-
-type TrackHotspotsRenderer a =
-     Map ChrId (Pair Number)
-  -> Canvas.Dimensions
-  -> { renderables :: List Renderable
-     , hotspots :: Number -> Point -> Array a }
-
-type TrackLike a =
-     Map ChrId (Pair Number)
-  -> Canvas.Dimensions
-  -> a
-
-type Renderer a =
-     Map ChrId (Array a)
-  -> Map ChrId (Pair Number)
-  -> Canvas.Dimensions
-  -> List Renderable
-
-
-pixelSegments :: ∀ r c.
-                 { segmentPadding :: Number | r }
-              -> CoordSys c BigInt
-              -> Canvas.Dimensions
-              -> CoordSysView
-              -> Map c (Pair Number)
-pixelSegments conf cSys trackDim csView =
-  aroundPair (-conf.segmentPadding)
-       <$> scaledSegments cSys (viewScale trackDim csView)
-
-
-
-renderTrackLike :: ∀ a b l rC r1 r2.
-                   IsSymbol l
-                => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
-                => { segmentPadding :: Number | rC }
-                -> CoordSys ChrId BigInt
-                -> SProxy l
-                -> Component (b -> TrackLike a)
-                -> ContentLayer (Record ( view :: CoordSysView | r2 )) a
-renderTrackLike conf cSys name com =
-  let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
-      segs = pixelSegments conf cSys
-  in Layer Scrolling (Masked 5.0)
-       $ (\r c d -> r (get name c) (segs d c.view) d)
-      <$> com
-
-
-
-renderFixedUI :: ∀ c.
-                 Component (Canvas.Dimensions -> Drawing)
-              -> RenderableLayer c
-renderFixedUI com = Layer Fixed NoMask $ map f com
-  where f draw = \_ d -> pure $ inj _static (draw d)
-
-
-
-
-type Peak x y r = { covers :: Pair x
-                  , y :: y
-                  , elements :: Array r }

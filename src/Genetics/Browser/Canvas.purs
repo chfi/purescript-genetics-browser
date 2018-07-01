@@ -4,13 +4,14 @@
 module Genetics.Browser.Canvas
        ( TrackContainer
        , Renderable
+       , BatchDrawing
        , ContentLayer
        , RenderableLayer
        , RenderableLayerHotspots
        , Label
        , LabelPlace(..)
-       , _static
-       , _drawings
+       , _drawing
+       , _drawingBatch
        , _labels
        , createAndAddLayer
        , createAndAddLayer_
@@ -40,7 +41,7 @@ import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
-import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.Newtype (class Newtype, unwrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
 import Data.Symbol (SProxy(..))
@@ -53,7 +54,7 @@ import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Effect.Uncurried (EffectFn2, EffectFn3, EffectFn5, runEffectFn2, runEffectFn3, runEffectFn5)
-import Genetics.Browser.Layer (Component(CBottom, CRight, CLeft, CTop, Center, Full), Layer(Layer), LayerType(Scrolling, Fixed), TrackDimensions, TrackPadding, _Component, asSlot, setContextTranslation, slotContext, slotOffset, slotSize, trackSlots)
+import Genetics.Browser.Layer (Component, Layer(Layer), LayerType(Scrolling, Fixed), TrackDimensions, TrackPadding, _Component, asSlot, setContextTranslation, slotContext, slotOffset, slotSize)
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -176,8 +177,8 @@ scrollCanvas (BufferedCanvas bc) = runEffectFn3 scrollCanvasImpl bc.back bc.fron
 
 -- | Scroll all buffered canvases in a container
 scrollTrack :: TrackContainer
-              -> Point
-              -> Effect Unit
+            -> Point
+            -> Effect Unit
 scrollTrack (TrackContainer bc) pt = do
   layers <- Ref.read bc.layers
   -- | Filter out all layers that don't scroll
@@ -236,13 +237,6 @@ wheelZoom bc cb =
 clearCanvas :: Context2D -> Canvas.Dimensions -> Effect Unit
 clearCanvas ctx {width, height} =
   void $ Canvas.clearRect ctx { x: 0.0, y: 0.0, width, height }
-
-
-
-
--- TODO track background color shouldn't be hardcoded
-backgroundColor :: String
-backgroundColor = "white"
 
 
 -- TODO the back canvas should have the option of being bigger than
@@ -535,10 +529,6 @@ renderLabels ls ctx = do
         (box.rect.x - (box.rect.width / 2.0))
         box.rect.y
 
-type Renderable' r = { drawings :: Array { drawing :: Drawing
-                                        , points :: Array Point }
-                    , labels :: Array Label | r }
-
 
 
 data LayerCanvas =
@@ -561,14 +551,15 @@ _Static = prism' Static $ case _ of
   Static el -> Just el
   Buffer _  -> Nothing
 
+type BatchDrawing = { drawing :: Drawing, points :: Array Point }
+
 type Renderable =
-  Variant ( static   :: Drawing
-          , drawings :: Array { drawing :: Drawing
-                              , points :: Array Point }
+  Variant ( drawing   :: Drawing
+          , drawingBatch :: Array BatchDrawing
           , labels   :: Array Label )
 
-_static   = SProxy :: SProxy "static"
-_drawings = SProxy :: SProxy "drawings"
+_drawing   = SProxy :: SProxy "drawing"
+_drawingBatch = SProxy :: SProxy "drawingBatch"
 _labels   = SProxy :: SProxy "labels"
 
 
@@ -656,19 +647,19 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 
         -- use the List Renderable to draw to the canvas
         let
-            static :: Drawing -> m Unit
-            static d = liftEffect $ Drawing.render ctx d
+            drawing :: Drawing -> m Unit
+            drawing d = liftEffect $ Drawing.render ctx d
 
-            drawings :: Array { drawing :: Drawing, points :: Array Point }
+            drawingBatch :: Array { drawing :: Drawing, points :: Array Point }
                      -> m Unit
-            drawings ds = liftEffect $ for_ ds
+            drawingBatch ds = liftEffect $ for_ ds
                             $ renderGlyphs (_.glyphBuffer $ unwrap bc) ctx (Pair l r)
 
             labels :: Array Label -> m Unit
             labels ls = liftEffect $ renderLabels ls ctx
 
         for_ renderables
-          $ case_ # onMatch { static, drawings, labels }
+          $ case_ # onMatch { drawing, drawingBatch, labels }
 
   pure { render, drawOnCanvas, lastHotspots }
 
