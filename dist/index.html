@@ -39,49 +39,72 @@
       var vscaleWidth = 90.0;
       var legendWidth = 140.0;
 
+      var score = { min: 0.0, max: 30.0, sig: 4 };
+
       var config =
-      { trackHeight: 400.0,
+          { trackHeight: 400.0,
 
-        padding:
-        { top: 35.0,
-          bottom: 35.0,
-          left: vscaleWidth,
-          right: legendWidth },
+            padding:
+            { top: 35.0,
+              bottom: 35.0,
+              left: vscaleWidth,
+              right: legendWidth },
 
-        score: { min: 0.0, max: 30.0, sig: 4 },
+            score: score,
 
-        urls: localUrls,
+            urls: localUrls,
 
-        snps:
-        { radius: 3.75,
-          lineWidth: 1.0,
-          color: { outline: "#FFFFFF",
-                   fill:    "#00008B" },
-          pixelOffset: {x: 0.0, y: 0.0} },
+            tracks: {
+                gwas: {
+                    snps: {
+                        radius: 3.75,
+                        lineWidth: 1.0,
+                        color: { outline: "#FFFFFF",
+                                 fill:    "#00008B" },
+                        pixelOffset: {x: 0.0, y: 0.0}
+                    },
 
-        annotations:
-        { radius: 5.5,
-          outline:   "#000000",
-          snpColor:  "#0074D9",
-          geneColor: "#FF4136" },
+                    annotations: {
+                        radius: 5.5,
+                        outline:   "#000000",
+                        snpColor:  "#0074D9",
+                        geneColor: "#FF4136"
+                    },
 
-        legend:
-        { fontSize: 14,
-          hPad: 0.2,
-          vPad: 0.2 },
+                    score: score,
 
-        vscale:
-        { color: "#000000",
-          hPad: 0.125,
-          numSteps: 3,
-          fonts: { labelSize: 18, scaleSize: 16 }
-        },
+                    legend: {
+                        fontSize: 14,
+                        hPad: 0.2,
+                        vPad: 0.2
+                    },
 
-        chrLabels:
-        { fontSize: 16 },
+                    vscale: {
+                        color: "#000000",
+                        hPad: 0.125,
+                        numSteps: 3,
+                        fonts: { labelSize: 18, scaleSize: 16 }
+                    },
 
-        initialChrs: { left: "1", right: "19" }
-      };
+
+                    chrLabels: { fontSize: 16 },
+
+
+                },
+
+                gene: {
+
+                },
+
+                chrs: {
+                    chrBG1: "#FFFFFF",
+                    chrBG2: "#EEEEEE",
+                    chrLabels: { fontSize: 16 },
+                },
+            },
+
+            initialChrs: { left: "1", right: "1" }
+          };
 
       GGB.main(config)();
 

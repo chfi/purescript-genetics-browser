@@ -37,7 +37,7 @@ import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (LegendConfig, Peak, VScale, pixelSegments)
 import Genetics.Browser.Canvas (TrackContainer, _Container, trackClickHandler, trackContainer, dragScroll, getDimensions, setTrackContainerSize, setElementStyle, wheelZoom)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
-import Genetics.Browser.Demo (Annotation, AnnotationField, AnnotationsConfig, SNP, SNPConfig, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
+import Genetics.Browser.Demo (Annotation, AnnotationField, AnnotationsConfig, SNP, SNPConfig, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), TrackPadding, trackSlots)
 import Genetics.Browser.Track (class TrackRecord, makeTrack)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
@@ -48,6 +48,7 @@ import Math as Math
 import Partial.Unsafe (unsafePartial)
 import Prim.RowList (class RowToList)
 import Record (insert)
+import Record as Record
 import Simple.JSON (read)
 import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM (Element)
@@ -437,7 +438,8 @@ initInfoBox = do
   pure $ updateInfoBox el
 
 
-runBrowser :: Conf -> TrackContainer -> Effect (Fiber Unit)
+-- runBrowser :: BrowserConfig {gwas :: _} -> TrackContainer -> Effect (Fiber Unit)
+runBrowser :: BrowserConfig {gene :: _, chrs :: _} -> TrackContainer -> Effect (Fiber Unit)
 runBrowser config bc = launchAff $ do
 
   let cSys :: CoordSys ChrId BigInt
@@ -479,13 +481,15 @@ runBrowser config bc = launchAff $ do
 
 
   -- render <- liftEffect
-  --           $ addGWASLayers (insert (SProxy :: SProxy "coordinateSystem") cSys config)
-  --                            trackData bc
+  --           $ addGWASLayers cSys config.tracks.gwas trackData bc
 
 
-  render <- liftEffect
-            $ addGeneLayers (insert (SProxy :: SProxy "coordinateSystem") cSys config)
-                             {genes} bc
+  render <- liftEffect do
+    chrLayers <- addChrLayers { coordinateSystem: cSys
+                              , segmentPadding: 12.0 }
+                              config.tracks.chrs bc
+    geneLayers <- addGeneLayers cSys config.tracks.gene {genes} bc
+    pure $ Record.merge { chrs: chrLayers } geneLayers
 
   track <-
     initializeTrack cSys render initialView bc
@@ -563,17 +567,13 @@ type DataURLs = { snps        :: Maybe String
 
 
 
-type Conf =
+type BrowserConfig a =
   { trackHeight :: Number
   , padding :: TrackPadding
   , score :: { min :: Number, max :: Number, sig :: Number }
   , urls :: DataURLs
-  , chrLabels :: { fontSize :: Int }
-  , snps        :: SNPConfig
-  , annotations :: AnnotationsConfig
-  , legend :: LegendConfig ()
-  , vscale :: VScale ()
   , initialChrs :: Maybe { left :: String, right :: String }
+  , tracks :: a
   }
 
 foreign import setWindow :: ∀ a. String -> a -> Effect Unit
@@ -592,7 +592,7 @@ main rawConfig = do
     Nothing -> log "Could not find element '#browser'"
     Just el -> do
 
-      case read rawConfig :: Either MultipleErrors Conf of
+      case read rawConfig :: Either MultipleErrors (BrowserConfig _) of
         Left errs -> do
           setElementContents el
             $  "<p>Error when parsing provided config object:<p>"
