@@ -94,17 +94,19 @@ pixelSegments conf cSys trackDim csView =
 
 
 
-renderTrackLike :: ∀ a b l rC r1 r2.
+
+
+trackLikeLayer :: ∀ a b l rC r1 r2.
                    IsSymbol l
                 => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
-                => { segmentPadding :: Number | rC }
-                -> CoordSys ChrId BigInt
+                => { segmentPadding :: Number
+                   , coordinateSystem :: CoordSys ChrId BigInt | rC }
                 -> SProxy l
                 -> Component (b -> TrackLike a)
                 -> ContentLayer (Record ( view :: CoordSysView | r2 )) a
-renderTrackLike conf cSys name com =
+trackLikeLayer conf name com =
   let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
-      segs = pixelSegments conf cSys
+      segs = pixelSegments conf conf.coordinateSystem
   in Layer Scrolling (Masked 5.0)
        $ (\r c d -> r (get name c) (segs d c.view) d)
       <$> com
@@ -145,15 +147,15 @@ thresholdRuler {threshold: {sig,min,max}, rulerColor} slot =
        , inj _drawing label ]
 
 
-chrLabels :: ∀ r1 r2.
-               { segmentPadding :: Number
-               , fontSize :: Int | r1 }
-            -> CoordSys ChrId BigInt
-            -> RenderableLayer { view :: CoordSysView | r2 }
-chrLabels conf cSys =
+chrLabelsLayer :: ∀ r1 r2 r3.
+                  { segmentPadding :: Number
+                  , coordinateSystem :: CoordSys ChrId BigInt | r3 }
+               -> { fontSize :: Int | r1 }
+               -> RenderableLayer { view :: CoordSysView | r2 }
+chrLabelsLayer trackConf {fontSize} =
   let
       labelOffset chrId = 0.3 *
-        (Int.toNumber $ conf.fontSize * (String.length $ show chrId))
+        (Int.toNumber $ fontSize * (String.length $ show chrId))
 
       labelSeg :: Canvas.Dimensions
                -> CoordSysView
@@ -161,7 +163,7 @@ chrLabels conf cSys =
                -> Drawing
       labelSeg d v (Tuple c s@(Pair l r)) =
           Drawing.text
-             (font sansSerif conf.fontSize mempty)
+             (font sansSerif fontSize mempty)
              (segMidPoint (viewPixels d v) s - labelOffset c)
              (0.7 * d.height)
              (fillColor black)
@@ -185,12 +187,12 @@ chrLabels conf cSys =
      $ CBottom \ {view} dim ->
          map (inj _drawing <<< labelSeg dim view)
          $ Map.toUnfoldable
-         $ pixelSegments conf cSys dim view
+         $ pixelSegments trackConf trackConf.coordinateSystem dim view
 
 
 chrBackgroundLayer :: ∀ r.
-                      { bg1 :: HexColor
-                      , bg2 :: HexColor
+                      { chrBG1 :: HexColor
+                      , chrBG2 :: HexColor
                       , segmentPadding :: Number | r }
                    -> Map ChrId (Pair Number)
                    -> Canvas.Dimensions
@@ -203,8 +205,8 @@ chrBackgroundLayer conf seg size =
         curSeg <- State.get
         State.modify_ not
         pure $ Tuple
-          (unwrap $ if curSeg then conf.bg1
-                              else conf.bg2)
+          (unwrap $ if curSeg then conf.chrBG1
+                              else conf.chrBG2)
           (Drawing.rectangle
              (l   -     conf.segmentPadding) (-5.0)
              (r-l + 2.0*conf.segmentPadding) (size.height+10.0))

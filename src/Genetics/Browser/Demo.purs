@@ -41,7 +41,7 @@ import Foreign (F, Foreign, ForeignError(ForeignError))
 import Foreign (readArray) as Foreign
 import Foreign.Index (readProp) as Foreign
 import Foreign.Keys (keys) as Foreign
-import Genetics.Browser (Feature, HexColor(..), LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabels, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, renderTrackLike, thresholdRuler, trackLegend)
+import Genetics.Browser (Feature, HexColor(..), LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, trackLikeLayer, thresholdRuler, trackLegend)
 import Genetics.Browser.Bed (ParsedLine, fetchBed)
 import Genetics.Browser.Canvas (BatchDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _drawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, aroundPair, normalize, pairSize, pairsOverlap)
@@ -657,23 +657,57 @@ renderAnnotations cSys sigSnps allAnnots conf =
 _snps = SProxy :: SProxy "snps"
 _annotations = SProxy :: SProxy "annotations"
 
-addGWASLayers :: ∀ r r2.
-                 { score :: { min :: Number, max :: Number, sig :: Number }
+
+
+addChrLayers :: ∀ r.
+                { coordinateSystem :: CoordSys ChrId BigInt
+                , segmentPadding :: Number | r }
+             -> { chrLabels :: { fontSize :: Int }
+                , chrBG1 :: HexColor
+                , chrBG2 :: HexColor }
+             -> TrackContainer
+             -> Effect (Pair Number -> CoordSysView -> Effect Unit)
+addChrLayers trackConf {chrLabels, chrBG1, chrBG2} tc = do
+
+
+  rBG  <-
+    createAndAddLayer_ tc "chrBackground"
+      $ trackLikeLayer trackConf (SProxy :: SProxy "background")
+          (Center chrBackgroundLayer)
+
+  rChrLabels <-
+    createAndAddLayer_ tc "chrLabels"
+      $ chrLabelsLayer trackConf { fontSize: chrLabels.fontSize }
+
+
+  let chrs o v = do
+        let background = { chrBG1
+                         , chrBG2
+                         , segmentPadding: trackConf.segmentPadding }
+            bgConf = { background
+                     , view: v }
+        traverse_ (renderLayer o bgConf)
+                    [ rBG, rChrLabels]
+
+
+  pure chrs
+
+addGWASLayers :: ∀ r.
+                 CoordSys ChrId BigInt
+              -> { score :: { min :: Number, max :: Number, sig :: Number }
+                 , chrLabels :: { fontSize :: Int }
                  , legend :: LegendConfig ()
                  , vscale :: VScale ()
-                 , chrLabels :: { fontSize :: Int }
                  , snps :: SNPConfig
-                 , annotations :: AnnotationsConfig
-                 , coordinateSystem :: CoordSys ChrId BigInt | r }
+                 , annotations :: AnnotationsConfig }
               -> { snps        :: Map ChrId (Array (SNP ()))
-                 , annotations :: Map ChrId (Array (Annotation ())) | r2 }
+                 , annotations :: Map ChrId (Array (Annotation ())) | r }
               -> TrackContainer
               -> Effect { snps        :: Pair Number -> CoordSysView -> Effect Unit
                         , annotations :: Pair Number -> CoordSysView -> Effect Unit
-                        , chrs        :: Pair Number -> CoordSysView -> Effect Unit
                         , hotspots    :: Effect (Number -> Point -> Array (SNP ()))
                         , fixedUI     :: Effect Unit }
-addGWASLayers config trackData =
+addGWASLayers coordinateSystem config trackData =
   let threshold = config.score
       vscale = build (merge config.vscale) threshold
 
@@ -684,22 +718,13 @@ addGWASLayers config trackData =
                  trackData.annotations) config.legend
 
       segmentPadding = 12.0
-      conf = { segmentPadding }
-      cSys = config.coordinateSystem
-
-      bgLayer :: ∀ r'.
-                 RenderableLayer { background :: { bg1 :: HexColor
-                                                 , bg2 :: HexColor
-                                                 , segmentPadding :: Number }
-                                 , view :: CoordSysView | r' }
-      bgLayer =
-        renderTrackLike conf cSys (SProxy :: SProxy "background")
-          (Center chrBackgroundLayer)
-
+      conf = { segmentPadding
+             , coordinateSystem }
+      cSys = coordinateSystem
 
       snpLayer :: RenderableLayerHotspots _ _
       snpLayer =
-        renderTrackLike conf cSys _snps
+        trackLikeLayer conf _snps
           (Center $ renderSNPs trackData.snps)
 
       annotationLayer :: RenderableLayer
@@ -708,14 +733,11 @@ addGWASLayers config trackData =
                               , render :: AnnotationsConfig }
                          , view :: CoordSysView }
       annotationLayer =
-        renderTrackLike conf cSys _annotations
+        trackLikeLayer conf _annotations
           (Center $ renderAnnotations cSys sigSnps trackData.annotations)
 
 
   in \bc -> do
-
-    rBG  <-
-      createAndAddLayer_ bc "chrBackground" bgLayer
 
     rRuler <-
       createAndAddLayer_ bc "ruler"
@@ -732,11 +754,6 @@ addGWASLayers config trackData =
 
     rLegend <-
       createAndAddLayer_ bc "legend" $ annotationsUI legend
-
-    rChrLabels <-
-      createAndAddLayer_ bc "chrLabels"
-        $ chrLabels { segmentPadding
-                    , fontSize: config.chrLabels.fontSize }  cSys
 
 
     let fixedUI = do
@@ -756,57 +773,31 @@ addGWASLayers config trackData =
                         , view: v } rAnnos
 
 
-        chrs o v = do
-          let bgConf = { background: { bg1: HexColor white
-                                     , bg2: HexColor lightgray
-                                     , segmentPadding }
-                       , view: v }
-          traverse_ (renderLayer o bgConf)
-                      [rBG, rChrLabels]
-
-
     pure { snps
          , annotations
          , hotspots
          , fixedUI
-         , chrs
          }
 
 
 
-addGeneLayers :: ∀ r r2.
-                 _
-              -> { genes        :: Map ChrId (Array BedFeature) | r2 }
+addGeneLayers :: ∀ r.
+                 CoordSys ChrId BigInt
+              -> { }
+              -> { genes        :: Map ChrId (Array BedFeature) }
               -> TrackContainer
-              -> Effect { genes :: Pair Number -> CoordSysView -> Effect Unit
-                        , chrs  :: Pair Number -> CoordSysView -> Effect Unit }
-addGeneLayers config trackData tcont = do
+              -> Effect { genes :: Pair Number -> CoordSysView -> Effect Unit }
+addGeneLayers coordinateSystem config trackData tcont = do
 
   let
       segmentPadding = 12.0
-      conf = { segmentPadding }
-
-      bgLayer :: ∀ r'.
-                 RenderableLayer { background :: { bg1 :: HexColor
-                                                 , bg2 :: HexColor
-                                                 , segmentPadding :: Number }
-                                 , view :: CoordSysView | r' }
-      bgLayer =
-        renderTrackLike conf config.coordinateSystem (SProxy :: SProxy "background")
-          (Center chrBackgroundLayer)
+      conf = { segmentPadding
+             , coordinateSystem }
 
       geneLayer :: _
       geneLayer =
-        renderTrackLike conf config.coordinateSystem (SProxy :: SProxy "genes")
+        trackLikeLayer conf (SProxy :: SProxy "genes")
           (Center $ renderGenes trackData.genes)
-
-  rBG  <-
-    createAndAddLayer_ tcont "background" bgLayer
-
-  rChrLabels <-
-    createAndAddLayer_ tcont "chrLabels"
-      $ chrLabels { segmentPadding
-                  , fontSize: config.chrLabels.fontSize } config.coordinateSystem
 
   rGenes <-
     createAndAddLayer_ tcont "genes" geneLayer
@@ -814,14 +805,4 @@ addGeneLayers config trackData tcont = do
   let genes o v =
         renderLayer o { genes: {}, view: v } rGenes
 
-
-      chrs o v = do
-        let bgConf = { background: { bg1: HexColor white
-                                   , bg2: HexColor lightgray
-                                   , segmentPadding }
-                     , view: v }
-        traverse_ (renderLayer o bgConf)
-                    [rBG, rChrLabels]
-
-  pure { genes
-       , chrs }
+  pure { genes }
