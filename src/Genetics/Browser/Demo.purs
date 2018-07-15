@@ -2,9 +2,9 @@ module Genetics.Browser.Demo where
 
 import Prelude
 
-import Color (black, white)
+import Color (black)
 import Color.Scheme.Clrs (blue, red)
-import Color.Scheme.X11 (darkblue, darkgrey, lightgray, lightgrey)
+import Color.Scheme.X11 (darkblue, darkgrey, lightgrey)
 import Control.Monad.Except (runExcept, throwError)
 import Data.Array as Array
 import Data.BigInt (BigInt)
@@ -15,8 +15,7 @@ import Data.Foldable (class Foldable, foldMap, foldr, length, minimumBy, sequenc
 import Data.FoldableWithIndex (foldMapWithIndex)
 import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
-import Data.Lens (re, view, (^.), (^?))
-import Data.Lens.Index (ix)
+import Data.Lens (re, view, (^.))
 import Data.Lens.Lens.Tuple (_2)
 import Data.List (List)
 import Data.List as List
@@ -41,11 +40,11 @@ import Foreign (F, Foreign, ForeignError(ForeignError))
 import Foreign (readArray) as Foreign
 import Foreign.Index (readProp) as Foreign
 import Foreign.Keys (keys) as Foreign
-import Genetics.Browser (Feature, HexColor(..), LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, trackLikeLayer, thresholdRuler, trackLegend)
-import Genetics.Browser.Bed (ParsedLine, fetchBed)
+import Genetics.Browser (Feature, HexColor, LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, thresholdRuler, trackLegend, trackLikeLayer)
+import Genetics.Browser.Bed (BedFeature)
 import Genetics.Browser.Canvas (BatchDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _drawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, aroundPair, normalize, pairSize, pairsOverlap)
-import Genetics.Browser.Layer (Component(Center, CRight, CLeft), Layer(..), LayerMask(..), LayerType(..))
+import Genetics.Browser.Layer (Component(Center, CRight, CLeft), Layer(..), LayerMask(..), LayerType(..), TrackPadding)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
@@ -63,54 +62,6 @@ import Type.Prelude (class RowToList, SProxy(SProxy))
 import Unsafe.Coerce (unsafeCoerce)
 
 
-
-type BedFeature = Feature { thickRange :: Pair Bp
-                          , blocks :: Array (Pair Bp)
-                          , geneId :: String
-                          , geneName :: String
-                          , chrId :: ChrId }
-
-
-bedToFeature :: CoordSys ChrId BigInt -> ParsedLine -> Maybe BedFeature
-bedToFeature cs pl = do
-  seg@(Pair offset _ ) <- cs ^? _Segments <<< ix pl.chrom
-
-  -- TODO validate ranges maybe, idk
-  let toBp :: BigInt -> Bp
-      toBp = wrap <<< BigInt.toNumber
-
-      frameSize = toBp $ pairSize seg
-      position = toBp  <$> Pair pl.chromStart pl.chromEnd
-      thickRange = toBp  <$> Pair pl.thickStart pl.thickEnd
-
-      blocks = Array.zipWith
-                 (\start size -> map toBp (Pair start size))
-                 pl.blockStarts pl.blockSizes
-
-  pure { position
-       , frameSize
-       , feature: { thickRange
-                  , blocks
-                  , geneId: pl.geneId
-                  , geneName: pl.geneName
-                  , chrId: pl.chrom
-                  }
-       }
-
-
-getGenes :: CoordSys ChrId BigInt
-         -> String
-         -> Aff (Map ChrId (Array BedFeature))
-getGenes cs url = do
-  ls <- fetchBed url
-
-  -- let fs = filterMap (bedToFeature cs) ls
-
-  let n = 10000
-      fs = Debug.trace ("Using genes #" <> show n)
-           \_ -> filterMap (bedToFeature cs) $ Array.take n ls
-
-  pure $ groupToMap _.feature.chrId $ fs
 
 
 renderGenes :: Map ChrId (Array BedFeature)
@@ -695,11 +646,12 @@ addChrLayers trackConf {chrLabels, chrBG1, chrBG2} tc = do
 addGWASLayers :: ∀ r.
                  CoordSys ChrId BigInt
               -> { score :: { min :: Number, max :: Number, sig :: Number }
-                 , chrLabels :: { fontSize :: Int }
                  , legend :: LegendConfig ()
                  , vscale :: VScale ()
                  , snps :: SNPConfig
-                 , annotations :: AnnotationsConfig }
+                 , annotations :: AnnotationsConfig
+                 , trackHeight :: Number
+                 , padding :: TrackPadding }
               -> { snps        :: Map ChrId (Array (SNP ()))
                  , annotations :: Map ChrId (Array (Annotation ())) | r }
               -> TrackContainer
@@ -783,7 +735,8 @@ addGWASLayers coordinateSystem config trackData =
 
 addGeneLayers :: ∀ r.
                  CoordSys ChrId BigInt
-              -> { }
+              -> { trackHeight :: Number
+                 , padding :: TrackPadding }
               -> { genes        :: Map ChrId (Array BedFeature) }
               -> TrackContainer
               -> Effect { genes :: Pair Number -> CoordSysView -> Effect Unit }

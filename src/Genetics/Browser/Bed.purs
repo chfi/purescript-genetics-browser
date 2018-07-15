@@ -2,29 +2,33 @@ module Genetics.Browser.Bed where
 
 import Prelude
 
-import Control.Coroutine (Producer, Transformer, transform)
-import Control.Coroutine.Aff as Aff
 import Control.Monad.Except (runExcept)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
+import Data.Filterable (partitionMap)
 import Data.Foldable (foldMap)
 import Data.Int as Int
+import Data.Lens ((^?))
+import Data.Lens.Index (ix)
+import Data.List as List
 import Data.List.NonEmpty (NonEmptyList)
-import Data.Maybe (Maybe(..))
-import Data.Monoid (mempty)
+import Data.Map (Map)
+import Data.Maybe (Maybe(..), maybe)
 import Data.Newtype (wrap)
+import Data.Pair (Pair(..))
 import Data.String as String
 import Data.Traversable (traverse)
 import Data.Validation.Semigroup (V, invalid, unV)
-import Debug.Trace as Debug
 import Effect.Aff (Aff, error, throwError)
-import Effect.Aff.AVar (new, put, take) as AVar
-import Foreign (Foreign, MultipleErrors, readArray, renderForeignError)
-import Genetics.Browser.Types (ChrId)
-import Network.HTTP.Affjax as Affjax
-import Network.HTTP.Affjax.Response as Affjax
+import Foreign (Foreign, ForeignError(..), MultipleErrors, readArray, renderForeignError)
+import Genetics.Browser (Feature, groupToMap)
+import Genetics.Browser.Coordinates (CoordSys, _Segments, pairSize)
+import Genetics.Browser.Types (Bp, ChrId)
+import Network.HTTP.Affjax (get) as Affjax
+import Network.HTTP.Affjax.Response (json) as Affjax
+import Prim.RowList (kind RowList)
 import Simple.JSON (read)
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -74,6 +78,7 @@ type BedLine count method attrs ident coord many =
   , tags :: attrs
   )
 
+
 type RawBedLine = Record (BedLine String String String String String String)
 
 type ParsedLine = Record (BedLine Int String String ChrId BigInt (Array BigInt))
@@ -100,6 +105,7 @@ validList :: String -> V (NonEmptyList String) (Array BigInt)
 validList x = traverse validBigInt (String.split (wrap ",") x)
 
 
+
 -- TODO validate `*Start` and `*End` by providing a coord sys and comparing thick* to chrom* etc.
 -- -- TODO more validation & parsing (e.g. of `itemRgb` and `strand` could be done, but not necessary ATM)
 validLine :: RawBedLine -> Validated ParsedLine
@@ -118,22 +124,70 @@ validLine l = (l { chrom = _
            <*> validList l.blockStarts
 
 
-validateBedChunk :: Array Foreign -> Validated (Array ParsedLine)
-validateBedChunk d =
-  case (traverse read d) :: Either MultipleErrors (Array RawBedLine) of
 
-    Left err -> invalid $ map renderForeignError err
-    Right ls -> traverse validLine ls
+type BedFeature = Feature { thickRange :: Pair Bp
+                          , blocks :: Array (Pair Bp)
+                          , geneId :: String
+                          , geneName :: String
+                          , chrId :: ChrId }
 
-fetchBed :: String -> Aff (Array ParsedLine)
-fetchBed url = do
+
+parseBed :: CoordSys ChrId BigInt
+         -> Foreign
+         -> Either MultipleErrors BedFeature
+parseBed cs o = do
+  raw <- read o
+  parsed <- unV (Left <<< map ForeignError) pure $ validLine raw
+
+  maybe
+    (Left $ pure $ ForeignError "Error parsing BedFeature")
+    pure
+    $ bedToFeature cs parsed
+
+
+
+bedToFeature :: CoordSys ChrId BigInt -> ParsedLine -> Maybe BedFeature
+bedToFeature cs pl = do
+  seg@(Pair offset _ ) <- cs ^? _Segments <<< ix pl.chrom
+
+  -- TODO validate ranges maybe, idk
+  let toBp :: BigInt -> Bp
+      toBp = wrap <<< BigInt.toNumber
+
+      frameSize = toBp $ pairSize seg
+      position = toBp  <$> Pair pl.chromStart pl.chromEnd
+      thickRange = toBp  <$> Pair pl.thickStart pl.thickEnd
+
+      blocks = Array.zipWith
+                 (\start size -> map toBp (Pair start size))
+                 pl.blockStarts pl.blockSizes
+
+  pure { position
+       , frameSize
+       , feature: { thickRange
+                  , blocks
+                  , geneId: pl.geneId
+                  , geneName: pl.geneName
+                  , chrId: pl.chrom
+                  }
+       }
+
+
+getGenes :: CoordSys ChrId BigInt
+         -> String
+         -> Aff (Map ChrId (Array BedFeature))
+getGenes cs url = do
   resp <- _.response <$> Affjax.get Affjax.json url
 
   let throwParseError = throwError <<< error <<< foldMap (_ <> ", ")
 
-  case runExcept $ readArray $ unsafeCoerce resp of
+  array <- case runExcept $ readArray $ unsafeCoerce resp of
     Left err -> throwParseError $ map renderForeignError err
-    Right ls -> do
-        unV throwParseError
-            pure
-            $ validateBedChunk ls
+    Right ls -> pure ls
+
+
+  let asList = List.fromFoldable array
+  let output = map Array.fromFoldable
+               $ groupToMap _.feature.chrId <<< _.right
+               $ partitionMap (parseBed cs) asList
+  pure output
