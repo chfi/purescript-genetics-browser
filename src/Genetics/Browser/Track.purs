@@ -2,6 +2,10 @@ module Genetics.Browser.Track
        ( class TrackRecord
        , buildTrack
        , makeTrack
+       , TrackConfigRecord
+       , class TrackConfig
+       , makeContainersImpl
+       , makeContainers
        ) where
 
 import Prelude
@@ -10,13 +14,17 @@ import Data.Pair (Pair)
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
-import Genetics.Browser.Canvas (TrackContainer)
+import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, trackContainer)
 import Genetics.Browser.Coordinates (CoordSysView)
+import Genetics.Browser.Layer (TrackPadding)
 import Genetics.Browser.Types (Point)
 import Prim.Row as Row
 import Prim.RowList (class RowToList, Cons, Nil, kind RowList)
-import Record (delete, get)
+import Record (delete, get, insert)
+import Type.Data.Symbol as Symbol
 import Type.Prelude (class IsSymbol, class TypeEquals, RLProxy(..), SProxy(..), from)
+
+
 
 
 type TrackInterface a =
@@ -108,3 +116,63 @@ makeTrack :: ∀ row list a.
           -> TrackContainer
           -> Aff (TrackInterface a)
 makeTrack r c = buildTrack (RLProxy :: RLProxy list) r c
+
+
+type TrackConfigRecord r =
+  { trackHeight :: Number
+  , padding :: TrackPadding | r }
+
+class TrackConfig
+  (confList :: RowList)
+  (confRow  :: # Type)
+  (trackRow :: # Type)
+  | confList -> confRow trackRow
+  where
+  makeContainersImpl :: RLProxy confList
+                     -> Number
+                     -> Record confRow
+                     -> Effect (Record trackRow)
+
+
+instance trackConfigNil ::
+  ( TypeEquals (Record tr) {}
+  ) => TrackConfig Nil cr tr where
+  makeContainersImpl _ _ _ = pure $ from {}
+
+
+instance trackConfigCons ::
+  ( IsSymbol name
+  , TrackConfig tail confRow' trackRow'
+  , Row.Cons name c confRow' confRow
+  , Row.Lacks name confRow'
+  , Row.Cons name TrackContainer trackRow' trackRow
+  , Row.Lacks name trackRow'
+  , TypeEquals (TrackConfigRecord we) c
+  ) => TrackConfig (Cons name c tail) confRow trackRow where
+  makeContainersImpl _ width r = do
+    let n = SProxy :: SProxy name
+
+        c :: TrackConfigRecord we
+        c = from $ get n r
+
+    cont <- trackContainer
+              {width, height: c.trackHeight}
+              c.padding
+              (Symbol.reflectSymbol n)
+
+    rest <- makeContainersImpl
+              (RLProxy :: RLProxy tail)
+              width
+              (delete n $ from r)
+
+    pure $ insert n cont rest
+
+
+
+makeContainers :: ∀ cl cr tr.
+                  RowToList cr cl
+               => TrackConfig cl cr tr
+               => Number
+               -> Record cr
+               -> Effect (Record tr)
+makeContainers = makeContainersImpl (RLProxy :: RLProxy cl)

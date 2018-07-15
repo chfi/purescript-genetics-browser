@@ -24,11 +24,16 @@ module Genetics.Browser.Canvas
        , trackContainer
        , setTrackContainerSize
        , setElementStyle
+       , BrowserContainer
+       , browserContainer
+       , addTrack
+       , getTrack
        ) where
 
 
 import Prelude
 
+import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Filterable (filterMap)
 import Data.Foldable (any, foldl, for_, length)
@@ -41,7 +46,7 @@ import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
-import Data.Newtype (class Newtype, unwrap)
+import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
 import Data.Symbol (SProxy(..))
@@ -50,7 +55,9 @@ import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
 import Effect (Effect)
+import Effect.Aff (Aff, error, throwError)
 import Effect.Class (class MonadEffect, liftEffect)
+import Effect.Class.Console (log)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Effect.Uncurried (EffectFn2, EffectFn3, EffectFn5, runEffectFn2, runEffectFn3, runEffectFn5)
@@ -65,14 +72,39 @@ import Partial.Unsafe (unsafeCrashWith)
 import Record as Record
 import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM (Element)
+import Web.DOM.Document (createElement)
 import Web.DOM.Node as DOM
 
 
 
--- | Create a new CanvasElement, not attached to the DOM, with the provided String as its CSS class
-foreign import createCanvas :: { width :: Number, height :: Number }
-                            -> String
-                            -> Effect CanvasElement
+foreign import unsafeCreateElementImpl
+  :: EffectFn2 String String Element
+
+
+unsafeCreateElement :: { elementType :: String
+                       , id :: String }
+                    -> Effect Element
+unsafeCreateElement args =
+  runEffectFn2
+    unsafeCreateElementImpl
+    args.elementType args.id
+
+
+foreign import initializeCanvasImpl
+  :: EffectFn2 CanvasElement Canvas.Dimensions Unit
+
+
+-- | Create a new CanvasElement, not attached to the DOM, with the provided String as its CSS id
+createCanvas :: Canvas.Dimensions
+             -> String
+             -> Effect CanvasElement
+createCanvas size name = do
+  el <- unsafeCoerce <$>
+        unsafeCreateElement { elementType: "canvas", id: name }
+
+  runEffectFn2 initializeCanvasImpl el size
+
+  pure el
 
 
 foreign import setElementStyleImpl :: EffectFn3
@@ -113,9 +145,12 @@ setCanvasPosition {left, top} ce =
     , Tuple "left" (show left <> "px") ]
 
 
-foreign import appendCanvasElem :: Element
-                                -> CanvasElement
-                                -> Effect Unit
+foreign import appendElem :: Element
+                          -> Element
+                          -> Effect Unit
+
+appendCanvasElem :: Element -> CanvasElement -> Effect Unit
+appendCanvasElem e c = appendElem e (unsafeCoerce c)
 
 
 -- | Sets some of the track container's CSS to reasonable defaults
@@ -209,23 +244,26 @@ canvasDrag el f =
   in canvasDragImpl el (toEither f)
 
 
--- | Takes a TrackContainer and a callback function that is called with the
--- | total dragged distance when a click & drag action is completed.
-dragScroll :: TrackContainer
+-- | Takes a BrowserContainer and a callback function that is called
+-- | with the total dragged distance, on each track, when a click &
+-- | drag action is completed.
+dragScroll :: BrowserContainer
            -> (Point -> Effect Unit)
            -> Effect Unit
-dragScroll bc'@(TrackContainer {element}) cb =
-  canvasDrag (unsafeCoerce element) case _ of
-    Left  p   -> cb p
-    Right {x} -> do
-      let p' = {x: -x, y: 0.0}
-      scrollTrack bc' p'
+dragScroll (BrowserContainer bc) cb = do
+  tracks <- Ref.read bc.tracks
+
+  for_ tracks \e -> canvasDrag (unsafeCoerce $ e ^. _Container) case _ of
+    Left  p -> cb p
+    Right p -> for_ tracks \c -> scrollTrack c {x: -p.x, y: 0.0}
 
 
 -- | Takes a TrackContainer and a callback function that is called with each
 -- | wheel scroll `deltaY`. Callback is provided with only the sign of `deltaY`
 -- | as to be `deltaMode` agnostic.
-wheelZoom :: TrackContainer
+wheelZoom :: ∀ t r.
+             Newtype t { element :: Element | r }
+          => t
           -> (Number -> Effect Unit)
           -> Effect Unit
 wheelZoom bc cb =
@@ -291,14 +329,60 @@ blankBuffer bc@(BufferedCanvas {back, front}) = do
     $ flip clearCanvas dim <=< Canvas.getContext2D
 
 
+
+
 newtype TrackContainer =
   TrackContainer { layers      :: Ref (Map String LayerCanvas)
-                   , dimensions  :: Ref TrackDimensions
-                   , element     :: Element
-                   , glyphBuffer :: CanvasElement }
+                 , dimensions  :: Ref TrackDimensions
+                 , element     :: Element
+                 , glyphBuffer :: CanvasElement }
 
 
 derive instance newtypeTrackContainer :: Newtype TrackContainer _
+
+
+newtype BrowserContainer =
+  BrowserContainer { tracks :: Ref (Map String TrackContainer)
+                   -- , dimensions :: Ref Canvas.Dimensions
+                   , element :: Element }
+
+
+derive instance newtypeBrowserContainer :: Newtype BrowserContainer _
+
+browserContainer :: ∀ m.
+                    MonadEffect m
+                 => Element
+                 -> m BrowserContainer
+browserContainer element = liftEffect do
+  -- el <- unsafeCreateElement { elementType: "div", id: "browserContainer" }
+  tracks <- Ref.new mempty
+  pure $ BrowserContainer { tracks, element }
+
+getTrack :: String
+         -> BrowserContainer
+         -> Aff TrackContainer
+getTrack n (BrowserContainer bc) = do
+  tracks <- liftEffect $ Ref.read bc.tracks
+
+  case Map.lookup n tracks of
+    Just t -> pure t
+    Nothing -> throwError
+               $ error
+               $ "Could not find track '" <> n <> "'!"
+
+addTrack :: ∀ m.
+            MonadEffect m
+         => BrowserContainer
+         -> String
+         -> TrackContainer
+         -> m Unit
+addTrack (BrowserContainer bc) name (TrackContainer tc) = liftEffect do
+  Ref.modify_ (Map.insert name (wrap tc)) bc.tracks
+
+  appendElem bc.element tc.element
+
+
+
 
 
 getDimensions :: ∀ m.
@@ -311,7 +395,10 @@ getDimensions (TrackContainer {dimensions}) =
 _Layers :: Lens' TrackContainer (Ref (Map String LayerCanvas))
 _Layers = _Newtype <<< Lens.prop (SProxy :: SProxy "layers")
 
-_Container :: Lens' TrackContainer Element
+
+_Container :: ∀ t r.
+              Newtype t { element :: Element | r }
+           => Lens' t Element
 _Container = _Newtype <<< Lens.prop (SProxy :: SProxy "element")
 
 
@@ -331,12 +418,17 @@ setTrackContainerSize dim bc'@(TrackContainer bc) = liftEffect $ do
 glyphBufferSize :: Canvas.Dimensions
 glyphBufferSize = { width: 15.0, height: 300.0 }
 
--- | Creates an *empty* TrackContainer, to which layers can be added
+
+-- | Creates an *empty* TrackContainer, to which layers can be added,
+-- | but does not attach its Element to the DOM
 trackContainer :: Canvas.Dimensions
-                 -> TrackPadding
-                 -> Element
-                 -> Effect TrackContainer
-trackContainer size padding element = do
+               -> TrackPadding
+               -> String
+               -> Effect TrackContainer
+trackContainer size padding name = do
+
+  element <- unsafeCreateElement { elementType: "div"
+                                 , id: name }
 
   setContainerStyle element size
 

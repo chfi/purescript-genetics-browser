@@ -3,6 +3,7 @@
   "set": "genetics-0.12",
   "source": "https://github.com/chfi/package-sets.git",
   "depends": [
+    "type-isequal",
     "aff",
     "aff-coroutines",
     "affjax",
@@ -31,7 +32,6 @@
     "record",
     "record-extra",
     "simple-json",
-    "spec",
     "transformers",
     "typelevel-prelude",
     "validation",

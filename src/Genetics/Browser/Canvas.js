@@ -1,5 +1,22 @@
 "use strict";
 
+exports.unsafeCreateElementImpl = function(type, id, className) {
+    var c = document.createElement(type);
+    c.id = id;
+    c.className = className;
+    return c;
+};
+
+exports.initializeCanvasImpl = function(canvas, size) {
+    canvas.width  = size.width;
+    canvas.height = size.height;
+
+    var ctx = canvas.getContext("2d");
+    if (ctx.imageSmoothingEnabled === true) {
+        ctx.imageSmoothingEnabled = false;
+    };
+};
+
 exports.createCanvas = function(size) {
     return function(className) {
         return function() {
@@ -21,7 +38,7 @@ exports.setElementStyleImpl = function(e,k,v) {
     e.style[k] = v;
 }
 
-exports.appendCanvasElem = function(cont) {
+exports.appendElem = function(cont) {
     return function(canv) {
         return function() {
             cont.appendChild(canv);
