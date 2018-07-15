@@ -14,18 +14,20 @@ import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
 import Data.Lens ((^.))
 import Data.Lens.Iso.Newtype (_Newtype)
+import Data.List (List)
+import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Newtype (over, unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Symbol (SProxy(SProxy))
-import Data.Traversable (for_, traverse_)
+import Data.Traversable (for_, traverse, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Effect (Effect)
-import Effect.Aff (Aff, Fiber, Milliseconds, forkAff, killFiber, launchAff, launchAff_)
+import Effect.Aff (Aff, Fiber, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_, throwError)
 import Effect.Aff.AVar (AVar)
 import Effect.Aff.AVar as AVar
 import Effect.Class (liftEffect)
@@ -34,16 +36,17 @@ import Effect.Exception (error, throw)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
-import Genetics.Browser (LegendConfig, Peak, VScale, pixelSegments)
-import Genetics.Browser.Canvas (TrackContainer, _Container, trackClickHandler, trackContainer, dragScroll, getDimensions, setTrackContainerSize, setElementStyle, wheelZoom)
+import Genetics.Browser (HexColor(..), LegendConfig, Peak, VScale, pixelSegments)
+import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, _Container, addTrack, browserContainer, dragScroll, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, trackContainer, wheelZoom)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, AnnotationsConfig, SNP, SNPConfig, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), TrackPadding, trackSlots)
-import Genetics.Browser.Track (class TrackRecord, makeTrack)
+import Genetics.Browser.Track (class TrackRecord, makeContainers, makeTrack)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Point)
+import Math (pow)
 import Math as Math
 import Partial.Unsafe (unsafePartial)
 import Prim.RowList (class RowToList)
@@ -438,8 +441,10 @@ initInfoBox = do
   pure $ updateInfoBox el
 
 
--- runBrowser :: BrowserConfig {gwas :: _} -> TrackContainer -> Effect (Fiber Unit)
-runBrowser :: BrowserConfig {gene :: _, chrs :: _} -> TrackContainer -> Effect (Fiber Unit)
+runBrowser :: BrowserConfig {gwas :: _, gene :: {trackHeight :: _, padding :: _} }
+           -> BrowserContainer
+           -> Effect (Fiber Unit)
+-- runBrowser :: BrowserConfig {gene :: _, chrs :: _} -> TrackContainer -> Effect (Fiber Unit)
 runBrowser config bc = launchAff $ do
 
   let cSys :: CoordSys ChrId BigInt
@@ -471,54 +476,83 @@ runBrowser config bc = launchAff $ do
         log $ "fetching genes"
         genes <- getGenes cSys url
         AVar.put genes geneVar
+  gwasTC <- getTrack "gwas" bc
+  geneTC <- getTrack "gene" bc
+  renderers <- do
+    gwas <- liftEffect do
+      chrLayers <- addChrLayers { coordinateSystem: cSys
+                                , segmentPadding: 12.0 }
+                                config.chrs gwasTC
+      gwasLayers <- addGWASLayers cSys config.tracks.gwas trackData gwasTC
+      pure $ Record.merge { chrs: chrLayers } gwasLayers
 
 
-  -- _ <- forkAff do
-  genes <- AVar.take geneVar
-  log $ "fetched and parsed genes!"
-  log $ "#: " <> show (sum $ Array.length <$> genes)
+    gene <- do
+      chrLayers <- addChrLayers { coordinateSystem: cSys
+                                , segmentPadding: 12.0 }
+                                config.chrs geneTC
+      gwasLayers <- addGWASLayers cSys config.tracks.gwas trackData geneTC
+      pure $ Record.merge { chrs: chrLayers } gwasLayers
+
+      -- genes <- case config.urls.genes of
+      --     Nothing  -> throwError $ error "no genes configured"
+      --     Just url -> do
+      --       log $ "fetching genes"
+      --       getGenes cSys url
+
+      -- log $ "fetched and parsed genes!"
+      -- log $ "#: " <> show (sum $ Array.length <$> genes)
+
+      liftEffect do
+        chrLayers <- addChrLayers { coordinateSystem: cSys
+                                  , segmentPadding: 12.0 }
+                                  config.chrs geneTC
+        pure { chrs: chrLayers }
+        -- geneLayers <- addGeneLayers cSys config.tracks.gene {genes} geneTC
+        -- pure $ Record.merge { chrs: chrLayers } geneLayers
+
+    pure {gwas, gene}
 
 
+  tracks <- do
+    gwas <- initializeTrack cSys renderers.gwas initialView gwasTC
+    gene <- initializeTrack cSys renderers.gene initialView geneTC
+    pure {gwas, gene}
 
-  -- render <- liftEffect
-  --           $ addGWASLayers cSys config.tracks.gwas trackData bc
-
-
-  render <- liftEffect do
-    chrLayers <- addChrLayers { coordinateSystem: cSys
-                              , segmentPadding: 12.0 }
-                              config.tracks.chrs bc
-    geneLayers <- addGeneLayers cSys config.tracks.gene {genes} bc
-    pure $ Record.merge { chrs: chrLayers } geneLayers
-
-  track <-
-    initializeTrack cSys render initialView bc
 
 
   liftEffect do
-    resizeEvent \d ->
-      launchAff_ $ track.queueCommand $ inj _docResize d
+    resizeEvent \d -> do
+      launchAff_ $ tracks.gwas.queueCommand $ inj _docResize d
+      launchAff_ $ tracks.gene.queueCommand $ inj _docResize d
 
     let btnMods = { scrollMod: 0.10, zoomMod: 0.15 }
-    btnUI btnMods track.queueUpdateView
+    btnUI btnMods \u -> do
+      tracks.gwas.queueUpdateView u
+      tracks.gene.queueUpdateView u
 
-    buttonEvent "reset"
-      $ track.queueUpdateView
-        (ModView (const $ unwrap initialView))
+    buttonEvent "reset" do
+      let cmd = ModView (const $ unwrap initialView)
+      tracks.gwas.queueUpdateView cmd
+      tracks.gene.queueUpdateView cmd
 
-    keyUI (bc ^. _Container) { scrollMod: 0.075 } track.queueUpdateView
+    keyUI (bc ^. _Container) { scrollMod: 0.075 } \u -> do
+      tracks.gwas.queueUpdateView u
+      tracks.gene.queueUpdateView u
 
     dragScroll bc \ {x,y} ->
       -- only do anything when scrolling at least a pixel
       when (Math.abs x >= one) do
-        trackDims <- _.center <<< trackSlots <$> getDimensions bc
-        track.queueUpdateView
-         $ ScrollView $ (-x) / trackDims.size.width
+        trackDims <- _.center <<< trackSlots <$> getDimensions gwasTC
+        let cmd = ScrollView $ (-x) / trackDims.size.width
+        tracks.gwas.queueUpdateView cmd
+        tracks.gene.queueUpdateView cmd
 
     let scrollZoomScale = 0.06
-    wheelZoom bc \dY ->
-       track.queueUpdateView
-         $ ZoomView $ 1.0 + scrollZoomScale * dY
+    wheelZoom bc \dY -> do
+      let cmd = ZoomView $ 1.0 + scrollZoomScale * dY
+      tracks.gwas.queueUpdateView cmd
+      tracks.gene.queueUpdateView cmd
 
 
   liftEffect do
@@ -529,16 +563,16 @@ runBrowser config bc = launchAff $ do
 
         glyphClick :: Point -> Effect Unit
         glyphClick p = launchAff_ do
-          v  <- liftEffect $ track.getView
+          v  <- liftEffect $ tracks.gwas.getView
 
-          trackDims <- _.center <<< trackSlots <$> getDimensions bc
+          trackDims <- _.center <<< trackSlots <$> getDimensions gwasTC
           let segs = pixelSegments { segmentPadding: 12.0 } cSys trackDims.size v
               annoPeaks = annotationsForScale cSys sigSnps
                             trackData.annotations segs
 
           liftEffect do
 
-            lastHotspots' <- track.lastHotspots
+            lastHotspots' <- tracks.gwas.lastHotspots
             let clicked = lastHotspots' clickRadius p
 
             case Array.head clicked of
@@ -552,7 +586,7 @@ runBrowser config bc = launchAff $ do
                   <> foldMap annoPeakHTML (annotAround annoPeaks g)
 
 
-    trackClickHandler bc
+    trackClickHandler gwasTC
       $ Center glyphClick
 
 
@@ -573,6 +607,9 @@ type BrowserConfig a =
   , score :: { min :: Number, max :: Number, sig :: Number }
   , urls :: DataURLs
   , initialChrs :: Maybe { left :: String, right :: String }
+  , chrs ::  { chrLabels :: { fontSize :: Int }
+             , chrBG1 :: HexColor
+             , chrBG2 :: HexColor }
   , tracks :: a
   }
 
@@ -600,12 +637,17 @@ main rawConfig = do
 
         Right c   -> do
 
-              {width} <- windowInnerSize
-              let dimensions = { width, height: c.trackHeight }
-              bc <- trackContainer dimensions c.padding el
+          {width} <- windowInnerSize
 
-              log $ unsafeStringify c
-              void $ runBrowser c bc
+          cs <- makeContainers width c.tracks
+
+          bc <- browserContainer el
+
+          addTrack bc "gwas" cs.gwas
+          addTrack bc "gene" cs.gene
+
+          log $ unsafeStringify c
+          void $ runBrowser c bc
 
 
 

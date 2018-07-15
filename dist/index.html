@@ -1,4 +1,5 @@
 <!doctype html>
+<meta charset="UTF-8">
 <html>
   <head>
     <link href="style.css" rel="stylesheet" >
@@ -41,14 +42,25 @@
 
       var score = { min: 0.0, max: 30.0, sig: 4 };
 
+      var gwasPadding = { top: 35.0,
+                          bottom: 35.0,
+                          left: vscaleWidth,
+                          right: legendWidth };
+
+      var gwasHeight = 220.0;
+
+
+      var genePadding = { top: 10.0,
+                          bottom: 35.0,
+                          left: vscaleWidth,
+                          right: legendWidth };
+
+      var geneHeight = 140.0;
+
       var config =
           { trackHeight: 400.0,
 
-            padding:
-            { top: 35.0,
-              bottom: 35.0,
-              left: vscaleWidth,
-              right: legendWidth },
+            padding: gwasPadding,
 
             score: score,
 
@@ -56,6 +68,8 @@
 
             tracks: {
                 gwas: {
+                    trackHeight: gwasHeight,
+                    padding: gwasPadding,
                     snps: {
                         radius: 3.75,
                         lineWidth: 1.0,
@@ -87,23 +101,23 @@
                     },
 
 
-                    chrLabels: { fontSize: 16 },
-
 
                 },
 
                 gene: {
-
+                    trackHeight: geneHeight,
+                    padding: genePadding
                 },
 
-                chrs: {
-                    chrBG1: "#FFFFFF",
-                    chrBG2: "#EEEEEE",
-                    chrLabels: { fontSize: 16 },
-                },
             },
 
-            initialChrs: { left: "1", right: "1" }
+            chrs: {
+                chrBG1: "#FFFFFF",
+                chrBG2: "#EEEEEE",
+                chrLabels: { fontSize: 16 },
+            },
+
+            initialChrs: { left: "1", right: "5" }
           };
 
       GGB.main(config)();
