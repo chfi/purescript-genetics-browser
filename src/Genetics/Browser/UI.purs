@@ -37,9 +37,10 @@ import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (HexColor(..), LegendConfig, Peak, VScale, pixelSegments)
+import Genetics.Browser.Bed (getGenes)
 import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, _Container, addTrack, browserContainer, dragScroll, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, trackContainer, wheelZoom)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
-import Genetics.Browser.Demo (Annotation, AnnotationField, AnnotationsConfig, SNP, SNPConfig, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getGenes, getSNPs, showAnnotationField)
+import Genetics.Browser.Demo (Annotation, AnnotationField, AnnotationsConfig, SNP, SNPConfig, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), TrackPadding, trackSlots)
 import Genetics.Browser.Track (class TrackRecord, makeContainers, makeTrack)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
@@ -441,10 +442,10 @@ initInfoBox = do
   pure $ updateInfoBox el
 
 
-runBrowser :: BrowserConfig {gwas :: _, gene :: {trackHeight :: _, padding :: _} }
+runBrowser :: BrowserConfig { gwas :: _
+                            , gene :: _ }
            -> BrowserContainer
            -> Effect (Fiber Unit)
--- runBrowser :: BrowserConfig {gene :: _, chrs :: _} -> TrackContainer -> Effect (Fiber Unit)
 runBrowser config bc = launchAff $ do
 
   let cSys :: CoordSys ChrId BigInt
@@ -462,132 +463,115 @@ runBrowser config bc = launchAff $ do
   cmdInfoBox <- liftEffect $ initInfoBox
 
 
-  trackData <-
-    {snps:_, annotations:_}
-    <$> foldMap (getSNPs        cSys) config.urls.snps
-    <*> foldMap (getAnnotations cSys) config.urls.annotations
 
-  geneVar <- AVar.empty
 
-  _ <- forkAff do
-    case config.urls.genes of
-      Nothing  -> pure unit
-      Just url -> do
-        log $ "fetching genes"
-        genes <- getGenes cSys url
-        AVar.put genes geneVar
-  gwasTC <- getTrack "gwas" bc
-  geneTC <- getTrack "gene" bc
-  renderers <- do
-    gwas <- liftEffect do
+
+
+  let setHandlers tc track = liftEffect do
+        resizeEvent \d -> do
+          launchAff_ $ track.queueCommand $ inj _docResize d
+
+        let btnMods = { scrollMod: 0.10, zoomMod: 0.15 }
+        btnUI btnMods \u ->
+          track.queueUpdateView u
+
+        buttonEvent "reset" do
+          let cmd = ModView (const $ unwrap initialView)
+          track.queueUpdateView cmd
+
+        keyUI (bc ^. _Container) { scrollMod: 0.075 } \u -> do
+          track.queueUpdateView u
+
+        dragScroll bc \ {x,y} ->
+          -- only do anything when scrolling at least a pixel
+          when (Math.abs x >= one) do
+            trackDims <- _.center <<< trackSlots <$> getDimensions tc
+            let cmd = ScrollView $ (-x) / trackDims.size.width
+            track.queueUpdateView cmd
+
+        let scrollZoomScale = 0.06
+        wheelZoom bc \dY -> do
+          let cmd = ZoomView $ 1.0 + scrollZoomScale * dY
+          track.queueUpdateView cmd
+
+
+
+
+  gwasTrack <- forkAff do
+
+    gwasData <-
+      {snps:_, annotations:_}
+      <$> foldMap (getSNPs        cSys) config.urls.snps
+      <*> foldMap (getAnnotations cSys) config.urls.annotations
+    gwasTC <- getTrack "gwas" bc
+    render <- liftEffect do
       chrLayers <- addChrLayers { coordinateSystem: cSys
                                 , segmentPadding: 12.0 }
                                 config.chrs gwasTC
-      gwasLayers <- addGWASLayers cSys config.tracks.gwas trackData gwasTC
+      gwasLayers <- addGWASLayers cSys config.tracks.gwas gwasData gwasTC
       pure $ Record.merge { chrs: chrLayers } gwasLayers
 
+    track <- initializeTrack cSys render initialView gwasTC
+    setHandlers gwasTC track
 
-    gene <- do
+
+    liftEffect do
+      let sigSnps = filterSig config.score gwasData.snps
+          annotAround pks snp =
+            Array.find (\a -> a.covers `pairsOverlap` snp.position)
+              =<< Map.lookup snp.feature.chrId pks
+
+          glyphClick :: Point -> Effect Unit
+          glyphClick p = launchAff_ do
+            v  <- liftEffect $ track.getView
+
+            trackDims <- _.center <<< trackSlots <$> getDimensions gwasTC
+            let segs = pixelSegments { segmentPadding: 12.0 } cSys trackDims.size v
+                annoPeaks = annotationsForScale cSys sigSnps
+                              gwasData.annotations segs
+
+            liftEffect do
+
+              lastHotspots' <- track.lastHotspots
+              let clicked = lastHotspots' clickRadius p
+
+              case Array.head clicked of
+                Nothing -> cmdInfoBox IBoxHide
+                Just g  -> do
+                  cmdInfoBox IBoxShow
+                  cmdInfoBox $ IBoxSetX $ Int.round p.x
+                  cmdInfoBox $ IBoxSetY $ Int.round p.y
+                  cmdInfoBox $ IBoxSetContents
+                    $ snpHTML g
+                    <> foldMap annoPeakHTML (annotAround annoPeaks g)
+
+
+      trackClickHandler gwasTC
+        $ Center glyphClick
+
+
+
+  geneTrack <- forkAff do
+
+    genes <- case config.urls.genes of
+        Nothing  -> throwError $ error "no genes configured"
+        Just url -> do
+          log $ "fetching genes"
+          delay $ wrap 100000.0
+          -- g <- getGenes' cSys url
+          log $ "got genes!"
+          pure mempty
+
+    geneTC <- getTrack "gene" bc
+    render <- liftEffect do
       chrLayers <- addChrLayers { coordinateSystem: cSys
                                 , segmentPadding: 12.0 }
                                 config.chrs geneTC
-      gwasLayers <- addGWASLayers cSys config.tracks.gwas trackData geneTC
-      pure $ Record.merge { chrs: chrLayers } gwasLayers
+      geneLayers <- addGeneLayers cSys config.tracks.gene { genes } geneTC
+      pure $ Record.merge { chrs: chrLayers } geneLayers
 
-      -- genes <- case config.urls.genes of
-      --     Nothing  -> throwError $ error "no genes configured"
-      --     Just url -> do
-      --       log $ "fetching genes"
-      --       getGenes cSys url
-
-      -- log $ "fetched and parsed genes!"
-      -- log $ "#: " <> show (sum $ Array.length <$> genes)
-
-      liftEffect do
-        chrLayers <- addChrLayers { coordinateSystem: cSys
-                                  , segmentPadding: 12.0 }
-                                  config.chrs geneTC
-        pure { chrs: chrLayers }
-        -- geneLayers <- addGeneLayers cSys config.tracks.gene {genes} geneTC
-        -- pure $ Record.merge { chrs: chrLayers } geneLayers
-
-    pure {gwas, gene}
-
-
-  tracks <- do
-    gwas <- initializeTrack cSys renderers.gwas initialView gwasTC
-    gene <- initializeTrack cSys renderers.gene initialView geneTC
-    pure {gwas, gene}
-
-
-
-  liftEffect do
-    resizeEvent \d -> do
-      launchAff_ $ tracks.gwas.queueCommand $ inj _docResize d
-      launchAff_ $ tracks.gene.queueCommand $ inj _docResize d
-
-    let btnMods = { scrollMod: 0.10, zoomMod: 0.15 }
-    btnUI btnMods \u -> do
-      tracks.gwas.queueUpdateView u
-      tracks.gene.queueUpdateView u
-
-    buttonEvent "reset" do
-      let cmd = ModView (const $ unwrap initialView)
-      tracks.gwas.queueUpdateView cmd
-      tracks.gene.queueUpdateView cmd
-
-    keyUI (bc ^. _Container) { scrollMod: 0.075 } \u -> do
-      tracks.gwas.queueUpdateView u
-      tracks.gene.queueUpdateView u
-
-    dragScroll bc \ {x,y} ->
-      -- only do anything when scrolling at least a pixel
-      when (Math.abs x >= one) do
-        trackDims <- _.center <<< trackSlots <$> getDimensions gwasTC
-        let cmd = ScrollView $ (-x) / trackDims.size.width
-        tracks.gwas.queueUpdateView cmd
-        tracks.gene.queueUpdateView cmd
-
-    let scrollZoomScale = 0.06
-    wheelZoom bc \dY -> do
-      let cmd = ZoomView $ 1.0 + scrollZoomScale * dY
-      tracks.gwas.queueUpdateView cmd
-      tracks.gene.queueUpdateView cmd
-
-
-  liftEffect do
-    let sigSnps = filterSig config.score trackData.snps
-        annotAround pks snp =
-          Array.find (\a -> a.covers `pairsOverlap` snp.position)
-            =<< Map.lookup snp.feature.chrId pks
-
-        glyphClick :: Point -> Effect Unit
-        glyphClick p = launchAff_ do
-          v  <- liftEffect $ tracks.gwas.getView
-
-          trackDims <- _.center <<< trackSlots <$> getDimensions gwasTC
-          let segs = pixelSegments { segmentPadding: 12.0 } cSys trackDims.size v
-              annoPeaks = annotationsForScale cSys sigSnps
-                            trackData.annotations segs
-
-          liftEffect do
-
-            lastHotspots' <- tracks.gwas.lastHotspots
-            let clicked = lastHotspots' clickRadius p
-
-            case Array.head clicked of
-              Nothing -> cmdInfoBox IBoxHide
-              Just g  -> do
-                cmdInfoBox IBoxShow
-                cmdInfoBox $ IBoxSetX $ Int.round p.x
-                cmdInfoBox $ IBoxSetY $ Int.round p.y
-                cmdInfoBox $ IBoxSetContents
-                  $ snpHTML g
-                  <> foldMap annoPeakHTML (annotAround annoPeaks g)
-
-
-    trackClickHandler gwasTC
-      $ Center glyphClick
+    track <- initializeTrack cSys render initialView geneTC
+    setHandlers geneTC track
 
 
   pure unit

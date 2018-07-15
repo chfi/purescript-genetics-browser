@@ -253,9 +253,11 @@ dragScroll :: BrowserContainer
 dragScroll (BrowserContainer bc) cb = do
   tracks <- Ref.read bc.tracks
 
-  for_ tracks \e -> canvasDrag (unsafeCoerce $ e ^. _Container) case _ of
+  canvasDrag (unsafeCoerce bc.element) case _ of
     Left  p -> cb p
-    Right p -> for_ tracks \c -> scrollTrack c {x: -p.x, y: 0.0}
+    Right p -> pure unit
+
+
 
 
 -- | Takes a TrackContainer and a callback function that is called with each
@@ -356,6 +358,14 @@ browserContainer :: ∀ m.
 browserContainer element = liftEffect do
   -- el <- unsafeCreateElement { elementType: "div", id: "browserContainer" }
   tracks <- Ref.new mempty
+
+  -- add a callback to visually scroll all tracks in the browser, on click & drag
+  canvasDrag (unsafeCoerce element) case _ of
+    Left  _ -> pure unit
+    Right p -> do
+      ts <- Ref.read tracks
+      for_ ts \c -> scrollTrack c {x: -p.x, y: 0.0}
+
   pure $ BrowserContainer { tracks, element }
 
 getTrack :: String
