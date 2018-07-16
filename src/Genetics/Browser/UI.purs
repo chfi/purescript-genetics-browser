@@ -557,10 +557,9 @@ runBrowser config bc = launchAff $ do
         Nothing  -> throwError $ error "no genes configured"
         Just url -> do
           log $ "fetching genes"
-          delay $ wrap 100000.0
-          -- g <- getGenes' cSys url
-          log $ "got genes!"
-          pure mempty
+          g <- getGenes cSys url
+          log $ "genes fetched: " <> show (sum $ Array.length <$> g)
+          pure g
 
     geneTC <- getTrack "gene" bc
     render <- liftEffect do
@@ -584,11 +583,8 @@ type DataURLs = { snps        :: Maybe String
                 }
 
 
-
 type BrowserConfig a =
-  { trackHeight :: Number
-  , padding :: TrackPadding
-  , score :: { min :: Number, max :: Number, sig :: Number }
+  { score :: { min :: Number, max :: Number, sig :: Number }
   , urls :: DataURLs
   , initialChrs :: Maybe { left :: String, right :: String }
   , chrs ::  { chrLabels :: { fontSize :: Int }

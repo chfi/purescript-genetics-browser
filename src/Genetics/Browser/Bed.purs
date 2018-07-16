@@ -12,6 +12,7 @@ import Data.Foldable (foldMap)
 import Data.Int as Int
 import Data.Lens ((^?))
 import Data.Lens.Index (ix)
+import Data.List (List)
 import Data.List as List
 import Data.List.NonEmpty (NonEmptyList)
 import Data.Map (Map)
@@ -20,8 +21,10 @@ import Data.Newtype (wrap)
 import Data.Pair (Pair(..))
 import Data.String as String
 import Data.Traversable (traverse)
+import Data.Tuple (Tuple(..))
+import Data.Unfoldable (unfoldr)
 import Data.Validation.Semigroup (V, invalid, unV)
-import Effect.Aff (Aff, error, throwError)
+import Effect.Aff (Aff, delay, error, throwError)
 import Foreign (Foreign, ForeignError(..), MultipleErrors, readArray, renderForeignError)
 import Genetics.Browser (Feature, groupToMap)
 import Genetics.Browser.Coordinates (CoordSys, _Segments, pairSize)
@@ -185,9 +188,28 @@ getGenes cs url = do
     Left err -> throwParseError $ map renderForeignError err
     Right ls -> pure ls
 
+  let chunkSize = 100
 
-  let asList = List.fromFoldable array
+      chunkF l = if List.null l
+                 then Nothing
+                 else Just (Tuple (List.take chunkSize l) (List.drop chunkSize l))
+
+      chunks = unfoldr chunkF
+               $ List.take 5000
+               $ List.fromFoldable array
+
+  let process :: List Foreign -> Aff _
+      process chnk = do
+        -- if the delay isn't done before the partitionMap, the
+        -- traverse lags for several seconds at the start, because ___
+        delay $ wrap 0.1
+        let o = partitionMap (parseBed cs) chnk
+        pure o.right
+
+  processedChunks <- traverse process chunks
+
   let output = map Array.fromFoldable
-               $ groupToMap _.feature.chrId <<< _.right
-               $ partitionMap (parseBed cs) asList
+               $ groupToMap _.feature.chrId
+               $ List.concat processedChunks
+
   pure output
