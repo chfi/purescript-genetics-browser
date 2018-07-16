@@ -56,6 +56,7 @@ import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (Variant, case_, onMatch)
 import Effect (Effect)
 import Effect.Aff (Aff, error, throwError)
+import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Class.Console (log)
 import Effect.Ref (Ref)
@@ -681,7 +682,7 @@ type RenderableLayerHotspots c a =
 -- | This returns a function that can be used to render to the layer maybe idk????
 -- | If the layer already existed, overwrites it
 createAndAddLayer :: ∀ m c a.
-                     MonadEffect m
+                     MonadAff m
                   => TrackContainer
                   -> String
                   -> RenderableLayerHotspots c a
@@ -769,7 +770,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 
 -- | Used for layers that don't contain clickable features
 createAndAddLayer_ :: ∀ m c.
-                     MonadEffect m
+                     MonadAff m
                   => TrackContainer
                   -> String
                   -> RenderableLayer c
@@ -788,7 +789,7 @@ createAndAddLayer_ bc name layer@(Layer lt _ com) = do
 -- | Convenience function for rendering layers when manipulating the
 -- | Renderable contents isn't desired.
 renderLayer :: ∀ m c r.
-               MonadEffect m
+               MonadAff m
             => Pair Number
             -> c
             -> { render :: c -> m (List Renderable)

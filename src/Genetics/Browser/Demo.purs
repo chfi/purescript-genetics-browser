@@ -431,6 +431,8 @@ renderSNPs :: ∀ r1.
 renderSNPs snpData { render, threshold } =
   let radius = render.radius
 
+      snpData' = List.fromFoldable <$> snpData
+
       drawing =
           let {x,y} = render.pixelOffset
               c     = circle x y radius
@@ -439,13 +441,13 @@ renderSNPs snpData { render, threshold } =
               fill  = filled   (fillColor    $ unwrap render.color.fill)    c
           in out <> fill
 
-      drawings :: Array (Tuple (SNP ()) Point) -> Array BatchDrawing
-      drawings pts = [{ drawing, points: view _2 <$> pts }]
+      drawings :: List (Tuple (SNP ()) Point) -> Array BatchDrawing
+      drawings pts = pure { drawing, points: view _2 <$> (Array.fromFoldable pts) }
 
 
       pointed :: Canvas.Dimensions
               -> Map ChrId (Pair Number)
-              -> Array (Tuple (SNP ()) Point)
+              -> List (Tuple (SNP ()) Point)
       pointed size = foldMapWithIndex placeSeg
         where
               place :: Pair Number -> SNP () -> Point
@@ -453,15 +455,15 @@ renderSNPs snpData { render, threshold } =
                 { x: offset + (pairSize seg) * (unwrap $ featureNormX s)
                 , y: size.height * (one - normYLogScore threshold s.feature.score) }
 
-              placeSeg :: ChrId -> Pair Number -> Array (Tuple (SNP ()) Point)
+              placeSeg :: ChrId -> Pair Number -> List (Tuple (SNP ()) Point)
               placeSeg chrId seg = foldMap (map $ fanout identity (place seg))
-                                    $ Map.lookup chrId snpData
+                                    $ Map.lookup chrId snpData'
 
 
-      hotspots :: Array (Tuple (SNP ()) Point)
+      hotspots :: List (Tuple (SNP ()) Point)
                -> Number -> Point
                -> Array (SNP ())
-      hotspots pts radius' pt = filterMap covers pts
+      hotspots pts radius' pt = Array.fromFoldable $ filterMap covers pts
         where covers :: Tuple (SNP ()) Point -> Maybe (SNP ())
               covers (Tuple f fPt)
                 | dist fPt pt <= radius + radius'   = Just f
@@ -617,7 +619,7 @@ addChrLayers :: ∀ r.
                 , chrBG1 :: HexColor
                 , chrBG2 :: HexColor }
              -> TrackContainer
-             -> Effect (Pair Number -> CoordSysView -> Effect Unit)
+             -> Aff (Pair Number -> CoordSysView -> Aff Unit)
 addChrLayers trackConf {chrLabels, chrBG1, chrBG2} tc = do
 
 
@@ -655,10 +657,10 @@ addGWASLayers :: ∀ r.
               -> { snps        :: Map ChrId (Array (SNP ()))
                  , annotations :: Map ChrId (Array (Annotation ())) | r }
               -> TrackContainer
-              -> Effect { snps        :: Pair Number -> CoordSysView -> Effect Unit
-                        , annotations :: Pair Number -> CoordSysView -> Effect Unit
-                        , hotspots    :: Effect (Number -> Point -> Array (SNP ()))
-                        , fixedUI     :: Effect Unit }
+              -> Aff { snps        :: Pair Number -> CoordSysView -> Aff Unit
+                     , annotations :: Pair Number -> CoordSysView -> Aff Unit
+                     , hotspots    :: Aff (Number -> Point -> Array (SNP ()))
+                     , fixedUI     :: Aff Unit }
 addGWASLayers coordinateSystem config trackData =
   let threshold = config.score
       vscale = build (merge config.vscale) threshold
@@ -739,7 +741,7 @@ addGeneLayers :: ∀ r.
                  , padding :: TrackPadding }
               -> { genes        :: Map ChrId (Array BedFeature) }
               -> TrackContainer
-              -> Effect { genes :: Pair Number -> CoordSysView -> Effect Unit }
+              -> Aff { genes :: Pair Number -> CoordSysView -> Aff Unit }
 addGeneLayers coordinateSystem config trackData tcont = do
 
   let

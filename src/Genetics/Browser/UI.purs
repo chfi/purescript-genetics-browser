@@ -93,7 +93,7 @@ foreign import resizeEvent :: ({ width  :: Number
 type TrackInterface a
   = { getView          :: Effect CoordSysView
     , container        :: TrackContainer
-    , lastHotspots     :: Effect (Number -> Point -> Array a)
+    , lastHotspots     :: Aff (Number -> Point -> Array a)
     , queueCommand     :: Variant UICmdR -> Aff Unit
     , queueUpdateView  :: UpdateView -> Effect Unit
     }
@@ -504,7 +504,7 @@ runBrowser config bc = launchAff $ do
       <$> foldMap (getSNPs        cSys) config.urls.snps
       <*> foldMap (getAnnotations cSys) config.urls.annotations
     gwasTC <- getTrack "gwas" bc
-    render <- liftEffect do
+    render <- do
       chrLayers <- addChrLayers { coordinateSystem: cSys
                                 , segmentPadding: 12.0 }
                                 config.chrs gwasTC
@@ -530,11 +530,11 @@ runBrowser config bc = launchAff $ do
                 annoPeaks = annotationsForScale cSys sigSnps
                               gwasData.annotations segs
 
+
+            lastHotspots' <- track.lastHotspots
+            let clicked = lastHotspots' clickRadius p
+
             liftEffect do
-
-              lastHotspots' <- track.lastHotspots
-              let clicked = lastHotspots' clickRadius p
-
               case Array.head clicked of
                 Nothing -> cmdInfoBox IBoxHide
                 Just g  -> do
@@ -562,7 +562,7 @@ runBrowser config bc = launchAff $ do
           pure g
 
     geneTC <- getTrack "gene" bc
-    render <- liftEffect do
+    render <- do
       chrLayers <- addChrLayers { coordinateSystem: cSys
                                 , segmentPadding: 12.0 }
                                 config.chrs geneTC

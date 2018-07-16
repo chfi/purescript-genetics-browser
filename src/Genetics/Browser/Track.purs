@@ -13,8 +13,7 @@ import Prelude
 import Data.Pair (Pair)
 import Effect (Effect)
 import Effect.Aff (Aff)
-import Effect.Class (liftEffect)
-import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, trackContainer)
+import Genetics.Browser.Canvas (TrackContainer, trackContainer)
 import Genetics.Browser.Coordinates (CoordSysView)
 import Genetics.Browser.Layer (TrackPadding)
 import Genetics.Browser.Types (Point)
@@ -29,7 +28,7 @@ import Type.Prelude (class IsSymbol, class TypeEquals, RLProxy(..), SProxy(..), 
 
 type TrackInterface a =
   { render   :: Pair Number -> CoordSysView -> Aff Unit
-  , hotspots :: Effect (Number -> Point -> Array a) }
+  , hotspots :: Aff (Number -> Point -> Array a) }
 
 class TrackRecord
       (trackList :: RowList)
@@ -41,15 +40,15 @@ class TrackRecord
              -> Record trackRow
              -> TrackContainer
              -> Aff { render   :: Pair Number -> CoordSysView -> Aff Unit
-                    , hotspots :: Effect (Number -> Point -> Array a) }
+                    , hotspots :: Aff (Number -> Point -> Array a) }
 
 
 instance trackRecordRender ::
   ( IsSymbol  name
   , Row.Lacks name trackRow'
-  , Row.Cons  name (Pair Number -> CoordSysView -> Effect Unit) trackRow' trackRow
+  , Row.Cons  name (Pair Number -> CoordSysView -> Aff Unit) trackRow' trackRow
   , TrackRecord trackTail trackRow' a
-  ) => TrackRecord (Cons name (Pair Number -> CoordSysView -> Effect Unit) trackTail) trackRow a where
+  ) => TrackRecord (Cons name (Pair Number -> CoordSysView -> Aff Unit) trackTail) trackRow a where
   buildTrack _ r tcont = do
 
     let name = SProxy :: SProxy name
@@ -57,7 +56,7 @@ instance trackRecordRender ::
     rest <- buildTrack (RLProxy :: RLProxy trackTail)
                        (delete name r) tcont
 
-    let rLayer p c = liftEffect $ (get name r) p c
+    let rLayer p c = (get name r) p c
 
     pure { render:   rLayer <> rest.render
          , hotspots: rest.hotspots }
@@ -66,9 +65,9 @@ instance trackRecordRender ::
 instance trackRecordUI ::
   ( IsSymbol  name
   , Row.Lacks name trackRow'
-  , Row.Cons  name (Effect Unit) trackRow' trackRow
+  , Row.Cons  name (Aff Unit) trackRow' trackRow
   , TrackRecord trackTail trackRow' a
-  ) => TrackRecord (Cons name (Effect Unit) trackTail) trackRow a where
+  ) => TrackRecord (Cons name (Aff Unit) trackTail) trackRow a where
   buildTrack _ r tcont = do
 
     let name = SProxy :: SProxy name
@@ -76,7 +75,7 @@ instance trackRecordUI ::
     rest <- buildTrack (RLProxy :: RLProxy trackTail)
                        (delete name r) tcont
 
-    let rLayer _ _ = liftEffect $ (get name r)
+    let rLayer _ _ = (get name r)
 
     pure { render:   rLayer <> rest.render
          , hotspots: rest.hotspots }
@@ -84,10 +83,10 @@ instance trackRecordUI ::
 instance trackRecordHotspots ::
   ( IsSymbol  name
   , Row.Lacks name trackRow'
-  , Row.Cons  name (Effect (Number -> pt -> Array a)) trackRow' trackRow
+  , Row.Cons  name (Aff (Number -> pt -> Array a)) trackRow' trackRow
   , TypeEquals pt Point
   , TrackRecord trackTail trackRow' a
-  ) => TrackRecord (Cons name (Effect (Number -> pt -> Array a)) trackTail) trackRow a where
+  ) => TrackRecord (Cons name (Aff (Number -> pt -> Array a)) trackTail) trackRow a where
   buildTrack _ r tcont = do
 
     let name = SProxy :: SProxy name
