@@ -77,7 +77,7 @@ renderGenes geneData _ segs size =
                   pure $ foldMap (drawGene size seg) genes
 
   in  (inj _bigDrawing <$> output.bigDrawing)
-   <> (inj _labels  <$> (pure $ Array.fromFoldable output.label))
+   <> (pure $ inj _labels $ output.label)
 
 
 drawGene :: Canvas.Dimensions
@@ -500,7 +500,8 @@ renderAnnotationPeaks :: ∀ r1 r2.
                       -> Map ChrId (Array (Peak Bp Number (Annotation r2)))
                       -> Canvas.Dimensions
                       -> Map ChrId (Pair Number)
-                      -> { drawingBatch :: Array BatchDrawing, labels :: Array Label }
+                      -> { drawingBatch :: Array BatchDrawing
+                         , labels :: List Label }
 renderAnnotationPeaks cSys vScale conf annoPks cdim =
   let
 
@@ -537,7 +538,7 @@ renderAnnotationPeaks cSys vScale conf annoPks cdim =
 
 
       drawAndLabel :: Peak Number Number (Annotation r2)
-                   -> Tuple (Array BatchDrawing) (Array Label)
+                   -> Tuple (Array BatchDrawing) (List Label)
       drawAndLabel aPeak = Tuple [drawing] label
         where
               (Pair l r) = aPeak.covers
@@ -568,15 +569,14 @@ renderAnnotationPeaks cSys vScale conf annoPks cdim =
 
               label = Tuple.snd $ foldr f (Tuple y0 mempty) aPeak.elements
               f a (Tuple y ls) = Tuple (y - labelOffset)
-                                    $ Array.snoc ls
-                                         { text: fromMaybe a.feature.name a.feature.gene
-                                         , point: { x, y }
-                                         , gravity: g
-                                         }
+                                    $ List.Cons { text: fromMaybe a.feature.name a.feature.gene
+                                                , point: { x, y }
+                                                , gravity: g
+                                                } ls
 
 
       drawAndLabelAll :: Map ChrId (Array (Peak _ _ _))
-                      -> Tuple (Array BatchDrawing) (Array Label)
+                      -> Tuple (Array BatchDrawing) (List Label)
       drawAndLabelAll pks = foldMap (foldMap drawAndLabel) pks
 
 

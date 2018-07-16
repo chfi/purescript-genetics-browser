@@ -57,6 +57,7 @@ import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Unfoldable (unfoldr)
 import Data.Variant (Variant, case_, onMatch)
+import Data.Witherable (wither)
 import Effect (Effect)
 import Effect.Aff (Aff, delay, error, throwError)
 import Effect.Aff.Class (class MonadAff, liftAff)
@@ -577,9 +578,13 @@ labelFont :: String
 labelFont = Drawing.fontString $ Drawing.font sansSerif labelFontSize mempty
 
 -- | Calculate the rectangle covered by a label when it'd be rendered
--- | to a provided canvas context
-labelBox :: Context2D -> Label -> Effect Canvas.Rectangle
-labelBox ctx {text, point, gravity} = do
+-- | to a provided canvas context, filtering by a horizontal range of pixels
+labelBox :: Pair Number
+         -> Context2D
+         -> Label
+         -> Effect (Maybe Canvas.Rectangle)
+labelBox (Pair minX maxX) ctx {text, point, gravity} = do
+
   {width} <- Canvas.withContext ctx do
     _ <- Canvas.setFont ctx labelFont
     Canvas.measureText ctx text
@@ -592,9 +597,12 @@ labelBox ctx {text, point, gravity} = do
         LLeft   -> point.x - pad
         LRight  -> point.x + pad
 
-  pure $ { x
-         , y: point.y - height
-         , width, height }
+  pure $ if x < maxX && x+width > minX
+    then pure $ { x, y: point.y - height
+                , width, height }
+    else Nothing
+
+
 
 
 -- | Returns `true` if the input rectangles overlap
@@ -609,23 +617,28 @@ isOverlapping r1 r2 =
 
 
 appendBoxed :: ∀ r.
-               Array {rect :: Canvas.Rectangle | r}
+               List {rect :: Canvas.Rectangle | r}
             -> {rect :: Canvas.Rectangle | r}
-            -> Array {rect :: Canvas.Rectangle | r}
+            -> List {rect :: Canvas.Rectangle | r}
 appendBoxed sofar next =
   let overlapsAny :: Boolean
       overlapsAny = any overlaps sofar
         where overlaps r' = (not $ next.rect == r'.rect)
                             && next.rect `isOverlapping` r'.rect
-  in if overlapsAny then sofar else sofar <> [next]
+  in if overlapsAny then sofar else List.Cons next sofar
 
 
-renderLabels :: Array Label -> Context2D -> Effect Unit
-renderLabels ls ctx = do
+renderLabels :: Pair Number
+             -> List Label
+             -> Context2D
+             -> Effect Unit
+renderLabels vis ls' ctx = do
 
-  boxed <- traverse (\l -> {text: l.text, rect: _} <$> labelBox ctx l) ls
+  boxed <- wither (\lb -> map {text: lb.text, rect: _}
+                          <$> labelBox vis ctx lb) ls'
 
-  let toRender = foldl appendBoxed [] boxed
+  let toRender = foldl appendBoxed mempty boxed
+
 
   Canvas.withContext ctx do
     _ <- Canvas.setFont ctx labelFont
@@ -663,10 +676,10 @@ type BigDrawing = { drawing :: Unit -> Drawing
                   , bottomRight :: Point }
 
 type Renderable =
-  Variant ( drawing   :: Drawing
-          , bigDrawing :: BigDrawing
+  Variant ( drawing      :: Drawing
+          , bigDrawing   :: BigDrawing
           , drawingBatch :: Array BatchDrawing
-          , labels   :: Array Label )
+          , labels       :: List Label )
 
 _drawing      = SProxy :: SProxy "drawing"
 _bigDrawing      = SProxy :: SProxy "bigDrawing"
@@ -773,8 +786,8 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
             drawingBatch ds = liftEffect $ for_ ds
                             $ renderGlyphs (_.glyphBuffer $ unwrap bc) ctx (Pair l r)
 
-            labels :: Array Label -> m Unit
-            labels ls = liftEffect $ renderLabels ls ctx
+            labels :: List Label -> m Unit
+            labels ls = liftEffect $ renderLabels (Pair l r) ls ctx
 
         let chunkSize = 100
 
