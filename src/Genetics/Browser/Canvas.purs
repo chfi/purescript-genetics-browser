@@ -5,12 +5,14 @@ module Genetics.Browser.Canvas
        ( TrackContainer
        , Renderable
        , BatchDrawing
+       , BigDrawing
        , ContentLayer
        , RenderableLayer
        , RenderableLayerHotspots
        , Label
        , LabelPlace(..)
        , _drawing
+       , _bigDrawing
        , _drawingBatch
        , _labels
        , createAndAddLayer
@@ -53,9 +55,10 @@ import Data.Symbol (SProxy(..))
 import Data.Traversable (traverse, traverse_)
 import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
+import Data.Unfoldable (unfoldr)
 import Data.Variant (Variant, case_, onMatch)
 import Effect (Effect)
-import Effect.Aff (Aff, error, throwError)
+import Effect.Aff (Aff, delay, error, throwError)
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Class.Console (log)
@@ -655,15 +658,20 @@ _Static = prism' Static $ case _ of
   Buffer _  -> Nothing
 
 type BatchDrawing = { drawing :: Drawing, points :: Array Point }
+type BigDrawing = { drawing :: Unit -> Drawing
+                  , topLeft :: Point
+                  , bottomRight :: Point }
 
 type Renderable =
   Variant ( drawing   :: Drawing
+          , bigDrawing :: BigDrawing
           , drawingBatch :: Array BatchDrawing
           , labels   :: Array Label )
 
-_drawing   = SProxy :: SProxy "drawing"
+_drawing      = SProxy :: SProxy "drawing"
+_bigDrawing      = SProxy :: SProxy "bigDrawing"
 _drawingBatch = SProxy :: SProxy "drawingBatch"
-_labels   = SProxy :: SProxy "labels"
+_labels       = SProxy :: SProxy "labels"
 
 
 
@@ -753,6 +761,13 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
             drawing :: Drawing -> m Unit
             drawing d = liftEffect $ Drawing.render ctx d
 
+            bigDrawing :: BigDrawing -> m Unit
+            bigDrawing d = liftEffect do
+              when (d.topLeft.x <= r && d.bottomRight.x >= l) do
+                Drawing.render ctx
+                  $ Drawing.translate d.topLeft.x d.topLeft.y
+                  $ d.drawing unit
+
             drawingBatch :: Array { drawing :: Drawing, points :: Array Point }
                      -> m Unit
             drawingBatch ds = liftEffect $ for_ ds
@@ -761,8 +776,21 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
             labels :: Array Label -> m Unit
             labels ls = liftEffect $ renderLabels ls ctx
 
-        for_ renderables
-          $ case_ # onMatch { drawing, drawingBatch, labels }
+        let chunkSize = 100
+
+            chunkF l = if List.null l
+                       then Nothing
+                       else Just (Tuple (List.take chunkSize l) (List.drop chunkSize l))
+
+            chunks :: List _
+            chunks = unfoldr chunkF renderables
+
+        for_ chunks \c -> do
+
+          for_ c \d -> do
+            case_ # onMatch { drawing, bigDrawing, drawingBatch, labels } $ d
+
+          liftAff $ delay $ wrap 0.01
 
   pure { render, drawOnCanvas, lastHotspots }
 

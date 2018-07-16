@@ -31,8 +31,6 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Tuple as Tuple
 import Data.Unfoldable (unfoldr)
 import Data.Variant (inj)
-import Debug.Trace as Debug
-import Effect (Effect)
 import Effect.Aff (Aff, error)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
@@ -42,9 +40,10 @@ import Foreign.Index (readProp) as Foreign
 import Foreign.Keys (keys) as Foreign
 import Genetics.Browser (Feature, HexColor, LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, thresholdRuler, trackLegend, trackLikeLayer)
 import Genetics.Browser.Bed (BedFeature)
-import Genetics.Browser.Canvas (BatchDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _drawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer)
+import Genetics.Browser.Canvas (BatchDrawing, BigDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _bigDrawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer)
+import Genetics.Browser.Canvas (BatchDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, BigDrawing, _bigDrawing, _drawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, aroundPair, normalize, pairSize, pairsOverlap)
-import Genetics.Browser.Layer (Component(Center, CRight, CLeft), Layer(..), LayerMask(..), LayerType(..), TrackPadding)
+import Genetics.Browser.Layer (Component(..), Layer(..), LayerMask(..), LayerType(..), TrackPadding)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
@@ -77,14 +76,14 @@ renderGenes geneData _ segs size =
                   seg <- Map.lookup chr segs
                   pure $ foldMap (drawGene size seg) genes
 
-  in  (inj _drawing <$> output.drawing)
+  in  (inj _bigDrawing <$> output.bigDrawing)
    <> (inj _labels  <$> (pure $ Array.fromFoldable output.label))
 
 
 drawGene :: Canvas.Dimensions
          -> Pair Number
          -> BedFeature
-         -> { drawing :: List Drawing, label :: List Label }
+         -> { bigDrawing :: List BigDrawing, label :: List Label }
 drawGene size seg gene =
   let (Pair l r) = gene.position
       segWidth = pairSize seg
@@ -94,43 +93,42 @@ drawGene size seg gene =
 
       exon block =
         let p@(Pair exL' size') = toLocal <$> block
-            s = rectangle exL' zero size' 30.0
-        in (outlined (outlineColor darkgrey <> lineWidth 1.0) s)
-        <> (filled (fillColor lightgrey) s)
+            s = if size' < one then mempty else rectangle exL' zero size' 30.0
+        in s
+
+      exons _ = let s' = foldMap exon gene.feature.blocks
+                in (outlined (outlineColor darkgrey <> lineWidth 1.0) s')
+                   <> (filled (fillColor lightgrey) s')
 
       introns _ =
         let s = rectangle 1.5 14.0 (width-1.5) 2.0
         in outlined (outlineColor black <> lineWidth 3.0) s
         <> filled   (fillColor black) s
 
-      label _ =
-        if width < one
-        then mempty
-        else Drawing.text
-               (font sansSerif 12 mempty)
-                  (2.5) (35.0)
-                  (fillColor black) gene.feature.geneName
+      drawing _ =
+          introns unit
+          <> exons unit
 
 
-      -- drawing = introns unit
-      --        <> foldMap exon gene.feature.blocks
-      drawing =
-        if width < one
-        then mempty
-        else introns unit
-             <> foldMap exon gene.feature.blocks
+  in if width < one
+     then mempty
+     else let point :: Point
+              point =
+                let (Pair offset _) = seg
+                in { x: offset + (pairSize seg) * (unwrap $ featureNormX gene)
+                   , y: size.height * 0.5 }
 
 
-      point :: Point
-      point =
-        let (Pair offset _) = seg
-        in { x: offset + (pairSize seg) * (unwrap $ featureNormX gene)
-           , y: size.height * 0.5 }
+              topLeft = point
+              bottomRight = point + { x: width, y: 15.0 }
 
-  in { drawing: pure (Drawing.translate point.x point.y drawing)
-     , label:  pure { text: gene.feature.geneName
-                      , point
-                      , gravity: LCenter }  }
+          in { bigDrawing: pure { drawing
+                                , topLeft
+                                , bottomRight
+                                }
+             , label:   pure { text: gene.feature.geneName
+                             , point
+                             , gravity: LCenter }  }
 
 
 
