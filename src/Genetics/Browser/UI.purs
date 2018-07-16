@@ -38,7 +38,7 @@ import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (HexColor(..), LegendConfig, Peak, VScale, pixelSegments)
 import Genetics.Browser.Bed (getGenes)
-import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, _Container, addTrack, browserContainer, dragScroll, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, trackContainer, wheelZoom)
+import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, _Container, addTrack, browserContainer, dragScroll, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, trackContainer, wheelZoom, withLoadingIndicator)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, AnnotationsConfig, SNP, SNPConfig, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), TrackPadding, trackSlots)
@@ -499,11 +499,11 @@ runBrowser config bc = launchAff $ do
 
   gwasTrack <- forkAff do
 
-    gwasData <-
-      {snps:_, annotations:_}
-      <$> foldMap (getSNPs        cSys) config.urls.snps
-      <*> foldMap (getAnnotations cSys) config.urls.annotations
     gwasTC <- getTrack "gwas" bc
+    gwasData <- withLoadingIndicator gwasTC
+                $  {snps:_, annotations:_}
+               <$> foldMap (getSNPs        cSys) config.urls.snps
+               <*> foldMap (getAnnotations cSys) config.urls.annotations
     render <- do
       chrLayers <- addChrLayers { coordinateSystem: cSys
                                 , segmentPadding: 12.0 }
@@ -553,7 +553,8 @@ runBrowser config bc = launchAff $ do
 
   geneTrack <- forkAff do
 
-    genes <- case config.urls.genes of
+    geneTC <- getTrack "gene" bc
+    genes <- withLoadingIndicator geneTC case config.urls.genes of
         Nothing  -> throwError $ error "no genes configured"
         Just url -> do
           log $ "fetching genes"
@@ -561,7 +562,6 @@ runBrowser config bc = launchAff $ do
           log $ "genes fetched: " <> show (sum $ Array.length <$> g)
           pure g
 
-    geneTC <- getTrack "gene" bc
     render <- do
       chrLayers <- addChrLayers { coordinateSystem: cSys
                                 , segmentPadding: 12.0 }

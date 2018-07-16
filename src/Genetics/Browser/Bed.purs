@@ -195,7 +195,6 @@ getGenes cs url = do
                  else Just (Tuple (List.take chunkSize l) (List.drop chunkSize l))
 
       chunks = unfoldr chunkF
-               $ List.take 5000
                $ List.fromFoldable array
 
   let process :: List Foreign -> Aff _

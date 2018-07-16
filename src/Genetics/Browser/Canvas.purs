@@ -24,6 +24,7 @@ module Genetics.Browser.Canvas
        , wheelZoom
        , trackClickHandler
        , trackContainer
+       , withLoadingIndicator
        , setTrackContainerSize
        , setElementStyle
        , BrowserContainer
@@ -78,6 +79,7 @@ import Record as Record
 import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM (Element)
 import Web.DOM.Document (createElement)
+import Web.DOM.Element as Element
 import Web.DOM.Node as DOM
 
 
@@ -455,6 +457,23 @@ trackContainer size padding name = do
   pure $
     TrackContainer
       { layers, dimensions, element, glyphBuffer }
+
+
+withLoadingIndicator :: ∀ m a.
+                         MonadEffect m
+                      => TrackContainer
+                      -> m a
+                      -> m a
+withLoadingIndicator tc cb = do
+  let nd = Element.toNode $ tc ^. _Container
+
+  liftEffect $ DOM.setTextContent "loading" nd
+  val <- cb
+  liftEffect $ DOM.setTextContent "" nd
+  pure val
+
+
+
 
 
 -- | Set the CSS z-indices of the Layers in the track, so their
