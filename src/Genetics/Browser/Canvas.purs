@@ -38,7 +38,7 @@ import Prelude
 
 import Data.Array as Array
 import Data.Either (Either(..))
-import Data.Filterable (filterMap)
+import Data.Filterable (filter, filterMap)
 import Data.Foldable (any, foldl, for_, length)
 import Data.Int as Int
 import Data.Lens (Getter', Lens', Prism', preview, prism', to, (^.))
@@ -53,12 +53,11 @@ import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
 import Data.Symbol (SProxy(..))
-import Data.Traversable (traverse, traverse_)
+import Data.Traversable (for, traverse_)
 import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Unfoldable (unfoldr)
 import Data.Variant (Variant, case_, onMatch)
-import Data.Witherable (wither)
 import Effect (Effect)
 import Effect.Aff (Aff, delay, error, throwError)
 import Effect.Aff.Class (class MonadAff, liftAff)
@@ -78,7 +77,6 @@ import Partial.Unsafe (unsafeCrashWith)
 import Record as Record
 import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM (Element)
-import Web.DOM.Document (createElement)
 import Web.DOM.Element as Element
 import Web.DOM.Node as DOM
 
@@ -601,8 +599,9 @@ labelFont = Drawing.fontString $ Drawing.font sansSerif labelFontSize mempty
 labelBox :: Pair Number
          -> Context2D
          -> Label
-         -> Effect (Maybe Canvas.Rectangle)
+         -> Effect Canvas.Rectangle
 labelBox (Pair minX maxX) ctx {text, point, gravity} = do
+
 
   {width} <- Canvas.withContext ctx do
     _ <- Canvas.setFont ctx labelFont
@@ -616,11 +615,8 @@ labelBox (Pair minX maxX) ctx {text, point, gravity} = do
         LLeft   -> point.x - pad
         LRight  -> point.x + pad
 
-  pure $ if x < maxX && x+width > minX
-    then pure $ { x, y: point.y - height
-                , width, height }
-    else Nothing
-
+  pure { x, y: point.y - height
+       , width, height }
 
 
 
@@ -647,17 +643,21 @@ appendBoxed sofar next =
   in if overlapsAny then sofar else List.Cons next sofar
 
 
+
+
 renderLabels :: Pair Number
              -> List Label
              -> Context2D
              -> Effect Unit
-renderLabels vis ls' ctx = do
+renderLabels vis@(Pair minX maxX) ls' ctx = do
 
-  boxed <- wither (\lb -> map {text: lb.text, rect: _}
-                          <$> labelBox vis ctx lb) ls'
+  let arr = filter (\l -> l.point.x < maxX && l.point.x+100.0 > minX)
+            $ Array.fromFoldable ls'
+
+  boxed <- for arr \lb -> {text: lb.text, rect: _}
+                          <$> labelBox vis ctx lb
 
   let toRender = foldl appendBoxed mempty boxed
-
 
   Canvas.withContext ctx do
     _ <- Canvas.setFont ctx labelFont
