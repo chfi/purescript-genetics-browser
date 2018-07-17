@@ -17,7 +17,7 @@ import Data.Function (on)
 import Data.FunctorWithIndex (mapWithIndex)
 import Data.Lens (re, view, (^.))
 import Data.Lens.Lens.Tuple (_2)
-import Data.List (List)
+import Data.List (List, (:))
 import Data.List as List
 import Data.Map (Map)
 import Data.Map as Map
@@ -70,20 +70,28 @@ renderGenes :: Map ChrId (Array BedFeature)
             -> List Renderable
 renderGenes geneData _ segs size =
   let
-      output = foldMapWithIndex f geneData
+      chunks :: Map ChrId (Array _ )
+      chunks = mapWithIndex f geneData
         where f :: ChrId -> Array BedFeature -> _
               f chr genes = fromMaybe mempty do
                   seg <- Map.lookup chr segs
-                  pure $ foldMap (drawGene size seg) genes
+                  pure $ filterMap (drawGene size seg) genes
 
-  in  (inj _bigDrawing <$> output.bigDrawing)
-   <> (pure $ inj _labels $ output.label)
+      output :: Tuple (List Renderable) (List Label)
+      output = foldMap (foldr f mempty) chunks
+        where
+              f :: _ -> Tuple _ _ -> Tuple _ _
+              f r (Tuple rs ls) = Tuple (inj _bigDrawing r.bigDrawing : rs)
+                                           (r.label : ls)
+
+  in (inj _labels $ Tuple.snd output)
+     : (Tuple.fst output)
 
 
 drawGene :: Canvas.Dimensions
          -> Pair Number
          -> BedFeature
-         -> { bigDrawing :: List BigDrawing, label :: List Label }
+         -> Maybe { bigDrawing :: BigDrawing, label :: Label }
 drawGene size seg gene =
   let (Pair l r) = gene.position
       segWidth = pairSize seg
@@ -93,10 +101,11 @@ drawGene size seg gene =
 
       exon block =
         let p@(Pair exL' size') = toLocal <$> block
-            s = if size' < one then mempty else rectangle exL' zero size' 30.0
-        in s
+        in rectangle exL' zero size' 30.0
 
-      exons _ = let s' = foldMap exon gene.feature.blocks
+      exonSize b = Pair.snd $ toLocal <$> b
+
+      exons _ = let s' = foldMap exon $ filter (\b -> exonSize b > one) gene.feature.blocks
                 in (outlined (outlineColor darkgrey <> lineWidth 1.0) s')
                    <> (filled (fillColor lightgrey) s')
 
@@ -111,7 +120,7 @@ drawGene size seg gene =
 
 
   in if width < one
-     then mempty
+     then Nothing
      else let point :: Point
               point =
                 let (Pair offset _) = seg
@@ -122,11 +131,11 @@ drawGene size seg gene =
               topLeft = point
               bottomRight = point + { x: width, y: 15.0 }
 
-          in { bigDrawing: pure { drawing
+          in pure { bigDrawing: { drawing
                                 , topLeft
                                 , bottomRight
                                 }
-             , label:   pure { text: gene.feature.geneName
+                  , label:   { text: gene.feature.geneName
                              , point
                              , gravity: LCenter }  }
 
