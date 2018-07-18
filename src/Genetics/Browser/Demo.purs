@@ -38,7 +38,7 @@ import Foreign (F, Foreign, ForeignError(ForeignError))
 import Foreign (readArray) as Foreign
 import Foreign.Index (readProp) as Foreign
 import Foreign.Keys (keys) as Foreign
-import Genetics.Browser (Feature, HexColor, LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, thresholdRuler, trackLegend, trackLikeLayer)
+import Genetics.Browser (Feature, HexColor, LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, thresholdRuler, trackLegend, trackLikeLayer, trackLikeLayerOpt)
 import Genetics.Browser.Bed (BedFeature)
 import Genetics.Browser.Canvas (BatchDrawing, BigDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _bigDrawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer)
 import Genetics.Browser.Canvas (BatchDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, BigDrawing, _bigDrawing, _drawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer)
@@ -46,9 +46,8 @@ import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, aroundPa
 import Genetics.Browser.Layer (Component(..), Layer(..), LayerMask(..), LayerType(..), TrackPadding)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
-import Graphics.Drawing (Drawing, Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
+import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
-import Graphics.Drawing.Font (font, sansSerif)
 import Math as Math
 import Network.HTTP.Affjax (get) as Affjax
 import Network.HTTP.Affjax.Response (json) as Affjax
@@ -70,22 +69,24 @@ renderGenes :: Map ChrId (Array BedFeature)
             -> List Renderable
 renderGenes geneData _ segs size =
   let
-      chunks :: Map ChrId (Array _ )
-      chunks = mapWithIndex f geneData
-        where f :: ChrId -> Array BedFeature -> _
-              f chr genes = fromMaybe mempty do
+      geneData' :: List (Tuple ChrId (List BedFeature))
+      geneData' = Map.toUnfoldable
+              $ map List.fromFoldable
+              $ geneData
+
+      glyphs :: List {bigDrawing :: _, label :: _}
+      glyphs = List.concatMap f geneData'
+        where f :: Tuple ChrId (List BedFeature) -> _
+              f (Tuple chr genes) = fromMaybe mempty do
                   seg <- Map.lookup chr segs
                   pure $ filterMap (drawGene size seg) genes
 
-      output :: Tuple (List Renderable) (List Label)
-      output = foldMap (foldr f mempty) chunks
-        where
-              f :: _ -> Tuple _ _ -> Tuple _ _
-              f r (Tuple rs ls) = Tuple (inj _bigDrawing r.bigDrawing : rs)
-                                           (r.label : ls)
+      drawings :: List Renderable
+      drawings = map (inj _bigDrawing <<< _.bigDrawing) glyphs
+      labels :: Renderable
+      labels = inj _labels $ map _.label glyphs
 
-  in (inj _labels $ Tuple.snd output)
-     : (Tuple.fst output)
+  in labels : drawings
 
 
 drawGene :: Canvas.Dimensions
@@ -127,9 +128,9 @@ drawGene size seg gene =
                 in { x: offset + (pairSize seg) * (unwrap $ featureNormX gene)
                    , y: size.height * 0.5 }
 
-
               topLeft = point
-              bottomRight = point + { x: width, y: 15.0 }
+              bottomRight = { x: point.x + width
+                            , y: point.y + 15.0 }
 
           in pure { bigDrawing: { drawing
                                 , topLeft
@@ -758,7 +759,7 @@ addGeneLayers coordinateSystem config trackData tcont = do
 
       geneLayer :: _
       geneLayer =
-        trackLikeLayer conf (SProxy :: SProxy "genes")
+        trackLikeLayerOpt conf (SProxy :: SProxy "genes")
           (Center $ renderGenes trackData.genes)
 
   rGenes <-

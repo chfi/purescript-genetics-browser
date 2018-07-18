@@ -187,6 +187,20 @@ segmentsInPair :: ∀ i c.
 segmentsInPair cs x = Map.filter (any (_ `inPair` x)) $ cs ^. _Segments
 
 
+segmentsInPair' :: ∀ i c.
+                   Ord i
+                => Ord c
+                => CoordSys i c
+                -> Pair c
+                -> Segments i c
+segmentsInPair' cs (Pair vL vR) = Map.filter f $ cs ^. _Segments
+  where f (Pair l r)
+          | l < vL && r > vR = true
+          | l < vL && r < vL = false
+          | l > vR && r > vR = false
+          | otherwise = true
+
+
 
 newtype ViewScale = ViewScale { pixelWidth :: Number, coordWidth :: BigInt }
 
@@ -264,6 +278,17 @@ scaledSegments :: ∀ i.
                -> ViewScale
                -> Segments i Number
 scaledSegments cs scale = (map <<< map) (scaleToScreen scale) $ cs ^. _Segments
+
+
+scaledSegments' :: ∀ i.
+                   Ord i
+                => CoordSys i BigInt
+                -> CoordSysView
+                -> ViewScale
+                -> Segments i Number
+scaledSegments' cs csv scale =
+  (map <<< map) (scaleToScreen scale)
+  $ segmentsInPair' cs (unwrap csv)
 
 
 -- | Helper functions for translating and scaling pairs.

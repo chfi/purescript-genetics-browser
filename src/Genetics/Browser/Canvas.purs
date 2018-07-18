@@ -806,9 +806,10 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
                             $ renderGlyphs (_.glyphBuffer $ unwrap bc) ctx (Pair l r)
 
             labels :: List Label -> m Unit
-            labels ls = liftEffect $ renderLabels (Pair l r) ls ctx
+            labels ls = liftEffect do
+              renderLabels (Pair l r) ls ctx
 
-        let chunkSize = 100
+        let chunkSize = 250
 
             chunkF l = if List.null l
                        then Nothing

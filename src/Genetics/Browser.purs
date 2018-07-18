@@ -32,7 +32,7 @@ import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (inj)
 import Foreign (F, Foreign, ForeignError(..), readString)
 import Genetics.Browser.Canvas (ContentLayer, Renderable, RenderableLayer, _drawing)
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized, aroundPair, normalize, scaledSegments, viewScale, xPerPixel)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized, aroundPair, normalize, scaledSegments, scaledSegments', viewScale, xPerPixel)
 import Genetics.Browser.Layer (Component(CBottom), Layer(Layer), LayerMask(NoMask, Masked), LayerType(Fixed, Scrolling))
 import Genetics.Browser.Types (Bp, ChrId, _exp)
 import Graphics.Canvas (Dimensions) as Canvas
@@ -93,6 +93,17 @@ pixelSegments conf cSys trackDim csView =
        <$> scaledSegments cSys (viewScale trackDim csView)
 
 
+pixelSegmentsOpt :: ∀ r i.
+                  Ord i
+               => { segmentPadding :: Number | r }
+              -> CoordSys i BigInt
+              -> Canvas.Dimensions
+              -> CoordSysView
+              -> Map i (Pair Number)
+pixelSegmentsOpt conf cSys trackDim csView =
+  aroundPair (-conf.segmentPadding)
+       <$> (scaledSegments' cSys csView (viewScale trackDim csView))
+
 
 
 
@@ -107,6 +118,22 @@ trackLikeLayer :: ∀ a b l rC r1 r2.
 trackLikeLayer conf name com =
   let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
       segs = pixelSegments conf conf.coordinateSystem
+  in Layer Scrolling (Masked 5.0)
+       $ (\r c d -> r (get name c) (segs d c.view) d)
+      <$> com
+
+
+trackLikeLayerOpt :: ∀ a b l rC r1 r2.
+                   IsSymbol l
+                => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
+                => { segmentPadding :: Number
+                   , coordinateSystem :: CoordSys ChrId BigInt | rC }
+                -> SProxy l
+                -> Component (b -> TrackLike a)
+                -> ContentLayer (Record ( view :: CoordSysView | r2 )) a
+trackLikeLayerOpt conf name com =
+  let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
+      segs = pixelSegmentsOpt conf conf.coordinateSystem
   in Layer Scrolling (Masked 5.0)
        $ (\r c d -> r (get name c) (segs d c.view) d)
       <$> com
