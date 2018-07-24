@@ -8,26 +8,24 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
 import Data.Filterable (filterMap)
-import Data.Foldable (foldMap, length, sum)
+import Data.Foldable (foldMap, length)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
 import Data.Lens ((^.))
 import Data.Lens.Iso.Newtype (_Newtype)
-import Data.List (List)
-import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
-import Data.Newtype (over, unwrap, wrap)
+import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Symbol (SProxy(SProxy))
-import Data.Traversable (for_, traverse, traverse_)
+import Data.Traversable (for_, traverse_)
 import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Effect (Effect)
-import Effect.Aff (Aff, Fiber, Milliseconds, delay, forkAff, killFiber, launchAff, launchAff_, throwError)
+import Effect.Aff (Aff, Fiber, Milliseconds, forkAff, killFiber, launchAff, launchAff_)
 import Effect.Aff.AVar (AVar)
 import Effect.Aff.AVar as AVar
 import Effect.Class (liftEffect)
@@ -36,22 +34,21 @@ import Effect.Exception (error, throw)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
-import Genetics.Browser (HexColor(..), LegendConfig, Peak, VScale, pixelSegments)
-import Genetics.Browser.Bed (getGenes)
-import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, _Container, addTrack, browserContainer, dragScroll, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, trackContainer, wheelZoom, withLoadingIndicator)
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scalePairBy, scaleToScreen, translatePairBy, viewScale)
-import Genetics.Browser.Demo (Annotation, AnnotationField, AnnotationsConfig, SNP, SNPConfig, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
-import Genetics.Browser.Layer (Component(Center), TrackPadding, trackSlots)
+import Genetics.Browser (HexColor, Peak, pixelSegments)
+import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, _Container, addTrack, animateTrack, browserContainer, dragScroll, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom, withLoadingIndicator)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scaleToScreen, viewScale, xPerPixel)
+import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
+import Genetics.Browser.Layer (Component(Center), trackSlots)
 import Genetics.Browser.Track (class TrackRecord, makeContainers, makeTrack)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
+import Genetics.Browser.UI.View (Animation(..), UpdateView(..), updateViewFold)
+import Genetics.Browser.UI.View as View
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Point)
-import Math (pow)
 import Math as Math
 import Partial.Unsafe (unsafePartial)
 import Prim.RowList (class RowToList)
-import Record (insert)
 import Record as Record
 import Simple.JSON (read)
 import Unsafe.Coerce (unsafeCoerce)
@@ -125,7 +122,8 @@ initializeTrack cSys renderFuns initView bc = do
       queueCommand = flip AVar.put uiCmdVar
 
     -- hardcoded timeout for now
-  queueUpdateView <- liftEffect $ uiViewUpdate cSys (wrap 30.0) {view: trackView, uiCmd: uiCmdVar}
+  queueUpdateView <- liftEffect $ uiViewUpdate cSys { trackContainer: bc } (wrap 30.0) {view: trackView, uiCmd: uiCmdVar}
+
 
   let mainLoop = do
         uiCmd <- AVar.take uiCmdVar
@@ -168,83 +166,73 @@ initializeTrack cSys renderFuns initView bc = do
        , queueUpdateView }
 
 
-data UpdateView =
-    ScrollView Number
-  | ZoomView Number
-  | ModView (Pair BigInt -> Pair BigInt)
-
-
-instance showUpdateView :: Show UpdateView where
-  show (ScrollView x) = "(Scroll by " <> show x <> ")"
-  show (ZoomView s) = "(Zoom by " <> show s <> ")"
-  show _ = "(ModView)"
-
-
-    -- TODO idk if this instance makes sense??? whatevs
-instance semigroupUpdateView :: Semigroup UpdateView where
-  append (ScrollView x1) (ScrollView x2) = ScrollView (x1 + x2)
-  append (ZoomView s1)   (ZoomView s2)   = ZoomView   (s1 * s2)
-  append _ y = y
-
-instance monoidUpdateView :: Monoid UpdateView where
-  mempty = ModView identity
-
-
-updateViewFold :: UpdateView
-               -> CoordSysView
-               -> CoordSysView
-updateViewFold uv = over CoordSysView case uv of
-  ZoomView   x -> (_ `scalePairBy`     x)
-  ScrollView x -> (_ `translatePairBy` x)
-  ModView f    -> f
-
 
 queueCmd :: ∀ a. AVar a -> a -> Effect Unit
 queueCmd av cmd = launchAff_ $ AVar.put cmd av
 
 
-foreign import onTimeout
-  :: Milliseconds
-  -> Effect Unit
-  -> Effect { run    :: Effect Unit
-            , cancel :: Effect Unit }
-
-
-animateDelta :: ∀ a a'.
-                Monoid a'
-             => (a' -> a -> a)
-             -> (a -> Effect Unit)
-             -> { current  :: Ref a
-                , velocity :: Ref a'
-                }
-             -> Milliseconds
-             -> Effect (a' -> Effect Unit)
-animateDelta update done refs timeout = do
-
-  comms <- onTimeout timeout do
-    vD <- Ref.read refs.velocity
-    Ref.write mempty refs.velocity
-    launchAff_ $ liftEffect do
-      Ref.modify (update vD) refs.current >>= done
-
-  pure \cmd -> do
-    Ref.modify_ (_ <> cmd) refs.velocity
-    comms.run
-
 uiViewUpdate :: ∀ c r.
                 CoordSys c BigInt
+             -> { trackContainer :: TrackContainer }
              -> Milliseconds
              -> { view  :: Ref CoordSysView
                 , uiCmd :: AVar (Variant UICmdR) | r }
              -> Effect (UpdateView -> Effect Unit)
-uiViewUpdate cs timeout {view, uiCmd} = do
-  let update vD = normalizeView cs (BigInt.fromInt 200000)
-                 <<< updateViewFold vD
-      done _ = launchAff_ $ AVar.put (inj _render unit) uiCmd
+uiViewUpdate cs { trackContainer } timeout {view, uiCmd} = do
 
-  velocity <- Ref.new mempty
-  animateDelta update done { current: view, velocity } timeout
+  position <- Ref.read view
 
+  trackDims <- _.center <<< trackSlots <$> getDimensions trackContainer
+
+  let width = trackDims.size.width
+
+      step :: UpdateView -> CoordSysView -> CoordSysView
+      step uv = normalizeView cs (BigInt.fromInt 200000)
+                 <<< updateViewFold uv
+
+      pixelClamps :: CoordSysView -> { left :: Number, right :: Number }
+      pixelClamps csv@(CoordSysView (Pair l r)) =
+        let vs     = viewScale trackDims.size csv
+            csSize = cs ^. _TotalSize
+            pxSize = (xPerPixel vs) * (BigInt.toNumber $ csSize)
+            left   = scaleToScreen vs l
+            right  = scaleToScreen vs (csSize - r)
+        in { left, right }
+
+      toPixels :: CoordSysView -> Number -> Number
+      toPixels csv x = let { left, right } = pixelClamps csv
+                           x' = width * x
+                       in if x' < zero then max (-left) x'
+                                       else min (right) x'
+
+      toPixelView :: _
+      toPixelView = unsafeCoerce unit
+
+      animate :: UpdateView -> CoordSysView -> View.Animation
+      animate uv csv = case uv of
+        ScrollView x -> Scrolling (toPixels csv x)
+        _  -> Jump
+        -- ZoomView   x -> Zooming   (toPixelView x)
+        -- ModView _    -> Jump
+
+
+      callback :: Either CoordSysView View.Animation -> Effect Unit
+      callback = case _ of
+        Right a -> animateTrack trackContainer a
+        Left  v -> do
+          Ref.write v view
+          launchAff_ $ AVar.put (inj _render unit) uiCmd
+
+
+      initial :: { position :: _, velocity :: UpdateView }
+      initial = { position, velocity: mempty }
+
+      timeouts :: _
+      timeouts = { step: wrap 10.0
+                 , done: wrap 500.0 }
+
+
+  View.animateDelta { step, animate } callback initial timeouts
 
 
 
@@ -482,11 +470,11 @@ runBrowser config bc = launchAff $ do
         keyUI (bc ^. _Container) { scrollMod: 0.075 } \u -> do
           track.queueUpdateView u
 
-        dragScroll bc \ {x,y} ->
+        dragScroll bc \ {x,y} -> do
           -- only do anything when scrolling at least a pixel
           when (Math.abs x >= one) do
             trackDims <- _.center <<< trackSlots <$> getDimensions tc
-            let cmd = ScrollView $ (-x) / trackDims.size.width
+            let cmd = ScrollView $ (x) / trackDims.size.width
             track.queueUpdateView cmd
 
         let scrollZoomScale = 0.06
@@ -550,10 +538,11 @@ runBrowser config bc = launchAff $ do
         $ Center glyphClick
 
 
-
   geneTrack <- forkAff do
 
+
     geneTC <- getTrack "gene" bc
+    {-
     genes <- withLoadingIndicator geneTC case config.urls.genes of
         Nothing  -> throwError $ error "no genes configured"
         Just url -> do
@@ -562,16 +551,19 @@ runBrowser config bc = launchAff $ do
           log $ "genes fetched: " <> show (sum $ Array.length <$> g)
           pure g
 
+    -}
+
     render <- do
       chrLayers <- addChrLayers { coordinateSystem: cSys
                                 , segmentPadding: 12.0 }
                                 config.chrs geneTC
-      geneLayers <- addGeneLayers cSys config.tracks.gene { genes } geneTC
-      pure $ Record.merge { chrs: chrLayers } geneLayers
+      geneLayers <- addGeneLayers cSys config.tracks.gene { genes: mempty } geneTC
+      pure { chrs: chrLayers }
+      -- pure $ Record.merge { chrs: chrLayers } geneLayers
 
     track <- initializeTrack cSys render initialView geneTC
-    setHandlers geneTC track
-
+    pure unit
+    -- setHandlers geneTC track
 
   pure unit
 
