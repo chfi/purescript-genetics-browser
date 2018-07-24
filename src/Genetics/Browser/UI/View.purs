@@ -3,19 +3,13 @@ module Genetics.Browser.UI.View where
 import Prelude
 
 import Data.BigInt (BigInt)
-import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
-import Data.Newtype (over, unwrap, wrap)
-import Data.Pair (Pair(..))
-import Data.Symbol (SProxy(..))
-import Data.Variant (Variant)
+import Data.Newtype (over)
+import Data.Pair (Pair)
 import Effect (Effect)
-import Effect.Aff (Milliseconds, launchAff_)
-import Effect.Class (liftEffect)
-import Effect.Class.Console (log)
-import Effect.Ref (Ref)
+import Effect.Aff (Milliseconds)
 import Effect.Ref as Ref
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), normalizeView, scalePairBy, translatePairBy)
+import Genetics.Browser.Coordinates (CoordSysView(..), scalePairBy, translatePairBy)
 
 foreign import onTimeout
   :: Milliseconds
@@ -68,75 +62,33 @@ data Animation =
 type ViewAnimation = Either Animation CoordSysView
 
 
-animateDelta' :: ∀ a a' b.
-                 Monoid a'
-              => (a' -> a -> { velocity :: a'
-                             , position :: a
-                             , output :: b })
-              -> (b -> Effect Unit)
-              -> { position :: a
-                 , velocity :: a' }
-              -> Milliseconds
-              -> Effect (a' -> Effect Unit)
-animateDelta' update cb initial timeout = do
-  velRef <- Ref.new initial.velocity
+animateDelta :: ∀ a a' b.
+                    Monoid a'
+             => { step    :: a' -> a -> a
+                , animate :: a' -> a -> b }
+             -> (Either a b -> Effect Unit)
+             -> { position :: a
+                , velocity :: a' }
+             -> { step :: Milliseconds
+                , done :: Milliseconds }
+             -> Effect (a' -> Effect Unit)
+animateDelta update cb initial timeout = do
+
   posRef <- Ref.new initial.position
+  velRef <- Ref.new initial.velocity
 
-  control <- onTimeout timeout do
-    vel <- Ref.read velRef
+  done <- onTimeout timeout.done do
     pos <- Ref.read posRef
-    let step = update vel pos
-    Ref.write step.velocity velRef
-    Ref.write step.position posRef
+    cb $ Left pos
 
-    cb step.output
+  comms <- onTimeout timeout.step do
+    vel <- Ref.read velRef
+    Ref.write mempty velRef
+    pos <- Ref.read posRef
+    Ref.write  (update.step vel pos) posRef
+    cb (Right $ update.animate vel pos)
+    done.run
 
   pure \cmd -> do
     Ref.modify_ (_ <> cmd) velRef
-    control.run
-
-
-uiViewUpdate' :: ∀ c r.
-                CoordSys c BigInt
-             -> Milliseconds
-             -> CoordSysView
-             -> (CoordSysView -> Effect Unit)
-             -> Effect (UpdateView -> Effect Unit)
-uiViewUpdate' cs timeout view cb = do
-  let done (Left x)  = cb x
-      done (Right a) = log "animating"
-
-  animateDelta' (viewUpdate' cs) done { position: view, velocity: mempty } timeout
-
-
-viewUpdate' :: CoordSys _ BigInt
-            -> UpdateView
-            -> CoordSysView
-            -> { velocity :: UpdateView
-               , position :: CoordSysView
-               , output   :: Either CoordSysView Animation }
-viewUpdate' cs uv curView =
-  let updatePosition vD = normalizeView cs (BigInt.fromInt 200000)
-                          <<< updateViewFold vD
-  in case uv of
-       sv@(ScrollView x) ->
-         let x' = x * 0.5
-             output =  if x' < 0.001 then Left curView
-                                     else Right $ Scrolling x
-             velocity = ScrollView x'
-             position = updatePosition sv curView
-         in { velocity, position, output }
-
-       zv@(ZoomView   z) ->
-         let z' = z * 0.5
-             output =  if z' < 0.001 then Left curView
-                                     else Right $ Zooming (Pair 0.25 0.75)
-             velocity = ZoomView z'
-             position = updatePosition zv curView
-         in { velocity, position, output }
-
-       ModView f ->
-         let position = wrap $ f $ unwrap curView
-         in { velocity: ModView identity
-            , position
-            , output: Left position }
+    comms.run

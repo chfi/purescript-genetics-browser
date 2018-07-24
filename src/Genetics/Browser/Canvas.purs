@@ -31,6 +31,7 @@ module Genetics.Browser.Canvas
        , browserContainer
        , addTrack
        , getTrack
+       , animateTrack
        ) where
 
 
@@ -53,6 +54,7 @@ import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
 import Data.Symbol (SProxy(..))
+import Data.Time.Duration (Milliseconds)
 import Data.Traversable (for, traverse_)
 import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
@@ -62,11 +64,11 @@ import Effect (Effect)
 import Effect.Aff (Aff, delay, error, throwError)
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
-import Effect.Class.Console (log)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Effect.Uncurried (EffectFn2, EffectFn3, EffectFn5, runEffectFn2, runEffectFn3, runEffectFn5)
 import Genetics.Browser.Layer (Component, Layer(Layer), LayerType(Scrolling, Fixed), TrackDimensions, TrackPadding, _Component, asSlot, setContextTranslation, slotContext, slotOffset, slotSize)
+import Genetics.Browser.UI.View as View
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -227,6 +229,22 @@ scrollTrack (TrackContainer bc) pt = do
   for_ scrolling \bc' -> scrollCanvas bc' pt
 
 
+animateCanvas :: BufferedCanvas
+              -> View.Animation
+              -> Effect Unit
+animateCanvas bc = case _ of
+  View.Scrolling x -> scrollCanvas bc {x: -x, y: zero}
+  View.Zooming   _ -> pure unit
+  View.Jump        -> pure unit
+
+animateTrack :: TrackContainer
+             -> View.Animation
+             -> Effect Unit
+animateTrack (TrackContainer tc) a = do
+  layers <- Ref.read tc.layers
+  let toAnimate = filterMap (preview _Buffer) layers
+  for_ toAnimate \bc' -> animateCanvas bc' a
+
 
 foreign import canvasDragImpl :: CanvasElement
                               -> ( { during :: Nullable Point
@@ -250,8 +268,8 @@ canvasDrag el f =
 
 
 -- | Takes a BrowserContainer and a callback function that is called
--- | with the total dragged distance, on each track, when a click &
--- | drag action is completed.
+-- | with the dragged distance each frame, on each track, when a click &
+-- | drag action is under way.
 dragScroll :: BrowserContainer
            -> (Point -> Effect Unit)
            -> Effect Unit
@@ -259,9 +277,8 @@ dragScroll (BrowserContainer bc) cb = do
   tracks <- Ref.read bc.tracks
 
   canvasDrag (unsafeCoerce bc.element) case _ of
-    Left  p -> cb p
-    Right p -> pure unit
-
+    Left  p -> pure unit
+    Right p -> cb p
 
 
 
@@ -361,17 +378,11 @@ browserContainer :: ∀ m.
                  => Element
                  -> m BrowserContainer
 browserContainer element = liftEffect do
-  -- el <- unsafeCreateElement { elementType: "div", id: "browserContainer" }
   tracks <- Ref.new mempty
 
-  -- add a callback to visually scroll all tracks in the browser, on click & drag
-  canvasDrag (unsafeCoerce element) case _ of
-    Left  _ -> pure unit
-    Right p -> do
-      ts <- Ref.read tracks
-      for_ ts \c -> scrollTrack c {x: -p.x, y: 0.0}
-
   pure $ BrowserContainer { tracks, element }
+
+
 
 getTrack :: String
          -> BrowserContainer
@@ -593,6 +604,7 @@ labelFontSize = 14
 
 labelFont :: String
 labelFont = Drawing.fontString $ Drawing.font sansSerif labelFontSize mempty
+
 
 -- | Calculate the rectangle covered by a label when it'd be rendered
 -- | to a provided canvas context, filtering by a horizontal range of pixels

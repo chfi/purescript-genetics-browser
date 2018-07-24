@@ -159,12 +159,3 @@ exports.canvasWheelCBImpl = function(canvas) {
         }
     };
 };
-
-
-exports.debugBrowserCanvas = function(k) {
-    return function(bc) {
-        return function() {
-            window[k] = bc;
-        };
-    };
-};
