@@ -2,13 +2,14 @@ module Genetics.Browser.UI where
 
 import Prelude
 
+import Control.Monad.Error.Class (throwError)
 import Data.Array as Array
 import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
 import Data.Filterable (filterMap)
-import Data.Foldable (foldMap, length)
+import Data.Foldable (foldMap, length, sum)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
@@ -35,8 +36,9 @@ import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (HexColor, Peak, pixelSegments)
+import Genetics.Browser.Bed (getGenes)
 import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, _Container, addTrack, animateTrack, browserContainer, dragScroll, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom, withLoadingIndicator)
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scaleToScreen, viewScale, xPerPixel)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scaleToScreen, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), trackSlots)
 import Genetics.Browser.Track (class TrackRecord, makeContainers, makeTrack)
@@ -193,10 +195,8 @@ uiViewUpdate cs { trackContainer } timeout {view, uiCmd} = do
       pixelClamps :: CoordSysView -> { left :: Number, right :: Number }
       pixelClamps csv@(CoordSysView (Pair l r)) =
         let vs     = viewScale trackDims.size csv
-            csSize = cs ^. _TotalSize
-            pxSize = (xPerPixel vs) * (BigInt.toNumber $ csSize)
             left   = scaleToScreen vs l
-            right  = scaleToScreen vs (csSize - r)
+            right  = scaleToScreen vs ((cs ^. _TotalSize) - r)
         in { left, right }
 
       toPixels :: CoordSysView -> Number -> Number
@@ -205,15 +205,20 @@ uiViewUpdate cs { trackContainer } timeout {view, uiCmd} = do
                        in if x' < zero then max (-left) x'
                                        else min (right) x'
 
-      toPixelView :: _
-      toPixelView = unsafeCoerce unit
+      toZoomRange :: CoordSysView -> Number -> Pair Number
+      toZoomRange (CoordSysView (Pair l r)) x =
+        let dx = (x - 1.0) / 2.0
+            l' = if l <= zero then 0.0
+                              else (-dx)
+            r' = if r >= (cs ^. _TotalSize) then 1.0
+                                            else 1.0 + dx
+        in Pair l' r'
 
       animate :: UpdateView -> CoordSysView -> View.Animation
       animate uv csv = case uv of
         ScrollView x -> Scrolling (toPixels csv x)
-        _  -> Jump
-        -- ZoomView   x -> Zooming   (toPixelView x)
-        -- ModView _    -> Jump
+        ZoomView   x -> Zooming   (toZoomRange csv x)
+        ModView _    -> Jump
 
 
       callback :: Either CoordSysView View.Animation -> Effect Unit
@@ -229,7 +234,7 @@ uiViewUpdate cs { trackContainer } timeout {view, uiCmd} = do
 
       timeouts :: _
       timeouts = { step: wrap 10.0
-                 , done: wrap 500.0 }
+                 , done: wrap 200.0 }
 
 
   View.animateDelta { step, animate } callback initial timeouts
@@ -542,7 +547,7 @@ runBrowser config bc = launchAff $ do
 
 
     geneTC <- getTrack "gene" bc
-    {-
+
     genes <- withLoadingIndicator geneTC case config.urls.genes of
         Nothing  -> throwError $ error "no genes configured"
         Just url -> do
@@ -551,19 +556,17 @@ runBrowser config bc = launchAff $ do
           log $ "genes fetched: " <> show (sum $ Array.length <$> g)
           pure g
 
-    -}
 
     render <- do
       chrLayers <- addChrLayers { coordinateSystem: cSys
                                 , segmentPadding: 12.0 }
                                 config.chrs geneTC
-      geneLayers <- addGeneLayers cSys config.tracks.gene { genes: mempty } geneTC
-      pure { chrs: chrLayers }
-      -- pure $ Record.merge { chrs: chrLayers } geneLayers
+      geneLayers <- addGeneLayers cSys config.tracks.gene { genes } geneTC
+      -- pure { chrs: chrLayers }
+      pure $ Record.merge { chrs: chrLayers } geneLayers
 
     track <- initializeTrack cSys render initialView geneTC
-    pure unit
-    -- setHandlers geneTC track
+    setHandlers geneTC track
 
   pure unit
 

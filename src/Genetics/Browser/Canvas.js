@@ -114,6 +114,33 @@ exports.scrollCanvasImpl = function(backCanvas, canvas, p) {
 };
 
 
+exports.zoomCanvasImpl = function(backCanvas, canvas, edges) {
+    var bCtx = backCanvas.getContext('2d');
+    bCtx.save();
+    bCtx.globalCompositeOperation = "copy";
+    bCtx.drawImage(canvas, 0, 0);
+    bCtx.restore();
+
+    var ctx = canvas.getContext('2d');
+
+    var width = canvas.width;
+    var height = canvas.height;
+
+    var sx = edges.left * width;
+    var sWidth = (edges.right - edges.left) * width
+
+    ctx.save();
+    ctx.globalCompositeOperation = "copy";
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.drawImage(backCanvas,
+                  sx, 0.0,
+                  sWidth, height,
+                  0.0, 0.0,
+                  width, height);
+    ctx.restore();
+};
+
+
 
 exports.canvasDragImpl = function(canvas) {
     return function(cb) {

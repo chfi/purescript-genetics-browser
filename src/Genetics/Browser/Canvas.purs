@@ -229,12 +229,29 @@ scrollTrack (TrackContainer bc) pt = do
   for_ scrolling \bc' -> scrollCanvas bc' pt
 
 
+foreign import zoomCanvasImpl :: EffectFn3
+                                 CanvasElement CanvasElement { left :: Number, right :: Number }
+                                 Unit
+
+-- | "Zoom" a buffered canvas such that the left and right edges of the
+-- | view (in canvas lengths) end up at the provided points.
+-- | E.g. (Pair 0.0 1.0) doesn't do anything, (Pair 0.4 0.6) zooms in
+-- | to the central 20% of the canvas.
+zoomCanvas :: BufferedCanvas
+           -> Pair Number
+           -> Effect Unit
+zoomCanvas (BufferedCanvas bc) (Pair left right) =
+  runEffectFn3 zoomCanvasImpl bc.back bc.front {left, right}
+
+
+
+
 animateCanvas :: BufferedCanvas
               -> View.Animation
               -> Effect Unit
 animateCanvas bc = case _ of
   View.Scrolling x -> scrollCanvas bc {x: -x, y: zero}
-  View.Zooming   _ -> pure unit
+  View.Zooming  ls -> zoomCanvas   bc ls
   View.Jump        -> pure unit
 
 animateTrack :: TrackContainer
