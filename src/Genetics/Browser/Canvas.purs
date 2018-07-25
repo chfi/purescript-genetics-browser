@@ -21,6 +21,7 @@ module Genetics.Browser.Canvas
        , getDimensions
        , _Container
        , dragScroll
+       , dragScrollTrack
        , wheelZoom
        , trackClickHandler
        , trackContainer
@@ -317,6 +318,14 @@ dragScroll (BrowserContainer bc) cb = do
     Left  p -> pure unit
     Right p -> cb p
 
+
+dragScrollTrack :: TrackContainer
+           -> (Point -> Effect Unit)
+           -> Effect Unit
+dragScrollTrack (TrackContainer tc) cb =
+  canvasDrag (unsafeCoerce tc.element) case _ of
+    Left  p -> pure unit
+    Right p -> cb p
 
 
 -- | Takes a TrackContainer and a callback function that is called with each

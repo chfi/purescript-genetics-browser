@@ -26,24 +26,22 @@ import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, case_, inj)
 import Data.Variant as V
 import Effect (Effect)
-import Effect.Aff (Aff, Fiber, Milliseconds, forkAff, killFiber, launchAff, launchAff_)
-import Effect.Aff.AVar (AVar)
+import Effect.Aff (Aff, Fiber, forkAff, killFiber, launchAff, launchAff_)
 import Effect.Aff.AVar as AVar
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
 import Effect.Exception (error, throw)
-import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (HexColor, Peak, pixelSegments)
 import Genetics.Browser.Bed (getGenes)
-import Genetics.Browser.Canvas (TrackAnimation(..), BrowserContainer, TrackContainer, _Container, addTrack, animateTrack, browserContainer, dragScroll, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom, withLoadingIndicator)
+import Genetics.Browser.Canvas (BrowserContainer, TrackAnimation(..), TrackContainer, _Container, addTrack, animateTrack, browserContainer, dragScroll, dragScrollTrack, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom, withLoadingIndicator)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scaleToScreen, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), trackSlots)
 import Genetics.Browser.Track (class TrackRecord, makeContainers, makeTrack)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
-import Genetics.Browser.UI.View (UpdateView(..), updateViewFold)
+import Genetics.Browser.UI.View (UpdateView(..))
 import Genetics.Browser.UI.View as View
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
@@ -86,15 +84,23 @@ foreign import resizeEvent :: ({ width  :: Number
                            -> Effect Unit
 
 
+type UICmdR = ( render :: Unit
+              , setView :: CoordSysView
+              , docResize :: { width :: Number, height :: Number } )
+
+
+
+
+_render = SProxy :: SProxy "render"
+_setView = SProxy :: SProxy "setView"
+_docResize = SProxy :: SProxy "docResize"
 
 -- | The value returned by the function that initializes the genome browser;
 -- | provides an interface to the running track instance.
 type TrackInterface a
-  = { getView          :: Effect CoordSysView
-    , container        :: TrackContainer
+  = { container        :: TrackContainer
     , lastHotspots     :: Aff (Number -> Point -> Array a)
     , queueCommand     :: Variant UICmdR -> Aff Unit
-    , queueUpdateView  :: UpdateView -> Effect Unit
     }
 
 
@@ -120,28 +126,30 @@ initializeTrack cSys renderFuns initView bc = do
 
   track <- makeTrack renderFuns bc
 
-  let getView = Ref.read trackView
-      queueCommand = flip AVar.put uiCmdVar
-
-    -- hardcoded timeout for now
-  queueUpdateView <- liftEffect $ uiViewUpdate cSys { trackContainer: bc } (wrap 30.0) {view: trackView, uiCmd: uiCmdVar}
+  let queueCommand = flip AVar.put uiCmdVar
 
 
   let mainLoop = do
         uiCmd <- AVar.take uiCmdVar
         case_ # V.on _render (\_ -> pure unit)
+
+              # V.on _setView (\csv -> do
+                      liftEffect $ Ref.write csv trackView
+                      queueCommand $ inj _render unit)
+
               # V.on _docResize (\ {width} -> do
                       {height} <- _.size <$> getDimensions bc
                       setTrackContainerSize {width, height} bc
                       queueCommand $ inj _render unit
                       mainLoop)
+
               $ uiCmd
 
         -- if there's a rendering fiber running, we kill it
         traverse_ (killFiber (error "Resetting renderer"))
           =<< AVar.tryTake renderFiberVar
 
-        csView <- liftEffect $ getView
+        csView <- liftEffect $ Ref.read trackView
 
         currentDims <- getDimensions bc
 
@@ -161,74 +169,9 @@ initializeTrack cSys renderFuns initView bc = do
 
   queueCommand $ inj _render unit
 
-  pure { getView
-       , container: bc
+  pure { container: bc
        , lastHotspots: track.hotspots
-       , queueCommand
-       , queueUpdateView }
-
-
-
-queueCmd :: ∀ a. AVar a -> a -> Effect Unit
-queueCmd av cmd = launchAff_ $ AVar.put cmd av
-
-
-uiViewUpdate :: ∀ c r.
-                CoordSys c BigInt
-             -> { trackContainer :: TrackContainer }
-             -> Milliseconds
-             -> { view  :: Ref CoordSysView
-                , uiCmd :: AVar (Variant UICmdR) | r }
-             -> Effect (UpdateView -> Effect Unit)
-uiViewUpdate cs { trackContainer } timeout {view, uiCmd} = do
-
-  position <- Ref.read view
-
-
-  let step :: UpdateView -> CoordSysView -> CoordSysView
-      step uv = normalizeView cs (BigInt.fromInt 200000)
-                 <<< updateViewFold uv
-
-
-      toZoomRange :: CoordSysView -> Number -> Pair Number
-      toZoomRange (CoordSysView (Pair l r)) x =
-        let dx = (x - 1.0) / 2.0
-            l' = if l <= zero then 0.0
-                              else (-dx)
-            r' = if r >= (cs ^. _TotalSize) then 1.0
-                                            else 1.0 + dx
-        in Pair l' r'
-
-      toLengths :: CoordSysView -> Number -> Number
-      toLengths (CoordSysView (Pair l r)) x =
-        if x < zero then (if l <= zero then 0.0 else x)
-                    else (if r >= (cs ^. _TotalSize) then 0.0 else x)
-
-      animate :: UpdateView -> CoordSysView -> TrackAnimation
-      animate uv csv = case uv of
-        ScrollView x -> Scrolling (toLengths csv x)
-        ZoomView   x -> Zooming   (toZoomRange csv x)
-        ModView _    -> Jump
-
-
-      callback :: Either CoordSysView TrackAnimation -> Effect Unit
-      callback = case _ of
-        Right a -> animateTrack trackContainer a
-        Left  v -> do
-          Ref.write v view
-          launchAff_ $ AVar.put (inj _render unit) uiCmd
-
-
-      initial :: { position :: _, velocity :: UpdateView }
-      initial = { position, velocity: mempty }
-
-      timeouts :: _
-      timeouts = { step: wrap 10.0
-                 , done: wrap 200.0 }
-
-
-  View.animateDelta' { step, animate } callback initial timeouts
-
+       , queueCommand }
 
 
 btnUI :: { scrollMod :: Number, zoomMod :: Number }
@@ -251,31 +194,6 @@ keyUI el mods cb = keydownEvent el f
           "ArrowLeft"  -> cb $ ScrollView (-mods.scrollMod)
           "ArrowRight" -> cb $ ScrollView   mods.scrollMod
           _ -> pure unit
-
-
-type UICmdR = ( render :: Unit
-              , docResize :: { width :: Number, height :: Number } )
-
-_render = SProxy :: SProxy "render"
-_docResize = SProxy :: SProxy "docResize"
-
-
-debugView :: ∀ a.
-             TrackInterface a
-          -> Effect { get :: String -> Effect Unit
-                    , set :: { l :: Number, r :: Number } -> Effect Unit }
-debugView s = unsafePartial do
-  let get name = launchAff_ do
-         view <- liftEffect $ s.getView
-         liftEffect do
-           log $ "CoordSysView: " <> show (map BigInt.toString $ unwrap view)
-           setWindow name $ (\(Pair l r) -> {l,r}) $ unwrap view
-
-  let set lr = s.queueUpdateView
-               $ ModView $ const ((fromJust <<< BigInt.fromNumber) <$> Pair lr.l lr.r)
-
-  pure {get, set}
-
 
 
 printSNPInfo :: ∀ r. Array (SNP r) -> Effect Unit
@@ -446,36 +364,46 @@ runBrowser config bc = launchAff $ do
   cmdInfoBox <- liftEffect $ initInfoBox
 
 
+  viewManager <- liftEffect $ View.browserViewManager
+                 cSys
+                 { step: wrap 5.0, done: wrap 200.0 }
+                 { initialView }
+                 bc
+
+  -- Here *global* callbacks/input handlers are set, i.e. buttons &
+  -- keys that don't depend on track canvases
+  liftEffect do
+    let btnMods = { scrollMod: 0.10, zoomMod: 0.15 }
+    btnUI btnMods \u ->
+      viewManager.updateView u
+
+    buttonEvent "reset" do
+      let cmd = ModView (const $ unwrap initialView)
+      viewManager.updateView cmd
+
+    keyUI (bc ^. _Container) { scrollMod: 0.075 } \u -> do
+      viewManager.updateView u
 
 
 
-
+  -- this is used to set callbacks/input handlers for track/track
+  -- canvas-dependent inputs
   let setHandlers tc track = liftEffect do
+
         resizeEvent \d -> do
           launchAff_ $ track.queueCommand $ inj _docResize d
 
-        let btnMods = { scrollMod: 0.10, zoomMod: 0.15 }
-        btnUI btnMods \u ->
-          track.queueUpdateView u
-
-        buttonEvent "reset" do
-          let cmd = ModView (const $ unwrap initialView)
-          track.queueUpdateView cmd
-
-        keyUI (bc ^. _Container) { scrollMod: 0.075 } \u -> do
-          track.queueUpdateView u
-
-        dragScroll bc \ {x,y} -> do
+        dragScrollTrack tc \ {x,y} -> do
           -- only do anything when scrolling at least a pixel
           when (Math.abs x >= one) do
             trackDims <- _.center <<< trackSlots <$> getDimensions tc
             let cmd = ScrollView $ (x) / trackDims.size.width
-            track.queueUpdateView cmd
+            viewManager.updateView cmd
 
         let scrollZoomScale = 0.06
         wheelZoom bc \dY -> do
           let cmd = ZoomView $ 1.0 + scrollZoomScale * dY
-          track.queueUpdateView cmd
+          viewManager.updateView cmd
 
 
 
@@ -497,6 +425,9 @@ runBrowser config bc = launchAff $ do
     track <- initializeTrack cSys render initialView gwasTC
     setHandlers gwasTC track
 
+    liftEffect $
+      viewManager.addCallback \csv ->
+        launchAff_ $ track.queueCommand (inj _setView csv)
 
     liftEffect do
       let sigSnps = filterSig config.score gwasData.snps
@@ -506,7 +437,7 @@ runBrowser config bc = launchAff $ do
 
           glyphClick :: Point -> Effect Unit
           glyphClick p = launchAff_ do
-            v  <- liftEffect $ track.getView
+            v <- liftEffect $ viewManager.browserView
 
             trackDims <- _.center <<< trackSlots <$> getDimensions gwasTC
             let segs = pixelSegments { segmentPadding: 12.0 } cSys trackDims.size v
@@ -535,7 +466,6 @@ runBrowser config bc = launchAff $ do
 
   geneTrack <- forkAff do
 
-
     geneTC <- getTrack "gene" bc
 
     genes <- withLoadingIndicator geneTC case config.urls.genes of
@@ -545,7 +475,6 @@ runBrowser config bc = launchAff $ do
           g <- getGenes cSys url
           log $ "genes fetched: " <> show (sum $ Array.length <$> g)
           pure g
-
 
     render <- do
       chrLayers <- addChrLayers { coordinateSystem: cSys
@@ -557,6 +486,11 @@ runBrowser config bc = launchAff $ do
 
     track <- initializeTrack cSys render initialView geneTC
     setHandlers geneTC track
+
+
+    liftEffect $ viewManager.addCallback \csv ->
+        launchAff_ $ track.queueCommand (inj _setView csv)
+
 
   pure unit
 
