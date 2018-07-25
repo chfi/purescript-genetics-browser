@@ -24,6 +24,11 @@ foreign import onTimeout
   -> Effect { run    :: Effect Unit
             , cancel :: Effect Unit }
 
+foreign import onFrame
+  :: Effect Unit
+  -> Effect { run    :: Effect Unit
+            , cancel :: Effect Unit }
+
 
 data UpdateView =
     ScrollView Number
@@ -66,8 +71,7 @@ animateDelta :: ∀ a a' b.
              -> (Either a b -> Effect Unit)
              -> { position :: a
                 , velocity :: a' }
-             -> { step :: Milliseconds
-                , done :: Milliseconds }
+             -> Milliseconds
              -> Effect { update :: a' -> Effect Unit
                        , position :: Effect a
                        , velocity :: Effect a' }
@@ -76,11 +80,11 @@ animateDelta motion cb initial timeout = do
   posRef <- Ref.new initial.position
   velRef <- Ref.new initial.velocity
 
-  done <- onTimeout timeout.done do
+  done <- onTimeout timeout do
     pos <- Ref.read posRef
     cb $ Left pos
 
-  comms <- onTimeout timeout.step do
+  comms <- onFrame do
     vel <- Ref.read velRef
     Ref.write mempty velRef
     pos <- Ref.read posRef
@@ -100,8 +104,7 @@ animateDelta motion cb initial timeout = do
 
 browserViewManager :: ∀ c.
                       CoordSys c BigInt
-                   -> { step :: Milliseconds
-                      , done :: Milliseconds }
+                   -> Milliseconds
                    -> { initialView :: CoordSysView }
                       -- , minimumBpPerPixel :: Number }
                    -> BrowserContainer
@@ -109,7 +112,7 @@ browserViewManager :: ∀ c.
                              , browserView :: Effect CoordSysView
                              , addCallback :: (CoordSysView -> Effect Unit) -> Effect Unit
                              }
-browserViewManager cSys timeouts options bc = do
+browserViewManager cSys timeout options bc = do
 
   cbs <- Ref.new (mempty :: List (CoordSysView -> Effect Unit))
 
@@ -147,7 +150,7 @@ browserViewManager cSys timeouts options bc = do
         Right a -> forTracks_ bc (flip animateTrack a)
         Left  v -> Ref.read cbs >>= traverse_ (_ $ v)
 
-  anim <- animateDelta { step, animate } callback initial timeouts
+  anim <- animateDelta { step, animate } callback initial timeout
 
   pure { updateView:  anim.update
        , browserView: anim.position

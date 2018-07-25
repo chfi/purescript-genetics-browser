@@ -351,7 +351,7 @@ runBrowser config bc = launchAff $ do
 
   viewManager <- liftEffect $ View.browserViewManager
                  cSys
-                 { step: wrap 5.0, done: wrap 200.0 }
+                 (wrap 200.0)
                  { initialView }
                  bc
 

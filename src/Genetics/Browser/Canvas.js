@@ -17,23 +17,6 @@ exports.initializeCanvasImpl = function(canvas, size) {
     };
 };
 
-exports.createCanvas = function(size) {
-    return function(className) {
-        return function() {
-            var c = document.createElement('canvas');
-            c.width  = size.width;
-            c.height = size.height;
-            c.className = className;
-
-            var ctx = c.getContext("2d");
-            if (ctx.imageSmoothingEnabled === true) {
-                ctx.imageSmoothingEnabled = false;
-            };
-            return c;
-        };
-    };
-};
-
 exports.setElementStyleImpl = function(e,k,v) {
     e.style[k] = v;
 }
@@ -139,18 +122,6 @@ exports.zoomCanvasImpl = function(backCanvas, canvas, edges) {
                   width, height);
     ctx.restore();
 };
-
-
-
-
-exports.frame = function(cb) {
-    return function() {
-        window.requestAnimationFrame(function(time) {
-            cb(time)();
-        });
-    };
-};
-
 
 
 exports.canvasDragImpl = function(canvas) {

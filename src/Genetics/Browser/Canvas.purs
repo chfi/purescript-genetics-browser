@@ -58,7 +58,6 @@ import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Nullable (Nullable, toMaybe)
 import Data.Pair (Pair(..))
 import Data.Symbol (SProxy(..))
-import Data.Time.Duration (Milliseconds)
 import Data.Traversable (for, traverse_)
 import Data.TraversableWithIndex (forWithIndex)
 import Data.Tuple (Tuple(Tuple), uncurry)
@@ -278,10 +277,6 @@ animateTrack (TrackContainer tc) a = do
     Zooming  ls -> zoomCanvas   bc' ls
 
     Jump        -> pure unit
-
-
-foreign import frame :: (Milliseconds -> Effect Unit)
-                     -> Effect Unit
 
 
 foreign import canvasDragImpl :: CanvasElement

@@ -22,3 +22,31 @@ exports.onTimeout = function(delay) {
         };
     };
 };
+
+
+exports.onFrame = function(cb) {
+    return function() {
+
+        var cbRef = null;
+
+        var runCallback = function() {
+            if (cbRef) {
+                window.cancelAnimationFrame(cbRef);
+            }
+
+            cbRef = window.requestAnimationFrame(function(t) {
+                cb();
+                cbRef = null;
+            });
+        };
+
+        var cancelCallback = function() {
+            if (cbRef) {
+                window.cancelAnimationFrame(cbRef);
+                cbRef = null;
+            }
+        };
+
+        return { run: runCallback, cancel: cancelCallback };
+    };
+};
