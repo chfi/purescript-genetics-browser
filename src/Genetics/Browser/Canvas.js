@@ -142,6 +142,17 @@ exports.zoomCanvasImpl = function(backCanvas, canvas, edges) {
 
 
 
+
+exports.frame = function(cb) {
+    return function() {
+        window.requestAnimationFrame(function(time) {
+            cb(time)();
+        });
+    };
+};
+
+
+
 exports.canvasDragImpl = function(canvas) {
     return function(cb) {
         return function() {

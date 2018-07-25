@@ -3,13 +3,18 @@ module Genetics.Browser.UI.View where
 import Prelude
 
 import Data.BigInt (BigInt)
+import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
+import Data.Lens ((^.))
 import Data.Newtype (over)
-import Data.Pair (Pair)
+import Data.Pair (Pair(..))
+import Data.Traversable (traverse_)
 import Effect (Effect)
 import Effect.Aff (Milliseconds)
 import Effect.Ref as Ref
-import Genetics.Browser.Coordinates (CoordSysView(..), scalePairBy, translatePairBy)
+import Genetics.Browser.Canvas (BrowserContainer, TrackAnimation(..), animateTrack, forTracks_)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _TotalSize, normalizeView, scalePairBy, translatePairBy)
+
 
 foreign import onTimeout
   :: Milliseconds
@@ -50,18 +55,8 @@ updateViewFold uv = over CoordSysView case uv of
 
 
 
-data Animation =
-    Scrolling Number
-  | Zooming   (Pair Number)
-  | Jump
 
--- | A `ViewAnimation` describes either an animation that can be applied
--- | to achieve the *visual* effect required to stay in sync with the
--- | current change in view, or a final `CoordSysView` to apply to
--- | relevant tracks when the change in view is finished.
-type ViewAnimation = Either Animation CoordSysView
-
-
+-- | TODO: instead of some low delay on the `step` timeout, use `requestAnimationFrame`
 animateDelta :: ∀ a a' b.
                     Monoid a'
              => { step    :: a' -> a -> a
@@ -71,8 +66,10 @@ animateDelta :: ∀ a a' b.
                 , velocity :: a' }
              -> { step :: Milliseconds
                 , done :: Milliseconds }
-             -> Effect (a' -> Effect Unit)
-animateDelta update cb initial timeout = do
+             -> Effect { update :: a' -> Effect Unit
+                       , position :: Effect a
+                       , velocity :: Effect a' }
+animateDelta motion cb initial timeout = do
 
   posRef <- Ref.new initial.position
   velRef <- Ref.new initial.velocity
@@ -85,10 +82,88 @@ animateDelta update cb initial timeout = do
     vel <- Ref.read velRef
     Ref.write mempty velRef
     pos <- Ref.read posRef
-    Ref.write  (update.step vel pos) posRef
-    cb (Right $ update.animate vel pos)
+    Ref.write  (motion.step vel pos) posRef
+    cb (Right $ motion.animate vel pos)
     done.run
 
-  pure \cmd -> do
-    Ref.modify_ (_ <> cmd) velRef
-    comms.run
+  let update cmd = do
+          Ref.modify_ (_ <> cmd) velRef
+          comms.run
+
+      position = Ref.read posRef
+      velocity = Ref.read velRef
+
+
+  pure { update, position, velocity }
+
+
+animateDelta' :: ∀ a a' b.
+                    Monoid a'
+             => { step    :: a' -> a -> a
+                , animate :: a' -> a -> b }
+             -> (Either a b -> Effect Unit)
+             -> { position :: a
+                , velocity :: a' }
+             -> { step :: Milliseconds
+                , done :: Milliseconds }
+             -> Effect (a' -> Effect Unit)
+animateDelta' update cb initial timeout = _.update <$> (animateDelta update cb initial timeout)
+
+
+
+browserViewManager :: ∀ c.
+                      CoordSys c BigInt
+                   -> { step :: Milliseconds
+                      , done :: Milliseconds }
+                   -> { initialView :: CoordSysView }
+                      -- , minimumBpPerPixel :: Number }
+                   -> BrowserContainer
+                   -> Effect { updateView  :: UpdateView -> Effect Unit
+                             , browserView :: Effect CoordSysView
+                             , addCallback :: (CoordSysView -> Effect Unit) -> Effect Unit
+                             }
+browserViewManager cSys timeouts options bc = do
+
+
+  cbs <- Ref.new ([] :: Array (CoordSysView -> Effect Unit))
+
+  let initial = { position: options.initialView
+                , velocity: mempty }
+
+
+      step :: UpdateView -> CoordSysView -> CoordSysView
+      step uv = normalizeView cSys (BigInt.fromInt 200000)
+                 <<< updateViewFold uv
+
+      animate :: UpdateView -> CoordSysView -> TrackAnimation
+      animate uv csv = case uv of
+        ScrollView x -> Scrolling (toLengths csv x)
+        ZoomView   x -> Zooming   (toZoomRange csv x)
+        ModView _    -> Jump
+
+
+      toLengths :: CoordSysView -> Number -> Number
+      toLengths (CoordSysView (Pair l r)) x =
+        if x < zero then (if l <= zero then 0.0 else x)
+                    else (if r >= (cSys ^. _TotalSize) then 0.0 else x)
+
+      toZoomRange :: CoordSysView -> Number -> Pair Number
+      toZoomRange (CoordSysView (Pair l r)) x =
+        let dx = (x - 1.0) / 2.0
+            l' = if l <= zero then 0.0
+                              else (-dx)
+            r' = if r >= (cSys ^. _TotalSize) then 1.0
+                                            else 1.0 + dx
+        in Pair l' r'
+
+      callback :: Either CoordSysView TrackAnimation -> Effect Unit
+      callback = case _ of
+        Right a -> forTracks_ bc (flip animateTrack a)
+        Left  v -> Ref.read cbs >>= traverse_ (_ $ v)
+
+  anim <- animateDelta { step, animate } callback initial timeouts
+
+  pure { updateView:  anim.update
+       , browserView: anim.position
+       , addCallback: \cb -> Ref.modify_ (_ <> [cb]) cbs
+       }

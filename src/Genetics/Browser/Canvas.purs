@@ -31,6 +31,9 @@ module Genetics.Browser.Canvas
        , browserContainer
        , addTrack
        , getTrack
+       , forTracks
+       , forTracks_
+       , TrackAnimation(..)
        , animateTrack
        ) where
 
@@ -67,8 +70,8 @@ import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Effect.Uncurried (EffectFn2, EffectFn3, EffectFn5, runEffectFn2, runEffectFn3, runEffectFn5)
-import Genetics.Browser.Layer (Component, Layer(Layer), LayerType(Scrolling, Fixed), TrackDimensions, TrackPadding, _Component, asSlot, setContextTranslation, slotContext, slotOffset, slotSize)
-import Genetics.Browser.UI.View as View
+import Genetics.Browser.Layer (Component, Layer(Layer), TrackDimensions, TrackPadding, _Component, asSlot, setContextTranslation, slotContext, slotOffset, slotSize, trackSlots)
+import Genetics.Browser.Layer as Layer
 import Graphics.Canvas (CanvasElement, Context2D)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Drawing, Point)
@@ -244,23 +247,40 @@ zoomCanvas (BufferedCanvas bc) (Pair left right) =
   runEffectFn3 zoomCanvasImpl bc.back bc.front {left, right}
 
 
+-- | Data type describing "animations" (single frame) to be applied to
+-- | a canvas
+-- |
+-- | Scrolling denotes a horizontal translation in canvas lengths,
+-- |
+-- | Zooming a rescaling of the canvas (see `zoomCanvas`)
+data TrackAnimation =
+    Scrolling Number
+  | Zooming   (Pair Number)
+  | Jump
 
 
-animateCanvas :: BufferedCanvas
-              -> View.Animation
-              -> Effect Unit
-animateCanvas bc = case _ of
-  View.Scrolling x -> scrollCanvas bc {x: -x, y: zero}
-  View.Zooming  ls -> zoomCanvas   bc ls
-  View.Jump        -> pure unit
-
+-- | Apply a `TrackAnimation` to all canvases in a container that can
+-- | be animated. Currently that is all BufferedCanvases.
 animateTrack :: TrackContainer
-             -> View.Animation
+             -> TrackAnimation
              -> Effect Unit
 animateTrack (TrackContainer tc) a = do
   layers <- Ref.read tc.layers
   let toAnimate = filterMap (preview _Buffer) layers
-  for_ toAnimate \bc' -> animateCanvas bc' a
+  for_ toAnimate \bc' -> case a of
+
+    Scrolling x -> do
+      width <- _.center.size.width <<< trackSlots
+               <$> getDimensions (wrap tc)
+      scrollCanvas bc' {x: -x * width, y: zero}
+
+    Zooming  ls -> zoomCanvas   bc' ls
+
+    Jump        -> pure unit
+
+
+foreign import frame :: (Milliseconds -> Effect Unit)
+                     -> Effect Unit
 
 
 foreign import canvasDragImpl :: CanvasElement
@@ -424,7 +444,21 @@ addTrack (BrowserContainer bc) name (TrackContainer tc) = liftEffect do
 
   appendElem bc.element tc.element
 
+forTracks :: ∀ m a.
+             MonadEffect m
+          => BrowserContainer
+          -> (TrackContainer -> m a)
+          -> m (Map String a)
+forTracks (BrowserContainer bc) f = do
+  tracks <- liftEffect $ Ref.read bc.tracks
+  for tracks f
 
+forTracks_ :: ∀ m a.
+             MonadEffect m
+          => BrowserContainer
+          -> (TrackContainer -> m a)
+          -> m Unit
+forTracks_ bc = void <<< forTracks bc
 
 
 
@@ -767,8 +801,8 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 
   canvas <- liftEffect do
     cv <- case lt of
-      Fixed     -> Static <$> createCanvas         size name
-      Scrolling -> Buffer <$> createBufferedCanvas size name
+      Layer.Fixed     -> Static <$> createCanvas         size name
+      Layer.Scrolling -> Buffer <$> createBufferedCanvas size name
     setCanvasPosition pos (cv ^. _FrontCanvas)
     pure cv
 

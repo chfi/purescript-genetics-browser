@@ -37,13 +37,13 @@ import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (HexColor, Peak, pixelSegments)
 import Genetics.Browser.Bed (getGenes)
-import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, _Container, addTrack, animateTrack, browserContainer, dragScroll, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom, withLoadingIndicator)
+import Genetics.Browser.Canvas (TrackAnimation(..), BrowserContainer, TrackContainer, _Container, addTrack, animateTrack, browserContainer, dragScroll, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom, withLoadingIndicator)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scaleToScreen, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), trackSlots)
 import Genetics.Browser.Track (class TrackRecord, makeContainers, makeTrack)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
-import Genetics.Browser.UI.View (Animation(..), UpdateView(..), updateViewFold)
+import Genetics.Browser.UI.View (UpdateView(..), updateViewFold)
 import Genetics.Browser.UI.View as View
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
@@ -184,26 +184,11 @@ uiViewUpdate cs { trackContainer } timeout {view, uiCmd} = do
 
   position <- Ref.read view
 
-  trackDims <- _.center <<< trackSlots <$> getDimensions trackContainer
 
-  let width = trackDims.size.width
-
-      step :: UpdateView -> CoordSysView -> CoordSysView
+  let step :: UpdateView -> CoordSysView -> CoordSysView
       step uv = normalizeView cs (BigInt.fromInt 200000)
                  <<< updateViewFold uv
 
-      pixelClamps :: CoordSysView -> { left :: Number, right :: Number }
-      pixelClamps csv@(CoordSysView (Pair l r)) =
-        let vs     = viewScale trackDims.size csv
-            left   = scaleToScreen vs l
-            right  = scaleToScreen vs ((cs ^. _TotalSize) - r)
-        in { left, right }
-
-      toPixels :: CoordSysView -> Number -> Number
-      toPixels csv x = let { left, right } = pixelClamps csv
-                           x' = width * x
-                       in if x' < zero then max (-left) x'
-                                       else min (right) x'
 
       toZoomRange :: CoordSysView -> Number -> Pair Number
       toZoomRange (CoordSysView (Pair l r)) x =
@@ -214,14 +199,19 @@ uiViewUpdate cs { trackContainer } timeout {view, uiCmd} = do
                                             else 1.0 + dx
         in Pair l' r'
 
-      animate :: UpdateView -> CoordSysView -> View.Animation
+      toLengths :: CoordSysView -> Number -> Number
+      toLengths (CoordSysView (Pair l r)) x =
+        if x < zero then (if l <= zero then 0.0 else x)
+                    else (if r >= (cs ^. _TotalSize) then 0.0 else x)
+
+      animate :: UpdateView -> CoordSysView -> TrackAnimation
       animate uv csv = case uv of
-        ScrollView x -> Scrolling (toPixels csv x)
+        ScrollView x -> Scrolling (toLengths csv x)
         ZoomView   x -> Zooming   (toZoomRange csv x)
         ModView _    -> Jump
 
 
-      callback :: Either CoordSysView View.Animation -> Effect Unit
+      callback :: Either CoordSysView TrackAnimation -> Effect Unit
       callback = case _ of
         Right a -> animateTrack trackContainer a
         Left  v -> do
@@ -237,7 +227,7 @@ uiViewUpdate cs { trackContainer } timeout {view, uiCmd} = do
                  , done: wrap 200.0 }
 
 
-  View.animateDelta { step, animate } callback initial timeouts
+  View.animateDelta' { step, animate } callback initial timeouts
 
 
 
