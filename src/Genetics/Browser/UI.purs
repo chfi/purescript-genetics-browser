@@ -85,22 +85,16 @@ foreign import resizeEvent :: ({ width  :: Number
 
 
 type UICmdR = ( render :: Unit
-              , setView :: CoordSysView
               , docResize :: { width :: Number, height :: Number } )
 
-
-
-
 _render = SProxy :: SProxy "render"
-_setView = SProxy :: SProxy "setView"
 _docResize = SProxy :: SProxy "docResize"
 
 -- | The value returned by the function that initializes the genome browser;
 -- | provides an interface to the running track instance.
 type TrackInterface a
-  = { container        :: TrackContainer
-    , lastHotspots     :: Aff (Number -> Point -> Array a)
-    , queueCommand     :: Variant UICmdR -> Aff Unit
+  = { lastHotspots :: Aff (Number -> Point -> Array a)
+    , queueCommand :: Variant UICmdR -> Aff Unit
     }
 
 
@@ -111,47 +105,39 @@ initializeTrack :: ∀ c r rl a.
                 => TrackRecord rl r a
                 => CoordSys c BigInt
                 -> Record r
-                -> CoordSysView
+                -> Effect CoordSysView
                 -> TrackContainer
                 -> Aff (TrackInterface a)
-initializeTrack cSys renderFuns initView bc = do
+initializeTrack cSys renderFuns getView tc = do
 
   renderFiberVar <- AVar.empty
-
-  trackView <- liftEffect $ Ref.new initView
-  bcVar <- AVar.new bc
-
   uiCmdVar <- AVar.empty
-  lastHotspotsVar <- AVar.empty
 
-  track <- makeTrack renderFuns bc
+  track <- makeTrack renderFuns tc
 
   let queueCommand = flip AVar.put uiCmdVar
 
-
-  let mainLoop = do
+      mainLoop = do
         uiCmd <- AVar.take uiCmdVar
-        case_ # V.on _render (\_ -> pure unit)
 
-              # V.on _setView (\csv -> do
-                      liftEffect $ Ref.write csv trackView
-                      queueCommand $ inj _render unit)
+        V.match { render: \_ -> pure unit
 
-              # V.on _docResize (\ {width} -> do
-                      {height} <- _.size <$> getDimensions bc
-                      setTrackContainerSize {width, height} bc
-                      queueCommand $ inj _render unit
-                      mainLoop)
+                , docResize: \ {width} -> do
+                    {height} <- _.size <$> getDimensions tc
+                    setTrackContainerSize {width, height} tc
+                    queueCommand $ inj _render unit
+                    mainLoop
 
-              $ uiCmd
+                } uiCmd
+
 
         -- if there's a rendering fiber running, we kill it
         traverse_ (killFiber (error "Resetting renderer"))
           =<< AVar.tryTake renderFiberVar
 
-        csView <- liftEffect $ Ref.read trackView
+        csView <- liftEffect $ getView
 
-        currentDims <- getDimensions bc
+        currentDims <- getDimensions tc
 
         let trackDims = _.center $ trackSlots currentDims
             currentScale = viewScale trackDims.size csView
@@ -169,8 +155,7 @@ initializeTrack cSys renderFuns initView bc = do
 
   queueCommand $ inj _render unit
 
-  pure { container: bc
-       , lastHotspots: track.hotspots
+  pure { lastHotspots: track.hotspots
        , queueCommand }
 
 
@@ -384,6 +369,11 @@ runBrowser config bc = launchAff $ do
     keyUI (bc ^. _Container) { scrollMod: 0.075 } \u -> do
       viewManager.updateView u
 
+    let scrollZoomScale = 0.06
+    wheelZoom bc \dY -> do
+      let cmd = ZoomView $ 1.0 + scrollZoomScale * dY
+      viewManager.updateView cmd
+
 
 
   -- this is used to set callbacks/input handlers for track/track
@@ -399,12 +389,6 @@ runBrowser config bc = launchAff $ do
             trackDims <- _.center <<< trackSlots <$> getDimensions tc
             let cmd = ScrollView $ (x) / trackDims.size.width
             viewManager.updateView cmd
-
-        let scrollZoomScale = 0.06
-        wheelZoom bc \dY -> do
-          let cmd = ZoomView $ 1.0 + scrollZoomScale * dY
-          viewManager.updateView cmd
-
 
 
 
@@ -422,12 +406,12 @@ runBrowser config bc = launchAff $ do
       gwasLayers <- addGWASLayers cSys config.tracks.gwas gwasData gwasTC
       pure $ Record.merge { chrs: chrLayers } gwasLayers
 
-    track <- initializeTrack cSys render initialView gwasTC
+    track <- initializeTrack cSys render viewManager.browserView gwasTC
     setHandlers gwasTC track
 
     liftEffect $
       viewManager.addCallback \csv ->
-        launchAff_ $ track.queueCommand (inj _setView csv)
+        launchAff_ $ track.queueCommand (inj _render unit)
 
     liftEffect do
       let sigSnps = filterSig config.score gwasData.snps
@@ -484,12 +468,12 @@ runBrowser config bc = launchAff $ do
       -- pure { chrs: chrLayers }
       pure $ Record.merge { chrs: chrLayers } geneLayers
 
-    track <- initializeTrack cSys render initialView geneTC
+    track <- initializeTrack cSys render viewManager.browserView geneTC
     setHandlers geneTC track
 
 
     liftEffect $ viewManager.addCallback \csv ->
-        launchAff_ $ track.queueCommand (inj _setView csv)
+        launchAff_ $ track.queueCommand (inj _render unit)
 
 
   pure unit

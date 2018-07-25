@@ -6,6 +6,8 @@ import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
 import Data.Lens ((^.))
+import Data.List (List)
+import Data.List as List
 import Data.Newtype (over)
 import Data.Pair (Pair(..))
 import Data.Traversable (traverse_)
@@ -93,22 +95,7 @@ animateDelta motion cb initial timeout = do
       position = Ref.read posRef
       velocity = Ref.read velRef
 
-
   pure { update, position, velocity }
-
-
-animateDelta' :: ∀ a a' b.
-                    Monoid a'
-             => { step    :: a' -> a -> a
-                , animate :: a' -> a -> b }
-             -> (Either a b -> Effect Unit)
-             -> { position :: a
-                , velocity :: a' }
-             -> { step :: Milliseconds
-                , done :: Milliseconds }
-             -> Effect (a' -> Effect Unit)
-animateDelta' update cb initial timeout = _.update <$> (animateDelta update cb initial timeout)
-
 
 
 browserViewManager :: ∀ c.
@@ -124,8 +111,7 @@ browserViewManager :: ∀ c.
                              }
 browserViewManager cSys timeouts options bc = do
 
-
-  cbs <- Ref.new ([] :: Array (CoordSysView -> Effect Unit))
+  cbs <- Ref.new (mempty :: List (CoordSysView -> Effect Unit))
 
   let initial = { position: options.initialView
                 , velocity: mempty }
@@ -153,7 +139,7 @@ browserViewManager cSys timeouts options bc = do
             l' = if l <= zero then 0.0
                               else (-dx)
             r' = if r >= (cSys ^. _TotalSize) then 1.0
-                                            else 1.0 + dx
+                                              else 1.0 + dx
         in Pair l' r'
 
       callback :: Either CoordSysView TrackAnimation -> Effect Unit
@@ -165,5 +151,5 @@ browserViewManager cSys timeouts options bc = do
 
   pure { updateView:  anim.update
        , browserView: anim.position
-       , addCallback: \cb -> Ref.modify_ (_ <> [cb]) cbs
+       , addCallback: \cb -> Ref.modify_ (List.Cons cb) cbs
        }
