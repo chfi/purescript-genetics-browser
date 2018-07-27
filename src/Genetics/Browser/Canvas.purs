@@ -23,6 +23,7 @@ module Genetics.Browser.Canvas
        , dragScroll
        , dragScrollTrack
        , wheelZoom
+       , trackWheel
        , trackClickHandler
        , trackContainer
        , withLoadingIndicator
@@ -209,6 +210,21 @@ trackClickHandler bc com = liftEffect do
 
 
 
+
+trackWheel :: TrackContainer
+           -> Component (Point -> Number -> Effect Unit)
+           -> Effect Unit
+trackWheel tc com = do
+  dims <- getDimensions tc
+
+  let cb = com ^. _Component
+      translate p = p - (slotOffset dims $ asSlot com)
+
+  canvasWheelCBImpl
+    (unsafeCoerce $ tc ^. _Container) (cb <<< translate)
+
+
+
 foreign import scrollCanvasImpl :: EffectFn3
                                    CanvasElement CanvasElement Point
                                    Unit
@@ -286,7 +302,7 @@ foreign import canvasDragImpl :: CanvasElement
 
 
 foreign import canvasWheelCBImpl :: CanvasElement
-                                 -> (Number -> Effect Unit)
+                                 -> (Point -> Number -> Effect Unit)
                                  -> Effect Unit
 
 -- |
@@ -333,7 +349,7 @@ wheelZoom :: ∀ t r.
           -> Effect Unit
 wheelZoom bc cb =
   canvasWheelCBImpl
-    (unsafeCoerce $ _.element $ unwrap bc) cb
+    (unsafeCoerce $ _.element $ unwrap bc) (const cb)
 
 
 -- | Helper function for erasing the contents of a canvas context given its dimensions

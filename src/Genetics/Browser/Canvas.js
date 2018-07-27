@@ -68,8 +68,8 @@ exports.setCanvasTranslation = function(p) {
 
 
 exports.elementClickImpl = function(el, cb) {
-    var rect = el.getBoundingClientRect();
     el.addEventListener('mousedown', function(e) {
+        var rect = el.getBoundingClientRect();
         var x = e.clientX - rect.left + window.scrollX;
         var y = e.clientY - rect.top  + window.scrollY;
         cb({x: x, y: y})();
@@ -161,7 +161,11 @@ exports.canvasWheelCBImpl = function(canvas) {
         return function() {
             var evCb = function(e) {
                 e.preventDefault();
-                cb(Math.sign(e.deltaY))();
+
+                var rect = canvas.getBoundingClientRect();
+                var x = e.clientX - rect.left + window.scrollX;
+                var y = e.clientY - rect.top  + window.scrollY;
+                cb({x: x, y: y})(Math.sign(e.deltaY))();
             };
 
             canvas.addEventListener("wheel", evCb);
