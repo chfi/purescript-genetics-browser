@@ -6,7 +6,7 @@ You need npm 5, as well as the Purescript compiler and build tools. The latter
 can be installed with npm:
 
 ```shell
-npm install -g purescript@"== 0.11.7" pulp psc-package
+npm install -g purescript@"== 0.12.0" pulp psc-package
 
 ```
 
