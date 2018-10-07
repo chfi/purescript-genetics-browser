@@ -3,6 +3,38 @@ html, body {
     overflow-x: hidden;
 }
 
+#browser {
+    position: absolute;
+    margin: 0;
+}
+
+#controls {
+    visibility: hidden;
+    position: absolute;
+    top: 4px;
+    left: 100px;
+    z-index: 1000;
+}
+
+#controls > button {
+    border: 1px solid #aaaaaa;
+    border-radius: 2px;
+    padding-left: 6px;
+    padding-right: 6px;
+    height: 23px;
+    min-width: 20px;
+}
+
+button#scrollRight {
+    margin-left: -2px;
+    margin-right: 4px;
+}
+
+button#zoomIn {
+    margin-left: -2px;
+    margin-right: 4px;
+}
+
 #infoBox {
     position: absolute;
     display: inline-block;
