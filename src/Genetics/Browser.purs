@@ -57,8 +57,6 @@ featureNormX { frameSize, position: (Pair l _) } =
   wrap $ unwrap (l / frameSize)
 
 
-
-
 type TrackLike a =
      Map ChrId (Pair Number)
   -> Canvas.Dimensions

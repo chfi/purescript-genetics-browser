@@ -41,7 +41,6 @@ import Foreign.Keys (keys) as Foreign
 import Genetics.Browser (Feature, HexColor, LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, thresholdRuler, trackLegend, trackLikeLayer, trackLikeLayerOpt)
 import Genetics.Browser.Bed (BedFeature)
 import Genetics.Browser.Canvas (BatchDrawing, BigDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _bigDrawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer)
-import Genetics.Browser.Canvas (BatchDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, BigDrawing, _bigDrawing, _drawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, aroundPair, normalize, pairSize, pairsOverlap)
 import Genetics.Browser.Layer (Component(..), Layer(..), LayerMask(..), LayerType(..), TrackPadding)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)

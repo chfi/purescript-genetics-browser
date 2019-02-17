@@ -1,22 +1,41 @@
-module Genetics.Browser.Coordinates where
+module Genetics.Browser.Coordinates
+       ( CoordSys
+       , CoordSysView(..)
+       , Normalized
+       , ViewScale
+       , pairSize
+       , _TotalSize
+       , normalizeView
+       , aroundPair
+       , normalize
+       , scalePairBy
+       , scaledSegments
+       , scaledSegments'
+       , translatePairBy
+       , viewScale
+       , xPerPixel
+       , _Segments
+       , pairsOverlap
+       , coordSys
+       , scaleToScreen
+       ) where
 
 import Prelude
 
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Foldable (any, foldMap)
+import Data.Foldable (foldMap)
 import Data.Generic.Rep (class Generic)
-import Data.Lens (Getter', Lens, _2, findOf, folded, to, view, (^.))
+import Data.Lens (Getter', Lens, to, (^.))
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Map (Map)
 import Data.Map as Map
-import Data.Maybe (Maybe, fromJust)
+import Data.Maybe (fromJust)
 import Data.Monoid.Additive (Additive(..))
 import Data.Newtype (class Newtype, alaF, unwrap)
 import Data.Pair (Pair(..))
 import Data.Tuple (Tuple(Tuple))
-import Genetics.Browser.Types (Point)
 import Global.Unsafe (unsafeStringify)
 import Partial.Unsafe (unsafePartial)
 
@@ -34,17 +53,6 @@ pairSize :: ∀ c.
 pairSize (Pair l r) = r - l
 
 
--- | Helper function for defining predicates on pairs that contain a given point.
-inPair :: ∀ c.
-          Ord c
-       => c
-       -> Pair c
-       -> Boolean
-inPair p (Pair l r) = l <= p && p <= r
-
-
--- TODO test this one
-
 -- | Helper function for defining predicates on pairs that overlap with a given pair.
 pairsOverlap :: ∀ c.
                 Ord c
@@ -55,13 +63,6 @@ pairsOverlap (Pair l1 r1) (Pair l2 r2) =
   let (Pair l1' r1') = Pair (min l1 l2) (min r1 r2)
       (Pair l2' r2') = Pair (max l1 l2) (max r1 r2)
   in r1' >= l2'
-
-around :: ∀ c.
-          Ring c
-       => c
-       -> c
-       -> Pair c
-around radius point = Pair (point - radius) (point + radius)
 
 aroundPair :: ∀ c.
               Ring c
@@ -76,26 +77,6 @@ newtype Normalized a = Normalized a
 
 derive instance newtypeNormalized :: Newtype (Normalized a) _
 
-normalizePoint :: { width :: Number
-                  , height :: Number }
-               -> Point
-               -> Normalized Point
-normalizePoint s {x, y} = Normalized { x: x', y: y' }
-  where x' = x / s.width
-        y' = y / s.height
-
-rescalePoint :: { width :: Number, height :: Number }
-             -> Normalized Point
-             -> Point
-rescalePoint s (Normalized p) = {x: p.x * s.width, y: p.y * s.height}
-
-
--- this should be in the UI, actually.
--- the padding for the view is calculated from the current scale & is in [minPixels, maxPixels]
-type SegmentPadding = { minPixels :: Number
-                      , maxPixels :: Number }
-
-
 -- | A coordinate system is defined by a set of segments,
 -- | which are defined by (mutually exclusive and contiguous) intervals
 -- | over the browser coordinates (BigInt in most cases)
@@ -105,11 +86,6 @@ newtype CoordSys i c =
 
 -- | A single segment is the segment identifier together with the range it covers.
 type Segment i c  = Tuple i (Pair c)
-
--- TODO the `Map i (Pair c)` definition of `Segments i c` makes it
---      tricky to work with `Segments` using lenses; having problems
---      working with whole `Tuple i (Pair c)` from `Map i (Pair c)`
---      without using Map.toUnfoldable, which requires an annotation...
 
 -- | Several segments are indexed by their identifiers.
 type Segments i c = Map i (Pair c)
@@ -138,14 +114,6 @@ _TotalSize = _Segments
              <<< (to $ alaF Additive foldMap pairSize)
 
 
--- | A Getter' into the size of a segment.
-_SegmentSize :: ∀ i c.
-                Ring c
-             => Getter' (Segment i c) c
-_SegmentSize = _2 <<< to pairSize
-
-
-
 -- | A coordinate system is created by providing an array of pairs of
 -- | chromosome/segment name (often in the ChrId newtype) and their
 -- | respective sizes.
@@ -164,42 +132,18 @@ coordSys segs = CoordSys $ Map.fromFoldable
                      in Array.zipWith Pair (zero `Array.cons` os) os
 
 
--- | Given a coordinate system and a point, find the segment that contains the point, if any.
-lookupSegment :: ∀ i c.
-                 Ord c
-              => CoordSys i c
-              -> c
-              -> Maybe (Segment i c)
-lookupSegment cs x = findOf folded pred array
-  where pred :: Segment i c -> Boolean
-        pred = view (_2 <<< to (inPair x))
-        array :: Array (Segment i c)
-        array = cs ^. _Segments <<< to Map.toUnfoldable
-
-
--- | Given a coordinate system and a range, find the segments that overlap, even partially, with the range.
 segmentsInPair :: ∀ i c.
                   Ord i
                => Ord c
                => CoordSys i c
                -> Pair c
                -> Segments i c
-segmentsInPair cs x = Map.filter (any (_ `inPair` x)) $ cs ^. _Segments
-
-
-segmentsInPair' :: ∀ i c.
-                   Ord i
-                => Ord c
-                => CoordSys i c
-                -> Pair c
-                -> Segments i c
-segmentsInPair' cs (Pair vL vR) = Map.filter f $ cs ^. _Segments
+segmentsInPair cs (Pair vL vR) = Map.filter f $ cs ^. _Segments
   where f (Pair l r)
           | l < vL && r > vR = true
           | l < vL && r < vL = false
           | l > vR && r > vR = false
           | otherwise = true
-
 
 
 newtype ViewScale = ViewScale { pixelWidth :: Number, coordWidth :: BigInt }
@@ -256,9 +200,6 @@ xPerPixel :: ViewScale -> Number
 xPerPixel (ViewScale {pixelWidth, coordWidth}) =
   (BigInt.toNumber coordWidth) / pixelWidth
 
--- | The scale of the browser view is defined by how much of the coordinate system is visible,
--- | and how big the screen it must fit into.
-type Scale = { screenWidth :: Number, viewWidth :: BigInt }
 
 -- | Given the width of the display in pixels, and how much of the coordinate system
 -- | that is currently visible, scale a point in the coordinate system
@@ -288,7 +229,7 @@ scaledSegments' :: ∀ i.
                 -> Segments i Number
 scaledSegments' cs csv scale =
   (map <<< map) (scaleToScreen scale)
-  $ segmentsInPair' cs (unwrap csv)
+  $ segmentsInPair cs (unwrap csv)
 
 
 -- | Helper functions for translating and scaling pairs.

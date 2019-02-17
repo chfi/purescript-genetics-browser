@@ -1,4 +1,19 @@
-module Genetics.Browser.Layer where
+module Genetics.Browser.Layer
+       ( Component(..)
+       , _Component
+       , Layer(..)
+       , LayerType(..)
+       , LayerMask(..)
+       , TrackPadding
+       , TrackDimensions
+       , asSlot
+       , setContextTranslation
+       , Point
+       , slotContext
+       , slotOffset
+       , slotSize
+       , trackSlots
+       ) where
 
 import Prelude
 
