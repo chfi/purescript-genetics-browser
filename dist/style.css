@@ -8,6 +8,17 @@ html, body {
     margin: 0;
 }
 
+#info-line {
+    border: 1px solid #aaaaaa;
+    padding: 1px;
+    position: absolute;
+    right: 0px;
+    bottom: 20px;
+    min-width: 19%;
+    font-size: 9pt;
+
+}
+
 #controls {
     visibility: hidden;
     position: absolute;
