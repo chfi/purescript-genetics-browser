@@ -8,6 +8,16 @@ html, body {
     margin: 0;
 }
 
+#info-line {
+    border: 1px solid #aaaaaa;
+    padding: 2px;
+    position: absolute;
+    right: 0px;
+    bottom: 18px;
+    font-size: 9pt;
+
+}
+
 #controls {
     visibility: hidden;
     position: absolute;
