@@ -48,8 +48,8 @@ import Graphics.Canvas as Canvas
 import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Math as Math
-import Network.HTTP.Affjax (get) as Affjax
-import Network.HTTP.Affjax.Response (json) as Affjax
+import Affjax (get) as Affjax
+import Affjax.ResponseFormat (json) as Affjax
 import Record (insert) as Record
 import Record.Builder (build, insert, merge, modify)
 import Record.Extra (class Keys)
@@ -269,7 +269,7 @@ getSNPs cs url = do
   resp <- Affjax.get Affjax.json url
 
   rawSNPs <-
-    case runExcept $ Foreign.readArray $ unsafeCoerce resp.response of
+    case runExcept $ Foreign.readArray $ unsafeCoerce resp.body of
            Left err -> throwError $ error "SNP data is not an array"
            Right as -> pure as
 
@@ -288,7 +288,7 @@ getAnnotations cs url = do
   resp <- Affjax.get Affjax.json url
 
   rawAnnots <- case runExcept
-                    $ Foreign.readArray $ unsafeCoerce resp.response of
+                    $ Foreign.readArray $ unsafeCoerce resp.body of
                  Left err -> throwError $ error "Annotations data is not an array"
                  Right as -> pure as
 

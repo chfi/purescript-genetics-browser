@@ -169,6 +169,10 @@ btnUI mods cb = do
   buttonEvent "zoomIn"      $ cb $ ZoomView $ 1.0 - mods.zoomMod
 
 
+btnUIFixed :: (UpdateView -> Effect Unit)
+           -> Effect Unit
+btnUIFixed = btnUI { scrollMod: 0.5, zoomMod: 1.0 }
+
 keyUI :: ∀ r.
          Element
       -> { scrollMod :: Number | r }
@@ -228,6 +232,9 @@ annoPeakHTML peak =
     Just {head, tail}     -> wrapWith "div"
                              ( wrapWith "p" "Annotations:"
                              <> foldMap annotationHTMLShort peak.elements)
+
+
+
 
 
 -- | Given a function to transform the data in the annotation's "rest" field
@@ -296,7 +303,7 @@ derive instance genericInfoBoxF :: Generic InfoBoxF _
 instance showInfoBoxF :: Show InfoBoxF where
   show = genericShow
 
-updateInfoBox :: Element -> InfoBoxF -> Effect Unit
+updateInfoBox :: _
 updateInfoBox el cmd =
   case cmd of
     IBoxShow ->

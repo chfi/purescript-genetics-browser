@@ -29,8 +29,8 @@ import Foreign (Foreign, ForeignError(..), MultipleErrors, readArray, renderFore
 import Genetics.Browser (Feature, groupToMap)
 import Genetics.Browser.Coordinates (CoordSys, _Segments, pairSize)
 import Genetics.Browser.Types (Bp, ChrId)
-import Network.HTTP.Affjax (get) as Affjax
-import Network.HTTP.Affjax.Response (json) as Affjax
+import Affjax (get) as Affjax
+import Affjax.ResponseFormat (json) as Affjax
 import Prim.RowList (kind RowList)
 import Simple.JSON (read)
 import Unsafe.Coerce (unsafeCoerce)
@@ -180,7 +180,7 @@ getGenes :: CoordSys ChrId BigInt
          -> String
          -> Aff (Map ChrId (Array BedFeature))
 getGenes cs url = do
-  resp <- _.response <$> Affjax.get Affjax.json url
+  resp <- _.body <$> Affjax.get Affjax.json url
 
   let throwParseError = throwError <<< error <<< foldMap (_ <> ", ")
 
