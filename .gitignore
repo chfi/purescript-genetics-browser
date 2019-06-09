@@ -8,5 +8,6 @@
 /.purs*
 /.psa*
 /.spago
-/dist/app.js
-/dist/data/
+/dist/*
+/.cache
+/build

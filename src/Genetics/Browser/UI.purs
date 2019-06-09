@@ -509,6 +509,10 @@ foreign import setWindow :: ∀ a. String -> a -> Effect Unit
 main :: Foreign -> Effect Unit
 main rawConfig = do
 
+  log "hello world!"
+  log "D:"
+
+
   el' <- do
     doc <- DOM.toDocument
            <$> (DOM.document =<< DOM.window)
