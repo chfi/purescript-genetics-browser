@@ -3,6 +3,7 @@ module Genetics.Browser.UI where
 import Prelude
 
 import Control.Monad.Error.Class (throwError)
+import Control.Monad.Free (Free)
 import Data.Array as Array
 import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
@@ -35,10 +36,11 @@ import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (HexColor, Peak, pixelSegments)
 import Genetics.Browser.Bed (getGenes)
-import Genetics.Browser.Canvas (BrowserContainer, TrackAnimation(..), TrackContainer, _Container, addTrack, animateTrack, browserContainer, dragScroll, dragScrollTrack, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom, withLoadingIndicator)
+import Genetics.Browser.Canvas (setTextContent, BrowserContainer, TrackAnimation(..), TrackContainer, _Container, addTrack, animateTrack, browserContainer, dragScroll, dragScrollTrack, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom, withLoadingIndicator)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scaleToScreen, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), trackSlots)
+import Genetics.Browser.Cacher as Cacher
 import Genetics.Browser.Track (class TrackRecord, makeContainers, makeTrack)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Genetics.Browser.UI.View (UpdateView(..))
@@ -64,6 +66,81 @@ import Web.HTML.HTMLDocument (toDocument) as DOM
 import Web.HTML.Window (document) as DOM
 import Web.UIEvent.KeyboardEvent (KeyboardEvent)
 import Web.UIEvent.KeyboardEvent (key) as DOM
+
+
+
+{-
+track commands/script:
+
+1. get the track container from the browser container by name
+2. set the loading indicator in a track container
+3. fetch datasets in Aff
+4. do something with the fetched datasets (general callback, possibly applied to trackcontainer)
+5. compile a given set of layers into a render function
+6. initialize a track with a render function + coordsys + track container
+7. add callbacks using Effect and a given track container's TrackInterface
+8. add callbacks using Effect, TrackInterface, arbitrary set of config & data (derived config)
+9. updating/showing the infobox (essentially just Effect Unit)
+
+
+the tricky part is really representing the different types of the
+datasets; since there can only be *one* type in the BrowserCmdF,
+"additional" types must be either in the `a` or, and this is kinda
+ugly but might make sense, they are provided by the `BrowserState`,
+when interpreting it into `Aff a` using `cmdAff`.
+
+Makes sense -- `Aff` can produce the required data, while
+`BrowserState` provides another set of data points...
+
+-}
+
+data BrowserCmdF a =
+    GetTrack String (Maybe TrackContainer -> a)
+  | SetTextContent TrackContainer String a
+  -- | Fetch (Aff Json) (Json -> a)
+
+type BrowserCmd a = Free BrowserCmdF a
+
+type BrowserState = { browserContainer :: BrowserContainer }
+
+cmdAff :: ∀ a.
+          BrowserState
+       -> BrowserCmdF a
+       -> Aff a
+cmdAff s (GetTrack name cont) = do
+  track <- pure <$> getTrack name s.browserContainer
+  pure $ cont track
+cmdAff s (SetTextContent tc val cont) = do
+  setTextContent tc val
+  pure cont
+-- cmdAff s (Fetch (Tuple aff cont)) = do
+--   b <- aff
+--   pure $ cont b
+
+
+
+
+
+-- data BrowserCmd a =
+--     GetTrack (String -> Maybe a)
+--   | AddTrack String TrackContainer a
+--   | GetData (Aff a)
+--   | AddChrLayers
+
+-- type ViewManager =
+--  { updateView  :: UpdateView -> Effect Unit
+--  , browserView :: Effect CoordSysView
+--  , addCallback :: (CoordSysView -> Effect Unit) -> Effect Unit
+--  }
+
+-- newtype BrowserState =
+--   BS (Map String Unit)
+
+
+--   BS { viewManager :: ViewManager
+--      , browserContainer :: BrowserContainer
+--      , trackInterfaces :: Map String (TrackInterface Unit)
+--        }
 
 
 foreign import windowInnerSize :: Effect Canvas.Dimensions
@@ -506,8 +583,8 @@ type BrowserConfig a =
 foreign import setWindow :: ∀ a. String -> a -> Effect Unit
 
 
-main :: Foreign -> Effect Unit
-main rawConfig = do
+main' :: Foreign -> Effect Unit
+main' rawConfig = do
 
   log "hello world!"
   log "D:"
@@ -542,6 +619,22 @@ main rawConfig = do
 
           log $ unsafeStringify c
           void $ runBrowser c bc
+
+
+
+main :: Effect Unit
+main = launchAff_ do
+
+  test <- Cacher.new (\x -> { one: 1 + x
+                            , another: (show x) <> "!" })
+
+  test.run 5
+
+  (show <$> test.last.one) >>= log
+  test.last.another >>= log
+
+  pure unit
+
 
 
 
