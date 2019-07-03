@@ -2,19 +2,12 @@ module Genetics.Browser.Cacher where
 
 import Prelude
 
-import Data.Pair (Pair)
-import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Aff.AVar as AVar
-import Genetics.Browser.Canvas (TrackContainer, trackContainer)
-import Genetics.Browser.Coordinates (CoordSysView)
-import Genetics.Browser.Layer (TrackPadding)
-import Genetics.Browser.Types (Point)
 import Prim.Row as Row
 import Prim.RowList (class RowToList, Cons, Nil, kind RowList)
-import Record (delete, get, insert)
-import Type.Data.Symbol as Symbol
-import Type.Prelude (class IsSymbol, class TypeEquals, RLProxy(..), SProxy(..), from, to)
+import Record (get, insert)
+import Type.Prelude (class IsSymbol, class TypeEquals, RLProxy(..), SProxy(..), from)
 import Unsafe.Coerce (unsafeCoerce)
 
 

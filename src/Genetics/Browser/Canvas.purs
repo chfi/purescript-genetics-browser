@@ -71,6 +71,8 @@ import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Effect.Uncurried (EffectFn2, EffectFn3, EffectFn5, runEffectFn2, runEffectFn3, runEffectFn5)
+import Genetics.Browser.Cacher (class CacherAff)
+import Genetics.Browser.Cacher as Cacher
 import Genetics.Browser.Layer (Component, Layer(Layer), TrackDimensions, TrackPadding, _Component, asSlot, setContextTranslation, slotContext, slotOffset, slotSize, trackSlots)
 import Genetics.Browser.Layer as Layer
 import Graphics.Canvas (CanvasElement, Context2D)
@@ -80,6 +82,7 @@ import Graphics.Drawing (render, translate) as Drawing
 import Graphics.Drawing.Font (font, fontString) as Drawing
 import Graphics.Drawing.Font (sansSerif)
 import Partial.Unsafe (unsafeCrashWith)
+import Prim.RowList (class RowToList)
 import Record as Record
 import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM (Element)
@@ -801,6 +804,96 @@ type RenderableLayerHotspots c a =
 
 
 
+newLayer :: ∀ m c a renderList renderRow outRow.
+            MonadAff m
+         => RowToList renderRow renderList
+         => CacherAff c renderList renderRow outRow
+         => TrackContainer
+         -> String
+         -> Layer (Tuple c Canvas.Dimensions -> Record renderRow)
+         -> m { run :: c -> Aff Unit
+              , drawOnCanvas :: Pair Number -> List Renderable -> m Unit
+              , last :: Record outRow }
+newLayer tc name layer@(Layer lt _ com) = do
+
+  size <- _.size <$> getDimensions tc
+  dims <- getDimensions tc
+  let pos = { left: 0.0, top: 0.0 }
+
+  let renderFuns c = (com ^. _Component) (Tuple c (slotSize dims (asSlot com)))
+
+  canvas <- liftEffect do
+    cv <- case lt of
+      Layer.Fixed     -> Static <$> createCanvas         size name
+      Layer.Scrolling -> Buffer <$> createBufferedCanvas size name
+    setCanvasPosition pos (cv ^. _FrontCanvas)
+    pure cv
+
+
+  cache <- liftAff $ Cacher.new renderFuns
+
+  let drawOnCanvas :: Pair Number -> List Renderable -> m Unit
+      drawOnCanvas (Pair l r) renderables = do
+        layers <- getLayers tc
+
+        -- TODO handle exceptions!!! :|
+        el  <- case Map.lookup name layers of
+                 Nothing -> unsafeCrashWith $ "Tried to render layer '" <> name <> "', but it did not exist!"
+                 Just e  -> pure $ e ^. _FrontCanvas
+
+        dims <- getDimensions tc
+        ctx <- slotContext layer dims el
+
+        liftEffect $ Canvas.withContext ctx do
+          setContextTranslation zero ctx
+          void $ Canvas.clearRect ctx $ Record.merge {x: 0.0, y: 0.0} dims.size
+
+        -- temporary hack to offset scrolling tracks as needed
+
+        _ <- liftEffect $ Canvas.translate ctx { translateX: -l, translateY: 0.0 }
+
+        -- use the List Renderable to draw to the canvas
+        let
+            drawing :: Drawing -> m Unit
+            drawing d = liftEffect $ Drawing.render ctx d
+
+            bigDrawing :: BigDrawing -> m Unit
+            bigDrawing d = liftEffect do
+              when (d.topLeft.x <= r && d.bottomRight.x >= l) do
+                Drawing.render ctx
+                  $ Drawing.translate d.topLeft.x d.topLeft.y
+                  $ d.drawing unit
+
+            drawingBatch :: Array { drawing :: Drawing, points :: Array Point }
+                     -> m Unit
+            drawingBatch ds = liftEffect $ for_ ds
+                            $ renderGlyphs (_.glyphBuffer $ unwrap tc) ctx (Pair l r)
+
+            labels :: List Label -> m Unit
+            labels ls = liftEffect do
+              renderLabels (Pair l r) ls ctx
+
+        let chunkSize = 250
+
+            chunkF l = if List.null l
+                       then Nothing
+                       else Just (Tuple (List.take chunkSize l) (List.drop chunkSize l))
+
+            chunks :: List _
+            chunks = unfoldr chunkF renderables
+
+        for_ chunks \c -> do
+
+          for_ c \d -> do
+            case_ # onMatch { drawing, bigDrawing, drawingBatch, labels } $ d
+
+          liftAff $ delay $ wrap 0.01
+
+
+  pure { drawOnCanvas, run: cache.run, last: cache.last }
+
+
+
 -- | Provided a TrackContainer, we can initialize and add a named layer.
 -- | This returns a function that can be used to render to the layer maybe idk????
 -- | If the layer already existed, overwrites it
@@ -864,7 +957,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
         ctx <- slotContext layer dims el
 
         liftEffect $ Canvas.withContext ctx do
-          setContextTranslation {x: zero, y: zero} ctx
+          setContextTranslation zero ctx
           void $ Canvas.clearRect ctx $ Record.merge {x: 0.0, y: 0.0} dims.size
 
         -- temporary hack to offset scrolling tracks as needed
