@@ -131,7 +131,7 @@ newTrackLikeLayer :: ∀ a b l rC r1 r2.
                 -> Layer (Tuple (Record ( view :: CoordSysView | r2 )) Canvas.Dimensions -> a)
 newTrackLikeLayer conf name com =
   let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
-      segs = pixelSegments conf conf.coordinateSystem
+      segs = pixelSegmentsOpt conf conf.coordinateSystem
 
       fun :: (b -> Map ChrId (Pair Number) -> Canvas.Dimensions -> a) -> Tuple _ _ -> a
       fun f (Tuple r d) = f (get name r) (segs d r.view) d
@@ -167,12 +167,22 @@ renderFixedUI com = Layer Fixed NoMask $ map f com
   where f draw = \_ d -> pure $ inj _drawing (draw d)
 
 
+fixedUILayer :: ∀ a.
+                Component (Canvas.Dimensions -> Drawing)
+             -> Layer (Tuple a Canvas.Dimensions
+                       -> { renderables :: List Renderable })
+fixedUILayer com = Layer Fixed NoMask $ map f com
+  where f draw = \(Tuple _ d) -> { renderables: pure $ inj _drawing (draw d) }
+
+
+
 thresholdRuler :: ∀ r r1.
+                  Tuple
                   { threshold :: Record (VScaleRow r1)
                   , rulerColor :: HexColor | r }
-               -> Canvas.Dimensions
-               -> List Renderable
-thresholdRuler {threshold: {sig,min,max}, rulerColor} slot =
+                  Canvas.Dimensions
+               -> { renderables :: List Renderable }
+thresholdRuler (Tuple {threshold: {sig,min,max}, rulerColor} slot) =
   let y = slot.height - (normalize min max sig * slot.height)
 
       outline = outlineColor (unwrap rulerColor)
@@ -189,9 +199,9 @@ thresholdRuler {threshold: {sig,min,max}, rulerColor} slot =
               (slot.width+10.0) (y-6.0)
               (fillColor $ unwrap rulerColor) text
 
-  in List.fromFoldable
+  in { renderables: List.fromFoldable
        [ inj _drawing rulerDrawing
-       , inj _drawing label ]
+       , inj _drawing label ] }
 
 
 chrLabelsLayer :: ∀ r1 r2 r3.
@@ -300,6 +310,7 @@ defaultVScaleConfig =
   , hPad: 0.125
   , numSteps: 3
   , fonts: { labelSize: 18, scaleSize: 14 } }
+
 
 
 drawVScaleInSlot :: VScale (VScaleRow ())

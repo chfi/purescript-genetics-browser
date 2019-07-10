@@ -59,13 +59,11 @@ import Type.Prelude (class RowToList, SProxy(SProxy))
 import Unsafe.Coerce (unsafeCoerce)
 
 
-
-
 renderGenes :: Map ChrId (Array BedFeature)
             -> _
             -> Map ChrId (Pair Number)
             -> Canvas.Dimensions
-            -> List Renderable
+            -> { renderables :: List Renderable }
 renderGenes geneData _ segs size =
   let
       geneData' :: List (Tuple ChrId (List BedFeature))
@@ -85,7 +83,7 @@ renderGenes geneData _ segs size =
       labels :: Renderable
       labels = inj _labels $ map _.label glyphs
 
-  in labels : drawings
+  in { renderables: labels : drawings }
 
 
 drawGene :: Canvas.Dimensions
@@ -785,15 +783,15 @@ addGeneLayers coordinateSystem config trackData tcont = do
       conf = { segmentPadding
              , coordinateSystem }
 
-      geneLayer :: _
       geneLayer =
-        trackLikeLayerOpt conf (SProxy :: SProxy "genes")
+        newTrackLikeLayer conf (SProxy :: _ "genes")
           (Center $ renderGenes trackData.genes)
 
-  rGenes <-
-    createAndAddLayer_ tcont "genes" geneLayer
+  rGenes <- newLayer tcont "genes" geneLayer
 
-  let genes o v =
-        renderLayer o { genes: {}, view: v } rGenes
+  let genes o v = do
+        rGenes.run { genes: {}, view: v}
+        rGenes.last.renderables >>= rGenes.drawOnCanvas o
+
 
   pure { genes }
