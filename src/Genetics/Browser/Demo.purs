@@ -2,6 +2,8 @@ module Genetics.Browser.Demo where
 
 import Prelude
 
+import Affjax (get, printResponseFormatError) as Affjax
+import Affjax.ResponseFormat (json) as Affjax
 import Color (black)
 import Color.Scheme.Clrs (blue, red)
 import Color.Scheme.X11 (darkblue, darkgrey, lightgrey)
@@ -9,7 +11,7 @@ import Control.Monad.Except (runExcept, throwError)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Either (Either(Right, Left))
+import Data.Either (Either(Right, Left), either)
 import Data.Filterable (filter, filterMap, partition, partitionMap)
 import Data.Foldable (class Foldable, foldMap, foldr, length, minimumBy, sequence_, traverse_)
 import Data.FoldableWithIndex (foldMapWithIndex)
@@ -38,9 +40,9 @@ import Foreign (F, Foreign, ForeignError(ForeignError))
 import Foreign (readArray) as Foreign
 import Foreign.Index (readProp) as Foreign
 import Foreign.Keys (keys) as Foreign
-import Genetics.Browser (Feature, HexColor, LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, thresholdRuler, trackLegend, trackLikeLayer, trackLikeLayerOpt)
+import Genetics.Browser (Feature, HexColor, LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, thresholdRuler, trackLegend, trackLikeLayer, trackLikeLayerOpt, newTrackLikeLayer)
 import Genetics.Browser.Bed (BedFeature)
-import Genetics.Browser.Canvas (BatchDrawing, BigDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _bigDrawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer)
+import Genetics.Browser.Canvas (BatchDrawing, BigDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _bigDrawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer, newLayer)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, aroundPair, normalize, pairSize, pairsOverlap)
 import Genetics.Browser.Layer (Component(..), Layer(..), LayerMask(..), LayerType(..), TrackPadding)
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
@@ -48,8 +50,6 @@ import Graphics.Canvas as Canvas
 import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
 import Graphics.Drawing as Drawing
 import Math as Math
-import Affjax (get) as Affjax
-import Affjax.ResponseFormat (json) as Affjax
 import Record (insert) as Record
 import Record.Builder (build, insert, merge, modify)
 import Record.Extra (class Keys)
@@ -268,10 +268,20 @@ getSNPs :: CoordSys ChrId BigInt
 getSNPs cs url = do
   resp <- Affjax.get Affjax.json url
 
+  liftEffect $ log $ unsafeCoerce resp.body
+
+  body <- either (throwError
+                  <<< error
+                  <<< Affjax.printResponseFormatError)
+          pure resp.body
+
   rawSNPs <-
-    case runExcept $ Foreign.readArray $ unsafeCoerce resp.body of
+    case runExcept
+         $ Foreign.readArray
+         $ unsafeCoerce body of
            Left err -> throwError $ error "SNP data is not an array"
            Right as -> pure as
+
 
   let parsed =
         partitionMap (runExcept <<< parseSNP cs) rawSNPs
@@ -287,8 +297,14 @@ getAnnotations :: CoordSys ChrId BigInt
 getAnnotations cs url = do
   resp <- Affjax.get Affjax.json url
 
+  body <- either (throwError
+                  <<< error
+                  <<< Affjax.printResponseFormatError)
+          pure resp.body
+
   rawAnnots <- case runExcept
-                    $ Foreign.readArray $ unsafeCoerce resp.body of
+                    $ Foreign.readArray
+                    $ unsafeCoerce body of
                  Left err -> throwError $ error "Annotations data is not an array"
                  Right as -> pure as
 
@@ -315,6 +331,21 @@ getAnnotations cs url = do
       sequence_ (log <$> (("> " <> _) <$> showAnnotation an))
 
   pure $ groupToMap _.feature.chr parsed.right
+
+
+snpPeak :: ∀ rS.
+           Bp
+        -> Array (SNP rS)
+        -> Maybe (Tuple (Peak Bp Number (SNP rS))
+                        (Array (SNP rS)))
+snpPeak radius snps = do
+  top <- minimumBy (compare `on` _.feature.score) snps
+
+  let covers = radius `aroundPair` top.position
+      y = top.feature.score
+      {no, yes} = partition (\p -> p.position `pairsOverlap` covers) snps
+
+  pure $ Tuple {covers, y, elements: yes} no
 
 
 
@@ -688,6 +719,11 @@ addGWASLayers coordinateSystem config trackData =
         trackLikeLayer conf _snps
           (Center $ renderSNPs trackData.snps)
 
+      snpLayer2 :: Layer (Tuple _ Canvas.Dimensions -> {renderables :: _, hotspots :: _})
+      snpLayer2 = newTrackLikeLayer conf _snps
+                    (Center $ renderSNPs trackData.snps)
+
+
       annotationLayer :: RenderableLayer
                          { annotations
                            :: { threshold :: Threshold
@@ -707,6 +743,9 @@ addGWASLayers coordinateSystem config trackData =
     rSNPs  <-
       createAndAddLayer  bc "snps" snpLayer
 
+    rSNPs2 <-
+      newLayer bc "snps2" snpLayer2
+
     rAnnos <-
       createAndAddLayer_ bc "annotations" annotationLayer
 
@@ -723,6 +762,11 @@ addGWASLayers coordinateSystem config trackData =
           traverse_ (renderLayer (Pair 0.0 0.0) uiConf)
                       [ rVScale, rLegend, rRuler ]
 
+
+        snps' o v = do
+          rSNPs2.run { snps: {threshold, render: config.snps }, view: v}
+          rSNPs2.last.renderables >>= rSNPs2.drawOnCanvas o
+
         snps o v = do
           renderLayer o { snps: { threshold, render: config.snps }
                         , view: v } rSNPs
@@ -734,7 +778,7 @@ addGWASLayers coordinateSystem config trackData =
                         , view: v } rAnnos
 
 
-    pure { snps
+    pure { snps: snps'
          , annotations
          , hotspots
          , fixedUI

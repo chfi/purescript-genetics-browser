@@ -121,6 +121,28 @@ trackLikeLayer conf name com =
       <$> com
 
 
+newTrackLikeLayer :: ∀ a b l rC r1 r2.
+                   IsSymbol l
+                => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
+                => { segmentPadding :: Number
+                   , coordinateSystem :: CoordSys ChrId BigInt | rC }
+                -> SProxy l
+                -> Component (b -> Map ChrId (Pair Number) -> Canvas.Dimensions -> a)
+                -> Layer (Tuple (Record ( view :: CoordSysView | r2 )) Canvas.Dimensions -> a)
+newTrackLikeLayer conf name com =
+  let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
+      segs = pixelSegments conf conf.coordinateSystem
+
+      fun :: (b -> Map ChrId (Pair Number) -> Canvas.Dimensions -> a) -> Tuple _ _ -> a
+      fun f (Tuple r d) = f (get name r) (segs d r.view) d
+
+      com' :: Component (Tuple (Record (view :: CoordSysView | r2)) Canvas.Dimensions -> a)
+      com' = fun <$> com
+
+  in Layer Scrolling (Masked 5.0) com'
+
+
+
 trackLikeLayerOpt :: ∀ a b l rC r1 r2.
                    IsSymbol l
                 => Row.Cons  l b r1 ( view :: CoordSysView | r2 )

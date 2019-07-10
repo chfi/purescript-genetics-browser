@@ -17,6 +17,7 @@ module Genetics.Browser.Canvas
        , _labels
        , createAndAddLayer
        , createAndAddLayer_
+       , newLayer
        , renderLayer
        , getDimensions
        , _Container
@@ -816,11 +817,14 @@ newLayer :: ∀ m c a renderList renderRow outRow.
               , last :: Record outRow }
 newLayer tc name layer@(Layer lt _ com) = do
 
+  -- 1. create the layercanvas
   size <- _.size <$> getDimensions tc
   dims <- getDimensions tc
   let pos = { left: 0.0, top: 0.0 }
 
   let renderFuns c = (com ^. _Component) (Tuple c (slotSize dims (asSlot com)))
+
+  -- 2. add the canvas to the trackcontainer & DOM
 
   canvas <- liftEffect do
     cv <- case lt of
@@ -829,6 +833,10 @@ newLayer tc name layer@(Layer lt _ com) = do
     setCanvasPosition pos (cv ^. _FrontCanvas)
     pure cv
 
+  let layerRef = _.layers $ unwrap tc
+  liftEffect do
+    Ref.modify_ (Map.insert name canvas) layerRef
+    appendCanvasElem (unwrap tc).element $ canvas ^. _FrontCanvas
 
   cache <- liftAff $ Cacher.new renderFuns
 
