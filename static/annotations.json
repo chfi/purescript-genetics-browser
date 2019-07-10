@@ -1,0 +1,245 @@
+[
+  {
+    "chr": "1",
+    "pos": 173365379,
+    "name": "rs13476242",
+    "p_lrt": 2.070492e-05,
+    "anno": "Q99N28",
+    "url": "http://www.uniprot.org/uniprot/Q99N28",
+    "gene": "Cadm3",
+    "synonymes": "Igsf4b, Necl1, Syncam3, Tsll1"
+  },
+  {
+    "chr": "1",
+    "pos": 174792257,
+    "name": "rs13476251",
+    "p_lrt": 9.902174e-06,
+    "anno": "Q9JL04",
+    "url": "http://www.uniprot.org/uniprot/Q9JL04",
+    "gene": "Fmn2"
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "CEL-17_31069801",
+    "p_lrt": 4.132089e-13
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "CEL-17_31214920",
+    "p_lrt": 1.667256e-13
+  },
+  {
+    "chr": "17",
+    "pos": 32800415,
+    "name": "rs13482952",
+    "p_lrt": 1.717271e-13
+  },
+  {
+    "chr": "17",
+    "pos": 32941145,
+    "name": "rs13459151",
+    "p_lrt": 8.423405e-14
+  },
+  {
+    "chr": "17",
+    "pos": 33018397,
+    "name": "rs3705058",
+    "p_lrt": 1.074321e-13
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "mCV22813496",
+    "p_lrt": 3.503345e-13
+  },
+  {
+    "chr": "17",
+    "pos": 33380773,
+    "name": "rs3023110",
+    "p_lrt": 4.304496e-06
+  },
+  {
+    "chr": "17",
+    "pos": 33563059,
+    "name": "rs6249614",
+    "p_lrt": 3.903073e-14,
+    "anno": "P70248",
+    "url": "http://www.uniprot.org/uniprot/P70248",
+    "gene": "Myo1f"
+  },
+  {
+    "chr": "17",
+    "pos": 33576442,
+    "name": "rs3724223",
+    "p_lrt": 9.147197e-10,
+    "anno": "P70248",
+    "url": "http://www.uniprot.org/uniprot/P70248",
+    "gene": "Myo1f"
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "UT_17_33.238924",
+    "p_lrt": 1.143028e-13
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "gnf17.033.384",
+    "p_lrt": 5.953354e-10
+  },
+  {
+    "chr": "17",
+    "pos": 34030404,
+    "name": "rs13482957",
+    "p_lrt": 1.932167e-10,
+    "anno": "Q31125",
+    "url": "http://www.uniprot.org/uniprot/Q31125",
+    "gene": "Slc39a7",
+    "synonymes": "H2-Ke4, Hke4"
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "mhcTAP118",
+    "p_lrt": 2.509989e-10
+  },
+  {
+    "chr": "17",
+    "pos": 34193620,
+    "name": "rs3023450",
+    "p_lrt": 1.305945e-09,
+    "anno": "P21958",
+    "url": "http://www.uniprot.org/uniprot/P21958",
+    "gene": "Tap1",
+    "synonymes": "Abcb2, Ham-1, Ham1"
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "mhc19",
+    "p_lrt": 2.830684e-10
+  },
+  {
+    "chr": "17",
+    "pos": 34196995,
+    "name": "rs3023442",
+    "p_lrt": 2.114332e-13
+  },
+  {
+    "chr": "17",
+    "pos": 34200797,
+    "name": "rs3023452",
+    "p_lrt": 2.026753e-10,
+    "anno": "P28063",
+    "url": "http://www.uniprot.org/uniprot/P28063",
+    "gene": "Psmb8",
+    "synonymes": "Lmp7, Mc13"
+  },
+  {
+    "chr": "17",
+    "pos": 34341052,
+    "name": "rs3665150",
+    "p_lrt": 1.670814e-13
+  },
+  {
+    "chr": "17",
+    "pos": 34381084,
+    "name": "rs13482958",
+    "p_lrt": 2.329718e-10,
+    "anno": "Q7TST0-1",
+    "url": "http://www.uniprot.org/uniprot/Q7TST0-1",
+    "gene": "Btnl1",
+    "synonymes": "Btnl3, Gm316, Ng10"
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "gnf17.035.152",
+    "p_lrt": 1.265517e-10
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "mCV22965443",
+    "p_lrt": 2.848581e-17
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "mhcTNFa7",
+    "p_lrt": 9.484311e-06
+  },
+  {
+    "chr": "17",
+    "pos": 35530170,
+    "name": "rs13482963",
+    "p_lrt": 8.88709e-11,
+    "anno": "Q8K2I2",
+    "url": "http://www.uniprot.org/uniprot/Q8K2I2",
+    "gene": "Cchcr1",
+    "synonymes": "Hcr"
+  },
+  {
+    "chr": "17",
+    "pos": 35834133,
+    "name": "rs3682923",
+    "p_lrt": 3.34167e-10
+  },
+  {
+    "chr": "17",
+    "pos": 36878449,
+    "name": "rs13482967",
+    "p_lrt": 2.892659e-14
+  },
+  {
+    "chr": "17",
+    "pos": 37131683,
+    "name": "rs13482968",
+    "p_lrt": 1.024016e-14
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "mCV25067640",
+    "p_lrt": 2.369546e-05
+  },
+  {
+    "chr": "17",
+    "pos": 40571110,
+    "name": "rs13482981",
+    "p_lrt": 1.64787e-06
+  },
+  {
+    "chr": "17",
+    "pos": 40843403,
+    "name": "rs3690398",
+    "p_lrt": 1.248355e-06
+  },
+  {
+    "chr": "17",
+    "pos": 63712442,
+    "name": "rs6402097",
+    "p_lrt": 1.580779e-05
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "UT_17_64.236785",
+    "p_lrt": 7.100478e-06
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "gnf17.065.592",
+    "p_lrt": 6.712321e-06
+  },
+  {
+    "chr": "17",
+    "pos": -9,
+    "name": "CEL-17_62934746",
+    "p_lrt": 2.471076e-05
+  }
+]

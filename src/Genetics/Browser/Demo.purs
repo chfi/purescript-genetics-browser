@@ -40,7 +40,7 @@ import Foreign (F, Foreign, ForeignError(ForeignError))
 import Foreign (readArray) as Foreign
 import Foreign.Index (readProp) as Foreign
 import Foreign.Keys (keys) as Foreign
-import Genetics.Browser (Feature, HexColor, LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, thresholdRuler, trackLegend, trackLikeLayer, trackLikeLayerOpt, newTrackLikeLayer)
+import Genetics.Browser (Feature, HexColor, LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, fixedUILayer, thresholdRuler, trackLegend, trackLikeLayer, trackLikeLayerOpt, newTrackLikeLayer)
 import Genetics.Browser.Bed (BedFeature)
 import Genetics.Browser.Canvas (BatchDrawing, BigDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _bigDrawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer, newLayer)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, aroundPair, normalize, pairSize, pairsOverlap)
@@ -430,15 +430,12 @@ filterSig {sig} = map (filter
 
 
 
-snpsUI :: ∀ c.
-          VScale (VScaleRow ())
-       -> RenderableLayer c
-snpsUI vscale = renderFixedUI (CLeft $ drawVScaleInSlot vscale)
+snpsUI :: _
+snpsUI vscale = fixedUILayer (CLeft $ drawVScaleInSlot vscale)
 
-annotationsUI :: ∀ r c.
-                 LegendConfig (entries :: Array LegendEntry | r)
-              -> RenderableLayer c
-annotationsUI legend = renderFixedUI (CRight $ drawLegendInSlot legend)
+
+annotationsUI :: _
+annotationsUI legend = fixedUILayer (CRight $ drawLegendInSlot legend)
 
 
 
@@ -626,23 +623,23 @@ renderAnnotationPeaks cSys vScale conf annoPks cdim =
 
 
 renderAnnotations :: ∀ r1 r2 rC.
-                    CoordSys ChrId BigInt
-                 -> Map ChrId (Array (SNP ()))
-                 -> Map ChrId (Array (Annotation r1))
-                 -> { threshold :: { min :: Number, max :: Number | r2 }
-                    , render :: AnnotationsConfig | rC }
-                 -> Map ChrId (Pair Number)
-                 -> Canvas.Dimensions
-                 -> List Renderable
+                     CoordSys ChrId BigInt
+                  -> Map ChrId (Array (SNP ()))
+                  -> Map ChrId (Array (Annotation r1))
+                  -> { threshold :: { min :: Number, max :: Number | r2 }
+                     , render :: AnnotationsConfig | rC }
+                  -> Map ChrId (Pair Number)
+                  -> Canvas.Dimensions
+                  -> { renderables :: List Renderable }
 renderAnnotations cSys sigSnps allAnnots conf =
   let annoPeaks = annotationsForScale cSys sigSnps allAnnots
 
   in \seg size ->
-        let {drawingBatch, labels} =
+  let {drawingBatch, labels} =
               renderAnnotationPeaks cSys conf.threshold conf.render (annoPeaks seg) size seg
-        in List.fromFoldable
+        in { renderables: List.fromFoldable
            [ inj _drawingBatch $ drawingBatch
-           , inj _labels   $ labels ]
+           , inj _labels   $ labels ] }
 
 
 _snps = SProxy :: SProxy "snps"
@@ -668,7 +665,7 @@ addChrLayers trackConf {chrLabels, chrBG1, chrBG2} tc = do
 
   rChrLabels <-
     createAndAddLayer_ tc "chrLabels"
-      $ chrLabelsLayer trackConf { fontSize: chrLabels.fontSize }
+    $ chrLabelsLayer trackConf { fontSize: chrLabels.fontSize }
 
 
   let chrs o v = do
@@ -714,71 +711,59 @@ addGWASLayers coordinateSystem config trackData =
              , coordinateSystem }
       cSys = coordinateSystem
 
-      snpLayer :: RenderableLayerHotspots _ _
-      snpLayer =
-        trackLikeLayer conf _snps
-          (Center $ renderSNPs trackData.snps)
-
-      snpLayer2 :: Layer (Tuple _ Canvas.Dimensions -> {renderables :: _, hotspots :: _})
-      snpLayer2 = newTrackLikeLayer conf _snps
+      snpLayer :: Layer (Tuple _ Canvas.Dimensions -> {renderables :: _, hotspots :: _})
+      snpLayer = newTrackLikeLayer conf _snps
                     (Center $ renderSNPs trackData.snps)
 
 
-      annotationLayer :: RenderableLayer
-                         { annotations
-                           :: { threshold :: Threshold
-                              , render :: AnnotationsConfig }
-                         , view :: CoordSysView }
-      annotationLayer =
-        trackLikeLayer conf _annotations
+      annotationLayer :: Layer (Tuple _ _ -> _)
+      annotationLayer = newTrackLikeLayer conf _annotations
           (Center $ renderAnnotations cSys sigSnps trackData.annotations)
+
+
 
 
   in \bc -> do
 
     rRuler <-
-      createAndAddLayer_ bc "ruler"
-        $ Layer Fixed NoMask (Center thresholdRuler)
+      newLayer bc "ruler" $ Layer Fixed NoMask (Center thresholdRuler)
 
-    rSNPs  <-
-      createAndAddLayer  bc "snps" snpLayer
-
-    rSNPs2 <-
-      newLayer bc "snps2" snpLayer2
+    rSNPs <-
+      newLayer bc "snps" snpLayer
 
     rAnnos <-
-      createAndAddLayer_ bc "annotations" annotationLayer
+      newLayer bc "annotations" annotationLayer
 
     rVScale <-
-      createAndAddLayer_ bc "vscale" $ snpsUI vscale
+      newLayer bc "vscale" $ snpsUI vscale
 
     rLegend <-
-      createAndAddLayer_ bc "legend" $ annotationsUI legend
+      newLayer bc "legend" $ annotationsUI legend
 
 
     let fixedUI = do
           let uiConf = { rulerColor: wrap red, threshold }
 
-          traverse_ (renderLayer (Pair 0.0 0.0) uiConf)
-                      [ rVScale, rLegend, rRuler ]
+          let render = \l -> do
+                l.run uiConf
+                l.last.renderables >>= l.drawOnCanvas (Pair 0.0 0.0)
 
+          traverse_ render [rLegend, rVScale, rRuler]
 
-        snps' o v = do
-          rSNPs2.run { snps: {threshold, render: config.snps }, view: v}
-          rSNPs2.last.renderables >>= rSNPs2.drawOnCanvas o
 
         snps o v = do
-          renderLayer o { snps: { threshold, render: config.snps }
-                        , view: v } rSNPs
-
-        hotspots = rSNPs.lastHotspots
-
-        annotations o v =
-          renderLayer o { annotations: { threshold, render: config.annotations }
-                        , view: v } rAnnos
+          rSNPs.run { snps: {threshold, render: config.snps }, view: v}
+          rSNPs.last.renderables >>= rSNPs.drawOnCanvas o
 
 
-    pure { snps: snps'
+        hotspots = rSNPs.last.hotspots
+
+        annotations o v = do
+          rAnnos.run { annotations: {threshold, render: config.annotations }, view: v}
+          rAnnos.last.renderables >>= rAnnos.drawOnCanvas o
+
+
+    pure { snps
          , annotations
          , hotspots
          , fixedUI

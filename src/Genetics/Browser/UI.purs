@@ -583,8 +583,8 @@ type BrowserConfig a =
 foreign import setWindow :: ∀ a. String -> a -> Effect Unit
 
 
-main' :: Foreign -> Effect Unit
-main' rawConfig = do
+main :: Foreign -> Effect Unit
+main rawConfig = do
 
   log "hello world!"
   log "D:"
@@ -622,8 +622,8 @@ main' rawConfig = do
 
 
 
-main :: Effect Unit
-main = launchAff_ do
+main' :: Effect Unit
+main' = launchAff_ do
 
   test <- Cacher.new (\x -> { one: 1 + x
                             , another: (show x) <> "!" })
