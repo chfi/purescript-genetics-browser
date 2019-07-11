@@ -40,7 +40,7 @@ import Foreign (F, Foreign, ForeignError(ForeignError))
 import Foreign (readArray) as Foreign
 import Foreign.Index (readProp) as Foreign
 import Foreign.Keys (keys) as Foreign
-import Genetics.Browser (Feature, HexColor, LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, fixedUILayer, thresholdRuler, trackLegend, trackLikeLayer, trackLikeLayerOpt, newTrackLikeLayer)
+import Genetics.Browser (Feature, HexColor, LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, renderFixedUI, fixedUILayer, thresholdRuler, trackLegend, trackLikeLayer)
 import Genetics.Browser.Bed (BedFeature)
 import Genetics.Browser.Canvas (BatchDrawing, BigDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, RenderableLayer, RenderableLayerHotspots, TrackContainer, _bigDrawing, _drawingBatch, _labels, createAndAddLayer, createAndAddLayer_, renderLayer, newLayer)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, aroundPair, normalize, pairSize, pairsOverlap)
@@ -644,7 +644,6 @@ _snps = SProxy :: SProxy "snps"
 _annotations = SProxy :: SProxy "annotations"
 
 
-
 addChrLayers :: ∀ r.
                 { coordinateSystem :: CoordSys ChrId BigInt
                 , segmentPadding :: Number | r }
@@ -655,16 +654,12 @@ addChrLayers :: ∀ r.
              -> Aff (Pair Number -> CoordSysView -> Aff Unit)
 addChrLayers trackConf {chrLabels, chrBG1, chrBG2} tc = do
 
+  rBG  <- newLayer tc "chrBackground"
+          $ trackLikeLayer trackConf (SProxy :: _ "background")
+            (Center chrBackgroundLayer)
 
-  rBG  <-
-    createAndAddLayer_ tc "chrBackground"
-      $ trackLikeLayer trackConf (SProxy :: SProxy "background")
-          (Center chrBackgroundLayer)
-
-  rChrLabels <-
-    createAndAddLayer_ tc "chrLabels"
-    $ chrLabelsLayer trackConf { fontSize: chrLabels.fontSize }
-
+  rChrLabels <- newLayer tc "chrLabels"
+                $ chrLabelsLayer trackConf { fontSize: chrLabels.fontSize }
 
   let chrs o v = do
         let background = { chrBG1
@@ -672,8 +667,12 @@ addChrLayers trackConf {chrLabels, chrBG1, chrBG2} tc = do
                          , segmentPadding: trackConf.segmentPadding }
             bgConf = { background
                      , view: v }
-        traverse_ (renderLayer o bgConf)
-                    [ rBG, rChrLabels]
+            render = \l -> do
+                l.run bgConf
+                l.last.renderables >>= l.drawOnCanvas o
+
+        traverse_ render
+                    [ rBG, rChrLabels ]
 
 
   pure chrs
@@ -710,12 +709,12 @@ addGWASLayers coordinateSystem config trackData =
       cSys = coordinateSystem
 
       snpLayer :: Layer (Tuple _ Canvas.Dimensions -> {renderables :: _, hotspots :: _})
-      snpLayer = newTrackLikeLayer conf _snps
+      snpLayer = trackLikeLayer conf _snps
                     (Center $ renderSNPs trackData.snps)
 
 
       annotationLayer :: Layer (Tuple _ _ -> _)
-      annotationLayer = newTrackLikeLayer conf _annotations
+      annotationLayer = trackLikeLayer conf _annotations
           (Center $ renderAnnotations cSys sigSnps trackData.annotations)
 
 
@@ -784,7 +783,7 @@ addGeneLayers coordinateSystem config trackData tcont = do
              , coordinateSystem }
 
       geneLayer =
-        newTrackLikeLayer conf (SProxy :: _ "genes")
+        trackLikeLayer conf (SProxy :: _ "genes")
           (Center $ renderGenes trackData.genes)
 
   rGenes <- newLayer tcont "genes" geneLayer

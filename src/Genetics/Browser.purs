@@ -106,32 +106,18 @@ pixelSegmentsOpt conf cSys trackDim csView =
 
 
 trackLikeLayer :: ∀ a b l rC r1 r2.
-                   IsSymbol l
-                => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
-                => { segmentPadding :: Number
-                   , coordinateSystem :: CoordSys ChrId BigInt | rC }
-                -> SProxy l
-                -> Component (b -> TrackLike a)
-                -> ContentLayer (Record ( view :: CoordSysView | r2 )) a
+                  IsSymbol l
+               => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
+               => { segmentPadding :: Number
+                  , coordinateSystem :: CoordSys ChrId BigInt | rC }
+               -> SProxy l
+               -> Component (b -> Map ChrId (Pair Number) -> Canvas.Dimensions -> a)
+               -> Layer (Tuple (Record ( view :: CoordSysView | r2 ))
+                               Canvas.Dimensions
+                      -> a)
 trackLikeLayer conf name com =
   let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
       segs = pixelSegments conf conf.coordinateSystem
-  in Layer Scrolling (Masked 5.0)
-       $ (\r c d -> r (get name c) (segs d c.view) d)
-      <$> com
-
-
-newTrackLikeLayer :: ∀ a b l rC r1 r2.
-                   IsSymbol l
-                => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
-                => { segmentPadding :: Number
-                   , coordinateSystem :: CoordSys ChrId BigInt | rC }
-                -> SProxy l
-                -> Component (b -> Map ChrId (Pair Number) -> Canvas.Dimensions -> a)
-                -> Layer (Tuple (Record ( view :: CoordSysView | r2 )) Canvas.Dimensions -> a)
-newTrackLikeLayer conf name com =
-  let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
-      segs = pixelSegmentsOpt conf conf.coordinateSystem
 
       fun :: (b -> Map ChrId (Pair Number) -> Canvas.Dimensions -> a) -> Tuple _ _ -> a
       fun f (Tuple r d) = f (get name r) (segs d r.view) d
@@ -140,23 +126,6 @@ newTrackLikeLayer conf name com =
       com' = fun <$> com
 
   in Layer Scrolling (Masked 5.0) com'
-
-
-
-trackLikeLayerOpt :: ∀ a b l rC r1 r2.
-                   IsSymbol l
-                => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
-                => { segmentPadding :: Number
-                   , coordinateSystem :: CoordSys ChrId BigInt | rC }
-                -> SProxy l
-                -> Component (b -> TrackLike a)
-                -> ContentLayer (Record ( view :: CoordSysView | r2 )) a
-trackLikeLayerOpt conf name com =
-  let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
-      segs = pixelSegmentsOpt conf conf.coordinateSystem
-  in Layer Scrolling (Masked 5.0)
-       $ (\r c d -> r (get name c) (segs d c.view) d)
-      <$> com
 
 
 
@@ -208,7 +177,7 @@ chrLabelsLayer :: ∀ r1 r2 r3.
                   { segmentPadding :: Number
                   , coordinateSystem :: CoordSys ChrId BigInt | r3 }
                -> { fontSize :: Int | r1 }
-               -> RenderableLayer { view :: CoordSysView | r2 }
+               -> Layer (Tuple _ Canvas.Dimensions -> { renderables :: List Renderable })
 chrLabelsLayer trackConf {fontSize} =
   let
       labelOffset chrId = 0.3 *
@@ -241,10 +210,13 @@ chrLabelsLayer trackConf {fontSize} =
 
 
   in Layer Scrolling (Masked 5.0)
-     $ CBottom \ {view} dim ->
-         map (inj _drawing <<< labelSeg dim view)
-         $ Map.toUnfoldable
-         $ pixelSegments trackConf trackConf.coordinateSystem dim view
+     $ CBottom \(Tuple {view} dim) ->
+         { renderables:
+           map (inj _drawing <<< labelSeg dim view)
+           $ Map.toUnfoldable
+           $ pixelSegments trackConf trackConf.coordinateSystem dim view
+         }
+
 
 
 chrBackgroundLayer :: ∀ r.
@@ -253,7 +225,7 @@ chrBackgroundLayer :: ∀ r.
                       , segmentPadding :: Number | r }
                    -> Map ChrId (Pair Number)
                    -> Canvas.Dimensions
-                   -> List Renderable
+                   -> { renderables :: List Renderable }
 chrBackgroundLayer conf seg size =
   let col c = if c then black else gray
 
@@ -268,9 +240,10 @@ chrBackgroundLayer conf seg size =
              (l   -     conf.segmentPadding) (-5.0)
              (r-l + 2.0*conf.segmentPadding) (size.height+10.0))
 
-  in map (inj _drawing
+  in { renderables:
+       map (inj _drawing
           <<< uncurry \c s -> filled (fillColor c) s)
-     $ evalState (traverse segBG $ Map.values seg) false
+     $ evalState (traverse segBG $ Map.values seg) false }
 
 
 newtype HexColor = HexColor Color

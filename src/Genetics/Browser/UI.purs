@@ -94,54 +94,6 @@ Makes sense -- `Aff` can produce the required data, while
 
 -}
 
-data BrowserCmdF a =
-    GetTrack String (Maybe TrackContainer -> a)
-  | SetTextContent TrackContainer String a
-  -- | Fetch (Aff Json) (Json -> a)
-
-type BrowserCmd a = Free BrowserCmdF a
-
-type BrowserState = { browserContainer :: BrowserContainer }
-
-cmdAff :: ∀ a.
-          BrowserState
-       -> BrowserCmdF a
-       -> Aff a
-cmdAff s (GetTrack name cont) = do
-  track <- pure <$> getTrack name s.browserContainer
-  pure $ cont track
-cmdAff s (SetTextContent tc val cont) = do
-  setTextContent tc val
-  pure cont
--- cmdAff s (Fetch (Tuple aff cont)) = do
---   b <- aff
---   pure $ cont b
-
-
-
-
-
--- data BrowserCmd a =
---     GetTrack (String -> Maybe a)
---   | AddTrack String TrackContainer a
---   | GetData (Aff a)
---   | AddChrLayers
-
--- type ViewManager =
---  { updateView  :: UpdateView -> Effect Unit
---  , browserView :: Effect CoordSysView
---  , addCallback :: (CoordSysView -> Effect Unit) -> Effect Unit
---  }
-
--- newtype BrowserState =
---   BS (Map String Unit)
-
-
---   BS { viewManager :: ViewManager
---      , browserContainer :: BrowserContainer
---      , trackInterfaces :: Map String (TrackInterface Unit)
---        }
-
 
 foreign import windowInnerSize :: Effect Canvas.Dimensions
 
@@ -549,7 +501,7 @@ runBrowser config bc = launchAff $ do
                                 , segmentPadding: 12.0 }
                                 config.chrs geneTC
       geneLayers <- addGeneLayers cSys config.tracks.gene { genes } geneTC
-      -- pure { chrs: chrLayers }
+
       pure $ Record.merge { chrs: chrLayers } geneLayers
 
     track <- initializeTrack cSys render viewManager.browserView geneTC
@@ -586,10 +538,6 @@ foreign import setWindow :: ∀ a. String -> a -> Effect Unit
 main :: Foreign -> Effect Unit
 main rawConfig = do
 
-  log "hello world!"
-  log "D:"
-
-
   el' <- do
     doc <- DOM.toDocument
            <$> (DOM.document =<< DOM.window)
@@ -619,23 +567,6 @@ main rawConfig = do
 
           log $ unsafeStringify c
           void $ runBrowser c bc
-
-
-
-main' :: Effect Unit
-main' = launchAff_ do
-
-  test <- Cacher.new (\x -> { one: 1 + x
-                            , another: (show x) <> "!" })
-
-  test.run 5
-
-  (show <$> test.last.one) >>= log
-  test.last.another >>= log
-
-  pure unit
-
-
 
 
 mouseChrSizes :: Array (Tuple ChrId BigInt)
