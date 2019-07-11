@@ -31,7 +31,7 @@ import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (inj)
 import Foreign (F, Foreign, ForeignError(..), readString)
-import Genetics.Browser.Canvas (ContentLayer, Renderable, RenderableLayer, _drawing)
+import Genetics.Browser.Canvas (Renderable, _drawing)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized, aroundPair, normalize, scaledSegments, scaledSegments', viewScale, xPerPixel)
 import Genetics.Browser.Layer (Component(CBottom), Layer(Layer), LayerMask(NoMask, Masked), LayerType(Fixed, Scrolling))
 import Genetics.Browser.Types (Bp, ChrId, _exp)
@@ -127,13 +127,6 @@ trackLikeLayer conf name com =
 
   in Layer Scrolling (Masked 5.0) com'
 
-
-
-renderFixedUI :: ∀ c.
-                 Component (Canvas.Dimensions -> Drawing)
-              -> RenderableLayer c
-renderFixedUI com = Layer Fixed NoMask $ map f com
-  where f draw = \_ d -> pure $ inj _drawing (draw d)
 
 
 fixedUILayer :: ∀ a.
