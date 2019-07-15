@@ -432,10 +432,9 @@ runBrowser config bc = launchAff $ do
 
     gwasTC <- getTrack "gwas" bc
 
-    gwasData <- fetchData gwasTC { snps: getSNPs cSys
-                                 , annotations: getAnnotations cSys }
-                                 { snps: config.urls.snps
-                                 , annotations: config.urls.annotations }
+    gwasData <- fetchData gwasTC  { snps: getSNPs cSys
+                                  , annotations: getAnnotations cSys } config.urls
+
 
     render <- do
       chrLayers <- addChrLayers { coordinateSystem: cSys
@@ -490,19 +489,13 @@ runBrowser config bc = launchAff $ do
 
     geneTC <- getTrack "gene" bc
 
-    genes <- withLoadingIndicator geneTC case config.urls.genes of
-        Nothing  -> throwError $ error "no genes configured"
-        Just url -> do
-          log $ "fetching genes"
-          g <- getGenes cSys url
-          log $ "genes fetched: " <> show (sum $ Array.length <$> g)
-          pure g
+    genes <- fetchData geneTC { genes: getGenes cSys } config.urls
 
     render <- do
       chrLayers <- addChrLayers { coordinateSystem: cSys
                                 , segmentPadding: 12.0 }
                                 config.chrs geneTC
-      geneLayers <- addGeneLayers cSys config.tracks.gene { genes } geneTC
+      geneLayers <- addGeneLayers cSys config.tracks.gene genes geneTC
 
       pure $ Record.merge { chrs: chrLayers } geneLayers
 
