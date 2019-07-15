@@ -6,14 +6,19 @@ module Genetics.Browser.Track
        , class TrackConfig
        , makeContainersImpl
        , makeContainers
+       , class TrackDataRecord
+       , fetchDataImpl
+       , fetchData
        ) where
 
 import Prelude
 
+import Data.Foldable (foldMap)
+import Data.Maybe (Maybe)
 import Data.Pair (Pair)
 import Effect (Effect)
 import Effect.Aff (Aff)
-import Genetics.Browser.Canvas (TrackContainer, trackContainer)
+import Genetics.Browser.Canvas (TrackContainer, trackContainer, withLoadingIndicator)
 import Genetics.Browser.Coordinates (CoordSysView)
 import Genetics.Browser.Layer (TrackPadding)
 import Genetics.Browser.Types (Point)
@@ -22,6 +27,7 @@ import Prim.RowList (class RowToList, Cons, Nil, kind RowList)
 import Record (delete, get, insert)
 import Type.Data.Symbol as Symbol
 import Type.Prelude (class IsSymbol, class TypeEquals, RLProxy(..), SProxy(..), from)
+import Unsafe.Coerce (unsafeCoerce)
 
 
 
@@ -175,3 +181,73 @@ makeContainers :: ∀ cl cr tr.
                -> Record cr
                -> Effect (Record tr)
 makeContainers = makeContainersImpl (RLProxy :: RLProxy cl)
+
+
+
+-- | `fetchData` puts a loading indicator in the provided TrackContainer,
+-- | fetches the data in the provided `urlRow` record, and parses it
+-- | using the parsers in the provided `parserRow` record.
+class TrackDataRecord
+      (fetcherList :: RowList)
+      (fetcherRow :: # Type)
+      (urlList :: RowList)
+      (urlRow :: # Type)
+      (dataRow :: # Type)
+      | fetcherList -> fetcherRow
+      , fetcherList -> urlRow
+      , fetcherList -> dataRow
+      , urlList  -> urlRow where
+  fetchDataImpl :: RLProxy fetcherList
+            -> RLProxy urlList
+            -> Record fetcherRow
+            -> Record urlRow
+            -> Aff (Record dataRow)
+
+
+instance trackDataCons ::
+  ( IsSymbol  name
+  , Row.Lacks name fetcherRow'
+  , Row.Cons  name (String -> Aff x) fetcherRow' fetcherRow
+  , Monoid x
+  , Row.Lacks name urlRow'
+  , Row.Cons  name (Maybe String) urlRow' urlRow
+  , Row.Lacks name dataRow'
+  , Row.Cons  name x dataRow' dataRow
+  , TrackDataRecord fetcherTail fetcherRow' urlTail urlRow' dataRow'
+  ) => TrackDataRecord (Cons name (String -> Aff x) fetcherTail) fetcherRow
+                       (Cons name (Maybe String) urlTail) urlRow
+                       dataRow where
+  fetchDataImpl _ _ fetchers urls = do
+    let name = SProxy :: _ name
+
+    rest <- fetchDataImpl (RLProxy :: _ fetcherTail)
+            (RLProxy :: _ urlTail)
+            (delete name fetchers)
+            (delete name urls)
+
+
+
+    dataset <- foldMap (get name fetchers) (get name urls)
+
+    pure $ insert name dataset rest
+
+
+instance trackDataNil ::
+  ( TypeEquals (Record dataRow) {}
+  ) => TrackDataRecord Nil () Nil () dataRow where
+  fetchDataImpl _ _ _ _ = pure $ from {}
+
+
+fetchData :: ∀ fetcherRow fetcherList urlRow urlList dataRow.
+             RowToList fetcherRow fetcherList
+          => RowToList urlRow urlList
+          => TrackDataRecord fetcherList fetcherRow urlList urlRow dataRow
+          => TrackContainer
+          -> Record fetcherRow
+          -> Record urlRow
+          -> Aff (Record dataRow)
+fetchData tc fs urls = withLoadingIndicator tc
+                       $ fetchDataImpl (RLProxy :: _ fetcherList)
+                                       (RLProxy :: _ urlList)
+                                       fs
+                                       urls

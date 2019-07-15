@@ -41,7 +41,7 @@ import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _Tot
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), trackSlots)
 import Genetics.Browser.Cacher as Cacher
-import Genetics.Browser.Track (class TrackRecord, makeContainers, makeTrack)
+import Genetics.Browser.Track (class TrackRecord, makeContainers, makeTrack, fetchData)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Genetics.Browser.UI.View (UpdateView(..))
 import Genetics.Browser.UI.View as View
@@ -431,10 +431,12 @@ runBrowser config bc = launchAff $ do
   gwasTrack <- forkAff do
 
     gwasTC <- getTrack "gwas" bc
-    gwasData <- withLoadingIndicator gwasTC
-                $  {snps:_, annotations:_}
-               <$> foldMap (getSNPs        cSys) config.urls.snps
-               <*> foldMap (getAnnotations cSys) config.urls.annotations
+
+    gwasData <- fetchData gwasTC { snps: getSNPs cSys
+                                 , annotations: getAnnotations cSys }
+                                 { snps: config.urls.snps
+                                 , annotations: config.urls.annotations }
+
     render <- do
       chrLayers <- addChrLayers { coordinateSystem: cSys
                                 , segmentPadding: 12.0 }

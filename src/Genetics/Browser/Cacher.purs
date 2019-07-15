@@ -37,7 +37,7 @@ instance cacherAffCons ::
   compile _ fun = do
     let name = SProxy :: _ name
 
-    tail <- compile (RLProxy :: _ inTail) (unsafeCoerce fun)
+    tail <- compile (RLProxy :: _ inTail) (unsafeCoerce fun) -- should be safe but should be better too lol
 
     avar <- AVar.empty
 
