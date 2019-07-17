@@ -787,7 +787,7 @@ _drawingBatch = SProxy :: SProxy "drawingBatch"
 _labels       = SProxy :: SProxy "labels"
 
 
-newLayer :: ∀ m c a renderList renderRow outRow.
+newLayer :: ∀ m c renderList renderRow outRow.
             MonadAff m
          => RowToList renderRow renderList
          => CacherAff c renderList renderRow outRow

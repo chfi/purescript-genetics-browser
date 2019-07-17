@@ -32,18 +32,19 @@ import Effect.Aff.AVar as AVar
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
 import Effect.Exception (error, throw)
+import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (HexColor, Peak, pixelSegments)
 import Genetics.Browser.Bed (getGenes)
+import Genetics.Browser.Cacher as Cacher
 import Genetics.Browser.Canvas (setTextContent, BrowserContainer, TrackAnimation(..), TrackContainer, _Container, addTrack, animateTrack, browserContainer, dragScroll, dragScrollTrack, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom, withLoadingIndicator)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scaleToScreen, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), trackSlots)
-import Genetics.Browser.Cacher as Cacher
 import Genetics.Browser.Track (class TrackRecord, makeContainers, makeTrack, fetchData)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
-import Genetics.Browser.UI.View (UpdateView(..))
+import Genetics.Browser.UI.View (UpdateView(..), ViewManager)
 import Genetics.Browser.UI.View as View
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
@@ -364,58 +365,17 @@ initInfoBox = do
   pure $ updateInfoBox el
 
 
-runBrowser :: BrowserConfig { gwas :: _
-                            , gene :: _ }
-           -> BrowserContainer
-           -> Effect (Fiber Unit)
-runBrowser config bc = launchAff $ do
 
-  let cSys :: CoordSys ChrId BigInt
-      cSys = coordSys mouseChrSizes
-      initialView = fromMaybe (wrap $ Pair zero (cSys^._TotalSize)) do
-        v <- config.initialChrs
-        (Pair l _) <- Map.lookup (wrap v.left) $ cSys^._Segments
-        (Pair _ r) <- Map.lookup (wrap v.right) $ cSys^._Segments
-        pure $ wrap $ Pair l r
-
-      clickRadius = 1.0
-
-  liftEffect $ initDebugDiv clickRadius
-
-  cmdInfoBox <- liftEffect $ initInfoBox
-
-
-  viewManager <- liftEffect $ View.browserViewManager
-                 cSys
-                 (wrap 200.0)
-                 { initialView }
-                 bc
-
-  -- Here *global* callbacks/input handlers are set, i.e. buttons &
-  -- keys that don't depend on track canvases
-  liftEffect do
-    let btnMods = { scrollMod: 0.10, zoomMod: 0.15 }
-    btnUI btnMods \u ->
-      viewManager.updateView u
-
-    buttonEvent "reset" do
-      let cmd = ModView (const $ unwrap initialView)
-      viewManager.updateView cmd
-
-    keyUI (bc ^. _Container) { scrollMod: 0.075 } \u -> do
-      viewManager.updateView u
-
-    let scrollZoomScale = 0.06
-    wheelZoom bc \dY -> do
-      let cmd = ZoomView $ 1.0 + scrollZoomScale * dY
-      viewManager.updateView cmd
-
+type BrowserState = { coordSys :: CoordSys ChrId BigInt
+                    , container :: BrowserContainer
+                    , viewManager :: ViewManager
+                    , cmdInfoBox :: (InfoBoxF -> Effect Unit) }
 
 
   -- this is used to set callbacks/input handlers for track/track
   -- canvas-dependent inputs
-  let setHandlers tc track = liftEffect do
-
+setHandlers :: _ -> _ -> _ -> Aff _
+setHandlers viewManager tc track = liftEffect do
         resizeEvent \d -> do
           launchAff_ $ track.queueCommand $ inj _docResize d
 
@@ -427,30 +387,36 @@ runBrowser config bc = launchAff $ do
             viewManager.updateView cmd
 
 
+mkGwas :: ∀ r. Ref BrowserState -> BrowserConfig { gwas :: _ | r} -> Aff _
+mkGwas bs config = do
+  bs' <- liftEffect $ Ref.read bs
+  let bc = bs'.container
+      cSys = bs'.coordSys
+      viewManager = bs'.viewManager
+      cmdInfoBox = bs'.cmdInfoBox
+      clickRadius = 1.0
 
-  gwasTrack <- forkAff do
+  gwasTC <- getTrack "gwas" bc
 
-    gwasTC <- getTrack "gwas" bc
-
-    gwasData <- fetchData gwasTC  { snps: getSNPs cSys
-                                  , annotations: getAnnotations cSys } config.urls
+  gwasData <- fetchData gwasTC  { snps: getSNPs cSys
+                                , annotations: getAnnotations cSys } config.urls
 
 
-    render <- do
-      chrLayers <- addChrLayers { coordinateSystem: cSys
-                                , segmentPadding: 12.0 }
-                                config.chrs gwasTC
-      gwasLayers <- addGWASLayers cSys config.tracks.gwas gwasData gwasTC
-      pure $ Record.merge { chrs: chrLayers } gwasLayers
+  render <- do
+    chrLayers <- addChrLayers { coordinateSystem: cSys
+                              , segmentPadding: 12.0 }
+                              config.chrs gwasTC
+    gwasLayers <- addGWASLayers cSys config.tracks.gwas gwasData gwasTC
+    pure $ Record.merge { chrs: chrLayers } gwasLayers
 
-    track <- initializeTrack cSys render viewManager.browserView gwasTC
-    setHandlers gwasTC track
+  track <- initializeTrack cSys render viewManager.browserView gwasTC
+  setHandlers viewManager gwasTC track
 
-    liftEffect $
+  liftEffect $
       viewManager.addCallback \csv ->
         launchAff_ $ track.queueCommand (inj _render unit)
 
-    liftEffect do
+  liftEffect do
       let sigSnps = filterSig config.score gwasData.snps
           annotAround pks snp =
             Array.find (\a -> a.covers `pairsOverlap` snp.position)
@@ -485,29 +451,90 @@ runBrowser config bc = launchAff $ do
         $ Center glyphClick
 
 
-  geneTrack <- forkAff do
+mkGene :: ∀ r. Ref BrowserState -> BrowserConfig { gene :: _ | r} -> Aff _
+mkGene bs config = do
+  bs' <- liftEffect $ Ref.read bs
+  let bc = bs'.container
+      cSys = bs'.coordSys
+      viewManager = bs'.viewManager
+      cmdInfoBox = bs'.cmdInfoBox
 
-    geneTC <- getTrack "gene" bc
+  geneTC <- getTrack "gene" bc
 
-    genes <- fetchData geneTC { genes: getGenes cSys } config.urls
+  genes <- fetchData geneTC { genes: getGenes cSys } config.urls
 
-    render <- do
-      chrLayers <- addChrLayers { coordinateSystem: cSys
-                                , segmentPadding: 12.0 }
-                                config.chrs geneTC
-      geneLayers <- addGeneLayers cSys config.tracks.gene genes geneTC
+  render <- do
+    chrLayers <- addChrLayers { coordinateSystem: cSys
+                              , segmentPadding: 12.0 }
+                              config.chrs geneTC
+    geneLayers <- addGeneLayers cSys config.tracks.gene genes geneTC
 
-      pure $ Record.merge { chrs: chrLayers } geneLayers
+    pure $ Record.merge { chrs: chrLayers } geneLayers
 
-    track <- initializeTrack cSys render viewManager.browserView geneTC
-    setHandlers geneTC track
-
-
-    liftEffect $ viewManager.addCallback \csv ->
-        launchAff_ $ track.queueCommand (inj _render unit)
+  track <- initializeTrack cSys render viewManager.browserView geneTC
+  setHandlers viewManager geneTC track
 
 
-  pure unit
+  liftEffect $ viewManager.addCallback \csv ->
+      launchAff_ $ track.queueCommand (inj _render unit)
+
+
+runBrowser :: BrowserConfig { gwas :: _
+                            , gene :: _ }
+           -> BrowserContainer
+           -> Effect (Fiber Unit)
+runBrowser config bc = launchAff $ do
+
+  let cSys :: CoordSys ChrId BigInt
+      cSys = coordSys mouseChrSizes
+      initialView = fromMaybe (wrap $ Pair zero (cSys^._TotalSize)) do
+        v <- config.initialChrs
+        (Pair l _) <- Map.lookup (wrap v.left) $ cSys^._Segments
+        (Pair _ r) <- Map.lookup (wrap v.right) $ cSys^._Segments
+        pure $ wrap $ Pair l r
+
+      clickRadius = 1.0
+
+  liftEffect $ initDebugDiv clickRadius
+
+  cmdInfoBox <- liftEffect $ initInfoBox
+
+
+  viewManager <- liftEffect $ View.browserViewManager
+                 cSys
+                 (wrap 200.0)
+                 { initialView }
+                 bc
+
+  bs <- liftEffect $ Ref.new { viewManager, cmdInfoBox, container: bc, coordSys: cSys }
+
+  -- Here *global* callbacks/input handlers are set, i.e. buttons &
+  -- keys that don't depend on track canvases
+  liftEffect do
+    let btnMods = { scrollMod: 0.10, zoomMod: 0.15 }
+    btnUI btnMods \u ->
+      viewManager.updateView u
+
+    buttonEvent "reset" do
+      let cmd = ModView (const $ unwrap initialView)
+      viewManager.updateView cmd
+
+    keyUI (bc ^. _Container) { scrollMod: 0.075 } \u -> do
+      viewManager.updateView u
+
+    let scrollZoomScale = 0.06
+    wheelZoom bc \dY -> do
+      let cmd = ZoomView $ 1.0 + scrollZoomScale * dY
+      viewManager.updateView cmd
+
+  case config.urls.snps of
+    Just _ -> mkGwas bs config *> pure unit
+    Nothing -> pure unit
+
+  case config.urls.genes of
+    Just _ -> mkGene bs config *> pure unit
+    Nothing -> pure unit
+
 
 
 
@@ -557,8 +584,13 @@ main rawConfig = do
 
           bc <- browserContainer el
 
-          addTrack bc "gwas" cs.gwas
-          addTrack bc "gene" cs.gene
+          case c.urls.snps of
+            Just _ -> addTrack bc "gwas" cs.gwas *> pure unit
+            Nothing -> pure unit
+
+          case c.urls.genes of
+            Just _ -> addTrack bc "gene" cs.gene *> pure unit
+            Nothing -> pure unit
 
           log $ unsafeStringify c
           void $ runBrowser c bc

@@ -102,16 +102,18 @@ animateDelta motion cb initial timeout = do
   pure { update, position, velocity }
 
 
+type ViewManager = { updateView  :: UpdateView -> Effect Unit
+                   , browserView :: Effect CoordSysView
+                   , addCallback :: (CoordSysView -> Effect Unit) -> Effect Unit
+                   }
+
 browserViewManager :: ∀ c.
                       CoordSys c BigInt
                    -> Milliseconds
                    -> { initialView :: CoordSysView }
                       -- , minimumBpPerPixel :: Number }
                    -> BrowserContainer
-                   -> Effect { updateView  :: UpdateView -> Effect Unit
-                             , browserView :: Effect CoordSysView
-                             , addCallback :: (CoordSysView -> Effect Unit) -> Effect Unit
-                             }
+                   -> Effect ViewManager
 browserViewManager cSys timeout options bc = do
 
   cbs <- Ref.new (mempty :: List (CoordSysView -> Effect Unit))
