@@ -9,6 +9,9 @@ module Genetics.Browser.Track
        , class TrackData
        , fetchDataImpl
        , fetchData
+       , class CombineFuns
+       , combineFunsImpl
+       , combineFuns
        ) where
 
 import Prelude
@@ -244,3 +247,71 @@ fetchData tc fs urls = withLoadingIndicator tc
                        $ fetchDataImpl (RLProxy :: _ fetcherList)
                                        fs
                                        urls
+
+
+
+-- | Combine a record of functions from records,
+-- | into a function from a record of their union,
+-- | to a record of their outputs.
+-- | E.g. `{f :: Record r1 -> a, g :: Record r2 -> b}`
+-- | into `Record (r1 + r2) -> { f :: a, g :: b }`
+class CombineFuns
+  (funsList :: RowList)
+  (funsRow :: # Type)
+  (argRow :: # Type)
+  (outRow :: # Type)
+  | funsList -> funsRow
+  , funsList -> argRow
+  , funsList -> outRow where
+  combineFunsImpl :: RLProxy funsList
+              -> Record funsRow
+              -> Record argRow
+              -> Record outRow
+
+
+instance combineFunCons ::
+  ( IsSymbol  name
+  , Row.Lacks name funsRow'
+  , Row.Cons  name (Record r -> a) funsRow' funsRow
+  , Row.Union argRow' r argRowUnion
+  , Row.Nub   argRowUnion argRowNubbed
+  , Row.Lacks name outRow'
+  , Row.Cons  name a outRow' outRow
+  , CombineFuns funsTail funsRow' argRow' outRow'
+  ) => CombineFuns (Cons name (Record r -> a) funsTail)
+                  funsRow
+                  argRowNubbed
+                  outRow where
+  combineFunsImpl _ funs args =
+    let name = SProxy :: _ name
+
+        thoseArgs :: Record argRow'
+        thoseArgs = unsafeCoerce args
+
+        theseArgs :: Record r
+        theseArgs = unsafeCoerce args
+
+        rest = combineFunsImpl (RLProxy :: _ funsTail)
+                               (delete name funs)
+                               thoseArgs
+        fn = (get name funs)
+
+    in (insert name (fn theseArgs) rest)
+
+
+instance combineFunNil ::
+  ( TypeEquals (Record outRow) {}
+  ) => CombineFuns Nil () () outRow where
+  combineFunsImpl _ _ _ = from {}
+
+
+-- | Note! this isn't actually type safe yet.
+-- | If two functions use arguments with the same label
+-- | but different types, things break...
+combineFuns :: ∀ funsList funsRow argRow outRow.
+               RowToList funsRow funsList
+            => CombineFuns funsList funsRow argRow outRow
+            => Record funsRow
+            -> Record argRow
+            -> Record outRow
+combineFuns funs args = combineFunsImpl (RLProxy :: _ funsList) funs args
