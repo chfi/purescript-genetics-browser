@@ -481,3 +481,67 @@ applyLayerDef :: ∀ browser track layer trackName layerName config a.
 applyLayerDef = applyLayerDefImpl
 
 
+
+-- | Class for checking if a RowList has a "conflict" with a
+-- | given label and type. If the list lacks the label, or
+-- | has the label with the same type, return False; if it
+-- | has the label, but with a different type, return True.
+class ConflictsWith
+  (list :: RowList)
+  (label :: Symbol)
+  (t :: Type)
+  (result :: Boolean)
+  | list label t -> result
+
+-- no conflict base case
+instance conflictsWithNil ::
+  ConflictsWith Nil label t False
+
+-- same label and type, no conflict, recurse
+instance conflictsWithCons1 ::
+  ( ConflictsWith tail label t tailResult
+  ) => ConflictsWith (Cons label  t  tail) label t tailResult
+
+-- found conflict base case
+else instance conflictsWithCons3 ::
+  ConflictsWith (Cons label  t' tail) label t True
+
+-- different label, same or different type, recurse
+else instance conflictsWithCons2 ::
+  ( ConflictsWith tail label t tailResult
+  ) =>  ConflictsWith (Cons label' t' tail) label t tailResult
+
+hasConflict :: ∀ row list l a .
+                 RowToList row list
+              => IsSymbol l
+              => ConflictsWith list l a True
+              => RProxy row
+              -> SProxy l
+              -> Proxy a
+              -> Unit
+hasConflict _ _ _ = unit
+
+
+noConflict :: ∀ row list l a .
+                 RowToList row list
+              => IsSymbol l
+              => ConflictsWith list l a False
+              => RProxy row
+              -> SProxy l
+              -> Proxy a
+              -> Unit
+noConflict _ _ _ = unit
+
+
+conflict1 = hasConflict  (RProxy :: _ (a :: Int, b :: String, c :: Boolean))
+                         (SProxy :: _ "c") (Proxy :: _ Int)
+
+conflict2 = hasConflict  (RProxy :: _ (a :: Int, b :: String, c :: Boolean))
+                         (SProxy :: _ "b") (Proxy :: _ Int)
+
+noconflict1 = noConflict (RProxy :: _ (a :: Int, b :: String, c :: Boolean))
+                         (SProxy :: _ "d") (Proxy :: _ Int)
+
+noconflict2 = noConflict (RProxy :: _ (a :: Int, b :: String, c :: Boolean))
+                         (SProxy :: _ "b") (Proxy :: _ String)
+
