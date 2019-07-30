@@ -532,16 +532,23 @@ noConflict :: ∀ row list l a .
               -> Unit
 noConflict _ _ _ = unit
 
+-- | Returns True if there are duplicates of any label with different types
+class ConflictingList
+  (list :: RowList)
+  (result :: Boolean)
+  | list -> result
 
-conflict1 = hasConflict  (RProxy :: _ (a :: Int, b :: String, c :: Boolean))
-                         (SProxy :: _ "c") (Proxy :: _ Int)
+instance conflictingListNil :: ConflictingList Nil False
 
-conflict2 = hasConflict  (RProxy :: _ (a :: Int, b :: String, c :: Boolean))
-                         (SProxy :: _ "b") (Proxy :: _ Int)
+instance conflictingListCons ::
+  ( ConflictsWith tail label t conflicts
+  , ConflictingList tail tailResult
+  , Boolean.Or conflicts tailResult result
+  ) => ConflictingList (Cons label t tail) result
 
-noconflict1 = noConflict (RProxy :: _ (a :: Int, b :: String, c :: Boolean))
-                         (SProxy :: _ "d") (Proxy :: _ Int)
-
-noconflict2 = noConflict (RProxy :: _ (a :: Int, b :: String, c :: Boolean))
-                         (SProxy :: _ "b") (Proxy :: _ String)
-
+doesConflict :: ∀ row list.
+                RowToList row list
+             => ConflictingList list True
+             => RProxy row
+             -> Unit
+doesConflict _ = unit
