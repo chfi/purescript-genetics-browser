@@ -28,6 +28,7 @@ import Genetics.Browser.Types (Point)
 import Prim.Boolean (False, True, kind Boolean)
 import Prim.Row as Row
 import Prim.RowList (class RowToList, Cons, Nil, kind RowList)
+import Prim.TypeError (class Fail, Text)
 import Record (delete, get, insert)
 import Type.Data.Boolean as Boolean
 import Type.Data.Symbol as Symbol
@@ -552,3 +553,55 @@ doesConflict :: ∀ row list.
              => RProxy row
              -> Unit
 doesConflict _ = unit
+
+
+class ConflictingRow
+  (row :: # Type)
+  (result :: Boolean)
+  | row -> result
+
+instance conflictingRow ::
+  ( RowToList row list
+  , ConflictingList list result
+  ) => ConflictingRow row result
+
+
+class UnionConflict (fail :: Boolean)
+
+instance unionConflictFail ::
+  ( Fail (Text "Tried to take union of conflicting rows")
+  ) => UnionConflict True
+
+
+instance unionConflictSuccess ::
+  UnionConflict False
+
+-- | Takes the union of two rows, except it errors if there are
+-- | overlapping labels of different types, and it removes the
+-- | redundant entries.
+class SafeUnion
+  (left :: # Type)
+  (right :: # Type)
+  (union :: # Type)
+  | left right -> union
+
+instance safeUnion ::
+  ( UnionConflict conflicting
+  , Row.Union left right union
+  , RowToList union list
+  , ConflictingList list conflicting
+  , Row.Nub union nubbed
+  ) => SafeUnion left right nubbed
+
+
+rowUnion :: ∀ left right union.
+            SafeUnion left right union
+         => RProxy left
+         -> RProxy right
+         -> RProxy union
+         -> Unit
+rowUnion _ _ _ = unit
+
+check = rowUnion (RProxy :: _ (a :: Int, b :: String))
+                 (RProxy :: _ (b :: String))
+                 (RProxy :: _ _)
