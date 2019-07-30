@@ -25,11 +25,13 @@ import Genetics.Browser.Canvas (TrackContainer, trackContainer, withLoadingIndic
 import Genetics.Browser.Coordinates (CoordSysView)
 import Genetics.Browser.Layer (TrackPadding)
 import Genetics.Browser.Types (Point)
+import Prim.Boolean (False, True, kind Boolean)
 import Prim.Row as Row
 import Prim.RowList (class RowToList, Cons, Nil, kind RowList)
 import Record (delete, get, insert)
+import Type.Data.Boolean as Boolean
 import Type.Data.Symbol as Symbol
-import Type.Prelude (class IsSymbol, class TypeEquals, RLProxy(..), SProxy(..), from)
+import Type.Prelude (class IsSymbol, class TypeEquals, Proxy(..), RLProxy(..), RProxy(..), SProxy(..), from)
 import Unsafe.Coerce (unsafeCoerce)
 
 
@@ -315,3 +317,167 @@ combineFuns :: ∀ funsList funsRow argRow outRow.
             -> Record argRow
             -> Record outRow
 combineFuns funs args = combineFunsImpl (RLProxy :: _ funsList) funs args
+
+
+
+class BuildLayers
+  (layers :: # Type)
+  (output :: # Type)
+  | layers -> output
+
+
+
+class GetBrowserConfig
+  (totalConfig :: # Type)
+  (browser :: # Type)
+  | totalConfig -> browser where
+    getBrowserConfigImpl :: Record totalConfig
+                         -> Record browser
+
+instance getBrowserConfig ::
+  ( IsSymbol sBrowser
+  , TypeEquals (SProxy sBrowser) (SProxy "browser")
+  , IsSymbol sLayers
+  , TypeEquals (SProxy sLayers) (SProxy "layers")
+
+  , Row.Cons sBrowser (Record browser') totalConfig' totalConfig
+  , Row.Lacks sBrowser totalConfig'
+
+  , Row.Cons sLayers layers browser browser'
+  , Row.Lacks sLayers browser
+  ) => GetBrowserConfig totalConfig browser where
+  getBrowserConfigImpl total =
+    let browser' :: Record browser'
+        browser' = get (from (SProxy :: _ "browser")) total
+    in delete (from (SProxy :: _ "layers")) browser'
+
+
+class GetTrackConfig
+  (totalConfig :: # Type)
+  (track :: # Type)
+  (trackName :: Symbol)
+  | totalConfig trackName -> track where
+    getTrackConfigImpl :: Record totalConfig
+                       -> SProxy trackName
+                       -> Record track
+
+instance getTrackConfig ::
+  ( IsSymbol sTracks
+  , TypeEquals (SProxy sTracks) (SProxy "tracks")
+  , IsSymbol sLayers
+  , TypeEquals (SProxy sLayers) (SProxy "layers")
+  , IsSymbol trackName
+
+  , Row.Cons sTracks (Record tracks) totalConfig' totalConfig
+  , Row.Lacks sTracks totalConfig'
+
+  , Row.Cons trackName (Record thisTrack') tracks' tracks
+  , Row.Lacks trackName tracks'
+
+  , Row.Cons sLayers layers thisTrack thisTrack'
+  , Row.Lacks sLayers thisTrack
+
+  ) => GetTrackConfig totalConfig thisTrack trackName where
+    getTrackConfigImpl total _ =
+      let tracks' :: Record tracks
+          tracks' = get (from (SProxy :: _ "tracks")) total
+
+          thisTrack :: Record thisTrack'
+          thisTrack = get (from (SProxy :: _ trackName)) tracks'
+
+      in delete (from (SProxy :: _ "layers")) thisTrack
+
+
+
+class GetLayerConfig
+  (totalConfig :: # Type)
+  (layer :: # Type)
+  (trackName :: Symbol)
+  (layerName :: Symbol)
+  | totalConfig trackName layerName -> layer where
+    getLayerConfigImpl :: Record totalConfig
+                       -> SProxy trackName
+                       -> SProxy layerName
+                       -> Record layer
+
+instance getLayerConfig ::
+  ( IsSymbol sTracks
+  , TypeEquals (SProxy sTracks) (SProxy "tracks")
+  , IsSymbol sLayers
+  , TypeEquals (SProxy sLayers) (SProxy "layers")
+  , IsSymbol trackName
+  , IsSymbol layerName
+
+  , Row.Cons sTracks (Record tracks) totalConfig' totalConfig
+  , Row.Lacks sTracks totalConfig'
+
+  , Row.Cons trackName (Record thisTrack) tracks' tracks
+  , Row.Lacks trackName tracks'
+
+  , Row.Cons sLayers (Record layers) thisTrack' thisTrack
+  , Row.Lacks sLayers thisTrack
+
+  , Row.Cons layerName (Record thisLayer) layers' layers
+  , Row.Lacks layerName layers'
+  ) => GetLayerConfig totalConfig thisLayer trackName layerName where
+    getLayerConfigImpl total _ _ =
+      let tracks' :: Record tracks
+          tracks' = get (from (SProxy :: _ "tracks")) total
+
+          thisTrack :: Record thisTrack
+          thisTrack = get (from (SProxy :: _ trackName)) tracks'
+
+          layers :: Record layers
+          layers = get (from (SProxy :: _ "layers")) thisTrack
+
+      in get (from (SProxy :: _ layerName)) layers
+
+
+newtype LayerDef browser track layer a
+  = LayerDef ({ browserConfig :: Record browser
+              , trackConfig :: Record track
+              , layerConfig :: Record layer }
+              -> a)
+
+
+class ApplyLayerDef
+  (browser :: # Type)
+  (track :: # Type)
+  (layer :: # Type)
+  (totalConfig :: # Type)
+  (trackName :: Symbol)
+  (layerName :: Symbol)
+  a
+  | trackName layerName totalConfig -> track layer where
+    applyLayerDefImpl :: LayerDef browser track layer a
+                      -> SProxy trackName
+                      -> SProxy layerName
+                      -> Record totalConfig
+                      -> a
+
+instance applyLayerDefInst ::
+  ( IsSymbol trackName
+  , IsSymbol layerName
+  , GetBrowserConfig totalConfig browser
+  , GetTrackConfig totalConfig track trackName
+  , GetLayerConfig totalConfig layer trackName layerName
+  ) => ApplyLayerDef browser track layer totalConfig trackName layerName a where
+    applyLayerDefImpl (LayerDef f) trackName layerName total =
+      let browserConfig = getBrowserConfigImpl total
+          trackConfig = getTrackConfigImpl total trackName
+          layerConfig = getLayerConfigImpl total trackName layerName
+      in f { browserConfig, trackConfig, layerConfig }
+
+
+applyLayerDef :: ∀ browser track layer trackName layerName config a.
+                 IsSymbol trackName
+              => IsSymbol layerName
+              => ApplyLayerDef browser track layer config trackName layerName a
+              => LayerDef browser track layer a
+              -> SProxy trackName
+              -> SProxy layerName
+              -> Record config
+              -> a
+applyLayerDef = applyLayerDefImpl
+
+
