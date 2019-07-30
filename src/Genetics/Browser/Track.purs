@@ -12,6 +12,11 @@ module Genetics.Browser.Track
        , class CombineFuns
        , combineFunsImpl
        , combineFuns
+       , class SafeUnion
+       , class UnionConflict
+       , class ConflictingList
+       , class ConflictsWith
+       , LayerDef(..)
        ) where
 
 import Prelude
@@ -28,7 +33,7 @@ import Genetics.Browser.Types (Point)
 import Prim.Boolean (False, True, kind Boolean)
 import Prim.Row as Row
 import Prim.RowList (class RowToList, Cons, Nil, kind RowList)
-import Prim.TypeError (class Fail, Text)
+import Prim.TypeError (class Fail, Above, Beside, Quote, Text)
 import Record (delete, get, insert)
 import Type.Data.Boolean as Boolean
 import Type.Data.Symbol as Symbol
@@ -276,14 +281,13 @@ instance combineFunCons ::
   ( IsSymbol  name
   , Row.Lacks name funsRow'
   , Row.Cons  name (Record r -> a) funsRow' funsRow
-  , Row.Union argRow' r argRowUnion
-  , Row.Nub   argRowUnion argRowNubbed
+  , SafeUnion argRow' r argRowUnion
   , Row.Lacks name outRow'
   , Row.Cons  name a outRow' outRow
   , CombineFuns funsTail funsRow' argRow' outRow'
   ) => CombineFuns (Cons name (Record r -> a) funsTail)
                   funsRow
-                  argRowNubbed
+                  argRowUnion
                   outRow where
   combineFunsImpl _ funs args =
     let name = SProxy :: _ name
@@ -512,26 +516,6 @@ else instance conflictsWithCons2 ::
   ( ConflictsWith tail label t tailResult
   ) =>  ConflictsWith (Cons label' t' tail) label t tailResult
 
-hasConflict :: ∀ row list l a .
-                 RowToList row list
-              => IsSymbol l
-              => ConflictsWith list l a True
-              => RProxy row
-              -> SProxy l
-              -> Proxy a
-              -> Unit
-hasConflict _ _ _ = unit
-
-
-noConflict :: ∀ row list l a .
-                 RowToList row list
-              => IsSymbol l
-              => ConflictsWith list l a False
-              => RProxy row
-              -> SProxy l
-              -> Proxy a
-              -> Unit
-noConflict _ _ _ = unit
 
 -- | Returns True if there are duplicates of any label with different types
 class ConflictingList
@@ -547,34 +531,18 @@ instance conflictingListCons ::
   , Boolean.Or conflicts tailResult result
   ) => ConflictingList (Cons label t tail) result
 
-doesConflict :: ∀ row list.
-                RowToList row list
-             => ConflictingList list True
-             => RProxy row
-             -> Unit
-doesConflict _ = unit
-
-
-class ConflictingRow
-  (row :: # Type)
-  (result :: Boolean)
-  | row -> result
-
-instance conflictingRow ::
-  ( RowToList row list
-  , ConflictingList list result
-  ) => ConflictingRow row result
-
-
-class UnionConflict (fail :: Boolean)
+class UnionConflict (left :: # Type) (right :: # Type) (fail :: Boolean)
 
 instance unionConflictFail ::
-  ( Fail (Text "Tried to take union of conflicting rows")
-  ) => UnionConflict True
+  ( Fail (Above
+          (Text "Tried to take the union of conflicting rows:\n")
+          (Above (Quote (Record left))
+                 (Beside (Text "\n")
+                         (Quote (Record right)))))
+  ) => UnionConflict left right True
 
-
-instance unionConflictSuccess ::
-  UnionConflict False
+else instance unionConflictSuccess ::
+  UnionConflict left right False
 
 -- | Takes the union of two rows, except it errors if there are
 -- | overlapping labels of different types, and it removes the
@@ -586,22 +554,9 @@ class SafeUnion
   | left right -> union
 
 instance safeUnion ::
-  ( UnionConflict conflicting
+  ( UnionConflict left right conflicting
   , Row.Union left right union
   , RowToList union list
   , ConflictingList list conflicting
   , Row.Nub union nubbed
   ) => SafeUnion left right nubbed
-
-
-rowUnion :: ∀ left right union.
-            SafeUnion left right union
-         => RProxy left
-         -> RProxy right
-         -> RProxy union
-         -> Unit
-rowUnion _ _ _ = unit
-
-check = rowUnion (RProxy :: _ (a :: Int, b :: String))
-                 (RProxy :: _ (b :: String))
-                 (RProxy :: _ _)
