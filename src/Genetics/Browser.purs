@@ -31,7 +31,7 @@ import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple), uncurry)
 import Data.Variant (inj)
 import Foreign (F, Foreign, ForeignError(..), readString)
-import Genetics.Browser.Canvas (ContentLayer, Renderable, RenderableLayer, _drawing)
+import Genetics.Browser.Canvas (Renderable, _drawing)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized, aroundPair, normalize, scaledSegments, scaledSegments', viewScale, xPerPixel)
 import Genetics.Browser.Layer (Component(CBottom), Layer(Layer), LayerMask(NoMask, Masked), LayerType(Fixed, Scrolling))
 import Genetics.Browser.Types (Bp, ChrId, _exp)
@@ -106,51 +106,45 @@ pixelSegmentsOpt conf cSys trackDim csView =
 
 
 trackLikeLayer :: ∀ a b l rC r1 r2.
-                   IsSymbol l
-                => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
-                => { segmentPadding :: Number
-                   , coordinateSystem :: CoordSys ChrId BigInt | rC }
-                -> SProxy l
-                -> Component (b -> TrackLike a)
-                -> ContentLayer (Record ( view :: CoordSysView | r2 )) a
+                  IsSymbol l
+               => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
+               => { segmentPadding :: Number
+                  , coordinateSystem :: CoordSys ChrId BigInt | rC }
+               -> SProxy l
+               -> Component (b -> Map ChrId (Pair Number) -> Canvas.Dimensions -> a)
+               -> Layer (Tuple (Record ( view :: CoordSysView | r2 ))
+                               Canvas.Dimensions
+                      -> a)
 trackLikeLayer conf name com =
   let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
       segs = pixelSegments conf conf.coordinateSystem
-  in Layer Scrolling (Masked 5.0)
-       $ (\r c d -> r (get name c) (segs d c.view) d)
-      <$> com
 
+      fun :: (b -> Map ChrId (Pair Number) -> Canvas.Dimensions -> a) -> Tuple _ _ -> a
+      fun f (Tuple r d) = f (get name r) (segs d r.view) d
 
-trackLikeLayerOpt :: ∀ a b l rC r1 r2.
-                   IsSymbol l
-                => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
-                => { segmentPadding :: Number
-                   , coordinateSystem :: CoordSys ChrId BigInt | rC }
-                -> SProxy l
-                -> Component (b -> TrackLike a)
-                -> ContentLayer (Record ( view :: CoordSysView | r2 )) a
-trackLikeLayerOpt conf name com =
-  let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
-      segs = pixelSegmentsOpt conf conf.coordinateSystem
-  in Layer Scrolling (Masked 5.0)
-       $ (\r c d -> r (get name c) (segs d c.view) d)
-      <$> com
+      com' :: Component (Tuple (Record (view :: CoordSysView | r2)) Canvas.Dimensions -> a)
+      com' = fun <$> com
+
+  in Layer Scrolling (Masked 5.0) com'
 
 
 
-renderFixedUI :: ∀ c.
-                 Component (Canvas.Dimensions -> Drawing)
-              -> RenderableLayer c
-renderFixedUI com = Layer Fixed NoMask $ map f com
-  where f draw = \_ d -> pure $ inj _drawing (draw d)
+fixedUILayer :: ∀ a.
+                Component (Canvas.Dimensions -> Drawing)
+             -> Layer (Tuple a Canvas.Dimensions
+                       -> { renderables :: List Renderable })
+fixedUILayer com = Layer Fixed NoMask $ map f com
+  where f draw = \(Tuple _ d) -> { renderables: pure $ inj _drawing (draw d) }
+
 
 
 thresholdRuler :: ∀ r r1.
+                  Tuple
                   { threshold :: Record (VScaleRow r1)
                   , rulerColor :: HexColor | r }
-               -> Canvas.Dimensions
-               -> List Renderable
-thresholdRuler {threshold: {sig,min,max}, rulerColor} slot =
+                  Canvas.Dimensions
+               -> { renderables :: List Renderable }
+thresholdRuler (Tuple {threshold: {sig,min,max}, rulerColor} slot) =
   let y = slot.height - (normalize min max sig * slot.height)
 
       outline = outlineColor (unwrap rulerColor)
@@ -167,16 +161,16 @@ thresholdRuler {threshold: {sig,min,max}, rulerColor} slot =
               (slot.width+10.0) (y-6.0)
               (fillColor $ unwrap rulerColor) text
 
-  in List.fromFoldable
+  in { renderables: List.fromFoldable
        [ inj _drawing rulerDrawing
-       , inj _drawing label ]
+       , inj _drawing label ] }
 
 
 chrLabelsLayer :: ∀ r1 r2 r3.
                   { segmentPadding :: Number
                   , coordinateSystem :: CoordSys ChrId BigInt | r3 }
                -> { fontSize :: Int | r1 }
-               -> RenderableLayer { view :: CoordSysView | r2 }
+               -> Layer (Tuple _ Canvas.Dimensions -> { renderables :: List Renderable })
 chrLabelsLayer trackConf {fontSize} =
   let
       labelOffset chrId = 0.3 *
@@ -209,10 +203,13 @@ chrLabelsLayer trackConf {fontSize} =
 
 
   in Layer Scrolling (Masked 5.0)
-     $ CBottom \ {view} dim ->
-         map (inj _drawing <<< labelSeg dim view)
-         $ Map.toUnfoldable
-         $ pixelSegments trackConf trackConf.coordinateSystem dim view
+     $ CBottom \(Tuple {view} dim) ->
+         { renderables:
+           map (inj _drawing <<< labelSeg dim view)
+           $ Map.toUnfoldable
+           $ pixelSegments trackConf trackConf.coordinateSystem dim view
+         }
+
 
 
 chrBackgroundLayer :: ∀ r.
@@ -221,7 +218,7 @@ chrBackgroundLayer :: ∀ r.
                       , segmentPadding :: Number | r }
                    -> Map ChrId (Pair Number)
                    -> Canvas.Dimensions
-                   -> List Renderable
+                   -> { renderables :: List Renderable }
 chrBackgroundLayer conf seg size =
   let col c = if c then black else gray
 
@@ -236,9 +233,10 @@ chrBackgroundLayer conf seg size =
              (l   -     conf.segmentPadding) (-5.0)
              (r-l + 2.0*conf.segmentPadding) (size.height+10.0))
 
-  in map (inj _drawing
+  in { renderables:
+       map (inj _drawing
           <<< uncurry \c s -> filled (fillColor c) s)
-     $ evalState (traverse segBG $ Map.values seg) false
+     $ evalState (traverse segBG $ Map.values seg) false }
 
 
 newtype HexColor = HexColor Color
@@ -278,6 +276,7 @@ defaultVScaleConfig =
   , hPad: 0.125
   , numSteps: 3
   , fonts: { labelSize: 18, scaleSize: 14 } }
+
 
 
 drawVScaleInSlot :: VScale (VScaleRow ())

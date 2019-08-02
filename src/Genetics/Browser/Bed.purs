@@ -2,11 +2,13 @@ module Genetics.Browser.Bed where
 
 import Prelude
 
+import Affjax (get, printResponseFormatError) as Affjax
+import Affjax.ResponseFormat (json) as Affjax
 import Control.Monad.Except (runExcept)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
-import Data.Either (Either(Right, Left))
+import Data.Either (Either(Right, Left), either)
 import Data.Filterable (partitionMap)
 import Data.Foldable (foldMap)
 import Data.Int as Int
@@ -29,8 +31,6 @@ import Foreign (Foreign, ForeignError(..), MultipleErrors, readArray, renderFore
 import Genetics.Browser (Feature, groupToMap)
 import Genetics.Browser.Coordinates (CoordSys, _Segments, pairSize)
 import Genetics.Browser.Types (Bp, ChrId)
-import Network.HTTP.Affjax (get) as Affjax
-import Network.HTTP.Affjax.Response (json) as Affjax
 import Prim.RowList (kind RowList)
 import Simple.JSON (read)
 import Unsafe.Coerce (unsafeCoerce)
@@ -180,11 +180,17 @@ getGenes :: CoordSys ChrId BigInt
          -> String
          -> Aff (Map ChrId (Array BedFeature))
 getGenes cs url = do
-  resp <- _.response <$> Affjax.get Affjax.json url
+  resp <- Affjax.get Affjax.json url
+
+
+  body <- either (throwError
+                  <<< error
+                  <<< Affjax.printResponseFormatError)
+          pure resp.body
 
   let throwParseError = throwError <<< error <<< foldMap (_ <> ", ")
 
-  array <- case runExcept $ readArray $ unsafeCoerce resp of
+  array <- case runExcept $ readArray $ unsafeCoerce body of
     Left err -> throwParseError $ map renderForeignError err
     Right ls -> pure ls
 

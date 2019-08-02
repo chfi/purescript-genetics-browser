@@ -6,37 +6,26 @@ You need npm 5, as well as the Purescript compiler and build tools. The latter
 can be installed with npm:
 
 ```shell
-npm install -g purescript@"== 0.12.0" pulp psc-package
+npm install -g purescript@"== 0.12.5" spago parcel
 
 ```
 
-The browser can then be built using make, into the example folder at `./dist/app.js`:
+The browser can be built for production using make, into `/dist/index.js`:
 
 ``` shell
 make build
 ```
 
-That produces `./dist/app.js`. Opening `./dist/index.html`
+That produces `./dist/index.js`. Opening `./dist/index.html`
 should now display the genome browser.
 
-The output path can be changed with the OUT option:
+`index.js` in the root folder can be changed to modify the way the
+browser functions are exposed. By default, the PureScript module
+`Genetics.Browser.UI` is bound to the global JS variable
+`GenomeBrowser`.
 
 
-``` shell
-make OUT=otherdist/index.js build
-```
-
-Pass `FLAGS=-w` to `make` for rebuilding on source code change.
-
-``` shell
-make FLAGS=-w build
-```
-
-The output app.js file can be loaded into an HTML file, doing so exposes
-the genome browser Track module at a global variable, `GGB` by default.
-
-
-Unit tests and QuickCheck tests can be run with
-```shell
-make test
-```
+For development, start the parcel server with `make start` (or `parcel
+index.html`), and compile the PureScript modules with either `spago
+build`, start a spago build server with `spago build -w`, or start the
+compiler using your IDE.

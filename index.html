@@ -1,0 +1,119 @@
+<!doctype html>
+<meta charset="UTF-8">
+<html>
+  <head>
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.3.1/css/all.css" integrity="sha384-mzrmE5qonljUremFsqc01SB46JvROS7bZs3IO2EmfFsd15uHvIt+Y8vEf7N7fWAU" crossorigin="anonymous">
+    <link href="style.css" rel="stylesheet" >
+  </head>
+  <body style="margin: 0">
+
+    <!-- <h1 style="font: bold normal 1.8em sans-serif; margin: 20px">Genetics Genome Browser</h1> -->
+
+    <div id="info-line">
+        Powered by <a href=https://github.com/genenetwork/purescript-genetics-browser>genenetwork/purescript-genetics-browser</a>
+    </div>
+    <div id="browser">
+      <div id="controls">
+        <button id="scrollLeft"  type="button" >
+          <i class="fas fa-arrow-left"></i>
+        </button>
+        <button id="scrollRight" type="button" >
+          <i class="fas fa-arrow-right"></i>
+        </button>
+        <button id="zoomOut" type="button" >
+          <i class="fas fa-search-minus"></i>
+        </button>
+        <button id="zoomIn"  type="button" >
+          <i class="fas fa-search-plus"></i>
+        </button>
+        <button id="reset"  type="button" >Reset</button>
+      </div>
+    </div>
+
+    <script src="./index.js"></script>
+    <script>
+
+      var localUrls =
+      { snps:        "./gwas.json",
+        annotations: "./annotations.json"
+      };
+
+      var urlRoot = "https://raw.githubusercontent.com/chfi/genetics-browser-example/master/track/data/";
+
+      var githubUrls =
+      { snps:        urlRoot + "gwas.json",
+        annotations: urlRoot + "annots_fake.json"
+      };
+
+
+      var vscaleWidth = 90.0;
+      var legendWidth = 140.0;
+
+      var score = { min: 0.0, max: 30.0, sig: 4 };
+
+      var gwasPadding = { top: 35.0,
+                          bottom: 35.0,
+                          left: vscaleWidth,
+                          right: legendWidth };
+
+      var gwasHeight = 320.0;
+
+      var config =
+          { score: score,
+
+            urls: localUrls,
+
+            tracks: {
+                gwas: {
+                    trackHeight: gwasHeight,
+                    padding: gwasPadding,
+                    snps: {
+                        radius: 3.75,
+                        lineWidth: 1.0,
+                        color: { outline: "#FFFFFF",
+                                 fill:    "#00008B" },
+                        pixelOffset: {x: 0.0, y: 0.0}
+                    },
+
+                    annotations: {
+                        radius: 5.5,
+                        outline:   "#000000",
+                        snpColor:  "#0074D9",
+                        geneColor: "#FF4136"
+                    },
+
+                    score: score,
+
+                    legend: {
+                        fontSize: 14,
+                        hPad: 0.2,
+                        vPad: 0.2
+                    },
+
+                    vscale: {
+                        color: "#000000",
+                        hPad: 0.125,
+                        numSteps: 3,
+                        fonts: { labelSize: 18, scaleSize: 16 }
+                    },
+
+                },
+
+            },
+
+            chrs: {
+                chrBG1: "#FFFFFF",
+                chrBG2: "#EEEEEE",
+                chrLabels: { fontSize: 16 },
+            },
+
+            // initialChrs: { left: "1", right: "5" }
+          };
+
+      GenomeBrowser.main(config)();
+
+      document.getElementById("controls").style.visibility = "visible";
+
+    </script>
+  </body>
+</html>

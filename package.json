@@ -3,11 +3,15 @@
   "version": "0.0.1",
   "description": "Genetics network browser written in Purescript",
   "dependencies": {
-    "big-integer": "^1.6.26"
+    "big-integer": "^1.6.26",
+    "parcel-plugin-static-files-copy": "^2.1.2"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chfi/purescript-genetics-browser.git"
+  },
+  "devDependencies": {
+    "cssnano": "^4.1.10"
   }
 }

@@ -6,18 +6,13 @@ module Genetics.Browser.Canvas
        , Renderable
        , BatchDrawing
        , BigDrawing
-       , ContentLayer
-       , RenderableLayer
-       , RenderableLayerHotspots
        , Label
        , LabelPlace(..)
        , _drawing
        , _bigDrawing
        , _drawingBatch
        , _labels
-       , createAndAddLayer
-       , createAndAddLayer_
-       , renderLayer
+       , newLayer
        , getDimensions
        , _Container
        , dragScroll
@@ -71,6 +66,8 @@ import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Effect.Uncurried (EffectFn2, EffectFn3, EffectFn5, runEffectFn2, runEffectFn3, runEffectFn5)
+import Genetics.Browser.Cacher (class CacherAff)
+import Genetics.Browser.Cacher as Cacher
 import Genetics.Browser.Layer (Component, Layer(Layer), TrackDimensions, TrackPadding, _Component, asSlot, setContextTranslation, slotContext, slotOffset, slotSize, trackSlots)
 import Genetics.Browser.Layer as Layer
 import Graphics.Canvas (CanvasElement, Context2D)
@@ -80,6 +77,7 @@ import Graphics.Drawing (render, translate) as Drawing
 import Graphics.Drawing.Font (font, fontString) as Drawing
 import Graphics.Drawing.Font (sansSerif)
 import Partial.Unsafe (unsafeCrashWith)
+import Prim.RowList (class RowToList)
 import Record as Record
 import Unsafe.Coerce (unsafeCoerce)
 import Web.DOM (Element)
@@ -789,35 +787,26 @@ _drawingBatch = SProxy :: SProxy "drawingBatch"
 _labels       = SProxy :: SProxy "labels"
 
 
-
--- | A `ContentLayer` represents anything that can be produced in the
--- | context of a Layer with a Canvas, and some sort of additional configuration.
-type ContentLayer c a = Layer (c -> Canvas.Dimensions -> a)
-
-type RenderableLayer c = ContentLayer c (List Renderable)
-type RenderableLayerHotspots c a =
-  ContentLayer c { renderables :: List Renderable
-                 , hotspots :: Number -> Point -> Array a }
-
-
-
--- | Provided a TrackContainer, we can initialize and add a named layer.
--- | This returns a function that can be used to render to the layer maybe idk????
--- | If the layer already existed, overwrites it
-createAndAddLayer :: ∀ m c a.
-                     MonadAff m
-                  => TrackContainer
-                  -> String
-                  -> RenderableLayerHotspots c a
-                  -> m { render :: c -> m (List Renderable)
-                       , drawOnCanvas :: Pair Number -> List Renderable -> m Unit
-                       , lastHotspots :: m (Number -> Point -> Array a) }
-createAndAddLayer bc name layer@(Layer lt _ com) = do
+newLayer :: ∀ m c renderList renderRow outRow.
+            MonadAff m
+         => RowToList renderRow renderList
+         => CacherAff c renderList renderRow outRow
+         => TrackContainer
+         -> String
+         -> Layer (Tuple c Canvas.Dimensions -> Record renderRow)
+         -> m { run :: c -> Aff Unit
+              , drawOnCanvas :: Pair Number -> List Renderable -> m Unit
+              , last :: Record outRow }
+newLayer tc name layer@(Layer lt _ com) = do
 
   -- 1. create the layercanvas
-
-  size <- _.size <$> getDimensions bc
+  size <- _.size <$> getDimensions tc
+  dims <- getDimensions tc
   let pos = { left: 0.0, top: 0.0 }
+
+  let renderFuns c = (com ^. _Component) (Tuple c (slotSize dims (asSlot com)))
+
+  -- 2. add the canvas to the trackcontainer & DOM
 
   canvas <- liftEffect do
     cv <- case lt of
@@ -826,45 +815,27 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
     setCanvasPosition pos (cv ^. _FrontCanvas)
     pure cv
 
-
-  hotspotsRef <- liftEffect $ Ref.new { offset: 0.0, hotspots: (\r p -> []) }
-  let lastHotspots = liftEffect do
-        { offset, hotspots } <- Ref.read hotspotsRef
-        pure \r {x, y} -> hotspots r {x: x+offset, y}
-
-  -- 2. add the canvas to the trackcontainer & DOM
-  let layerRef = _.layers $ unwrap bc
+  let layerRef = _.layers $ unwrap tc
   liftEffect do
     Ref.modify_ (Map.insert name canvas) layerRef
-    appendCanvasElem (unwrap bc).element $ canvas ^. _FrontCanvas
+    appendCanvasElem (unwrap tc).element $ canvas ^. _FrontCanvas
 
-  -- 3. create the rendering function
-  let render :: c -> m (List Renderable)
-      render c = do
-        dims <- getDimensions bc
+  cache <- liftAff $ Cacher.new renderFuns
 
-        let toRender = (com ^. _Component) c $ slotSize dims (asSlot com)
-
-        liftEffect $ Ref.modify_ (_ { hotspots = toRender.hotspots }) hotspotsRef
-
-        pure toRender.renderables
-
-
-      drawOnCanvas :: Pair Number -> List Renderable -> m Unit
+  let drawOnCanvas :: Pair Number -> List Renderable -> m Unit
       drawOnCanvas (Pair l r) renderables = do
-        layers <- getLayers bc
+        layers <- getLayers tc
 
-        liftEffect $ Ref.modify_ ( _ { offset = l }) hotspotsRef
         -- TODO handle exceptions!!! :|
         el  <- case Map.lookup name layers of
                  Nothing -> unsafeCrashWith $ "Tried to render layer '" <> name <> "', but it did not exist!"
                  Just e  -> pure $ e ^. _FrontCanvas
 
-        dims <- getDimensions bc
+        dims <- getDimensions tc
         ctx <- slotContext layer dims el
 
         liftEffect $ Canvas.withContext ctx do
-          setContextTranslation {x: zero, y: zero} ctx
+          setContextTranslation zero ctx
           void $ Canvas.clearRect ctx $ Record.merge {x: 0.0, y: 0.0} dims.size
 
         -- temporary hack to offset scrolling tracks as needed
@@ -886,7 +857,7 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
             drawingBatch :: Array { drawing :: Drawing, points :: Array Point }
                      -> m Unit
             drawingBatch ds = liftEffect $ for_ ds
-                            $ renderGlyphs (_.glyphBuffer $ unwrap bc) ctx (Pair l r)
+                            $ renderGlyphs (_.glyphBuffer $ unwrap tc) ctx (Pair l r)
 
             labels :: List Label -> m Unit
             labels ls = liftEffect do
@@ -908,36 +879,5 @@ createAndAddLayer bc name layer@(Layer lt _ com) = do
 
           liftAff $ delay $ wrap 0.01
 
-  pure { render, drawOnCanvas, lastHotspots }
 
-
-
--- | Used for layers that don't contain clickable features
-createAndAddLayer_ :: ∀ m c.
-                     MonadAff m
-                  => TrackContainer
-                  -> String
-                  -> RenderableLayer c
-                  -> m { render :: c -> m (List Renderable)
-                       , drawOnCanvas :: Pair Number -> List Renderable -> m Unit }
-createAndAddLayer_ bc name layer@(Layer lt _ com) = do
-  -- silly solution to avoid code duping createAndAddLayer
-  let layer' :: ∀ a. RenderableLayerHotspots c a
-      layer' = (map <<< map <<< map) (\ renderables -> { renderables, hotspots: \r p -> [] }) layer
-
-  { render, drawOnCanvas } <- createAndAddLayer bc name layer'
-  pure { render, drawOnCanvas }
-
-
-
--- | Convenience function for rendering layers when manipulating the
--- | Renderable contents isn't desired.
-renderLayer :: ∀ m c r.
-               MonadAff m
-            => Pair Number
-            -> c
-            -> { render :: c -> m (List Renderable)
-               , drawOnCanvas :: Pair Number -> List Renderable -> m Unit
-               | r }
-            -> m Unit
-renderLayer p c l = l.render c >>= l.drawOnCanvas p
+  pure { drawOnCanvas, run: cache.run, last: cache.last }

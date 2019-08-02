@@ -1,26 +1,35 @@
-BUILD = pulp $(FLAGS)
+BUILD = spago $(FLAGS)
 
-BUNDLE = $(BUILD) --psc-package browserify --skip-entry-point --no-check-main --standalone $(NAMESPACE) --main
-NAMESPACE = GGB
+BUNDLE = spago bundle-module -m $(MODULE) --to temp.js
 
-OUT = ./dist/app.js
+PARCEL = parcel index.html
+
+NAMESPACE = GenomeBrowser
+
 MODULE  = Genetics.Browser.UI
 
-.PHONY: $(OUT)
-$(OUT): deps
-	$(BUNDLE) $(MODULE)  --to $(OUT)
+.PHONY: start
+start: output
+	parcel index.html
 
-build: $(OUT)
+output:
+	spago build
+
+.PHONY: build
+build: output
+	parcel build -o index.js -d build index.js
 
 .PHONY: test
 test: deps
 	$(BUILD) test
+
 
 .PHONY: clean
 clean:
 	rm -rf ./output \
 	       ./node_modules \
          ./.psc-package \
+         ./dist \
          $(OUT)
 
 npm   = ./node_modules
