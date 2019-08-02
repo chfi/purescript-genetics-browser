@@ -2,16 +2,13 @@ module Genetics.Browser.UI where
 
 import Prelude
 
-import Control.Monad.Error.Class (throwError)
-import Control.Monad.Free (Free)
 import Data.Array as Array
 import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
-import Data.Enum (fromEnum)
 import Data.Filterable (filterMap)
-import Data.Foldable (foldMap, length, sum)
+import Data.Foldable (foldMap, length)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Int as Int
@@ -22,11 +19,10 @@ import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
-import Data.String as String
 import Data.Symbol (SProxy(SProxy))
 import Data.Traversable (for_, traverse_)
 import Data.Tuple (Tuple(Tuple))
-import Data.Variant (Variant, case_, inj)
+import Data.Variant (Variant, inj)
 import Data.Variant as V
 import Effect (Effect)
 import Effect.Aff (Aff, Fiber, forkAff, killFiber, launchAff, launchAff_)
@@ -39,12 +35,11 @@ import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (HexColor, Peak, pixelSegments)
 import Genetics.Browser.Bed (getGenes)
-import Genetics.Browser.Cacher as Cacher
-import Genetics.Browser.Canvas (setTextContent, BrowserContainer, TrackAnimation(..), TrackContainer, _Container, addTrack, animateTrack, browserContainer, dragScroll, dragScrollTrack, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom, withLoadingIndicator)
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView(..), _Segments, _TotalSize, coordSys, normalizeView, pairsOverlap, scaleToScreen, viewScale)
+import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, _Container, addTrack, browserContainer, dragScrollTrack, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, _TotalSize, coordSys, pairsOverlap, scaleToScreen, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), trackSlots)
-import Genetics.Browser.Track (class TrackRecord, makeContainers, makeTrack, fetchData, class CombineFuns, combineFuns)
+import Genetics.Browser.Track (class TrackRecord, fetchData, makeContainers, makeTrack)
 import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
 import Genetics.Browser.UI.View (UpdateView(..), ViewManager)
 import Genetics.Browser.UI.View as View
@@ -481,8 +476,8 @@ mkGene bs config = do
       launchAff_ $ track.queueCommand (inj _render unit)
 
 
-runBrowser :: BrowserConfig { gwas :: _
-                            , gene :: _ }
+runBrowser :: BrowserConfig { gwas :: _ }
+                            -- , gene :: _ }
            -> BrowserContainer
            -> Effect (Fiber Unit)
 runBrowser config bc = launchAff $ do
@@ -533,9 +528,11 @@ runBrowser config bc = launchAff $ do
     Just _ -> mkGwas bs config *> pure unit
     Nothing -> pure unit
 
+  {-
   case config.urls.genes of
     Just _ -> mkGene bs config *> pure unit
     Nothing -> pure unit
+-}
 
 
 
@@ -560,33 +557,7 @@ foreign import setWindow :: ∀ a. String -> a -> Effect Unit
 
 
 main :: Foreign -> Effect Unit
-main _ = do
-  let funs :: { f :: { x :: Int, y :: String } -> String
-              , g :: { y :: String, z :: Boolean } -> Int }
-      funs = { f: \ {x,y} -> show x <> " " <> y
-             , g: \ {y,z} -> (String.length y) + (fromEnum z) }
-
-      funs1 :: { f :: { x :: Int, y :: String } -> String
-               , g :: { z :: Boolean } -> Int }
-      funs1 = { f: \ {x,y} -> show x <> " " <> y
-              , g: \ {z} -> (fromEnum z) }
-
-      args :: { x :: Int, y :: String, z :: Boolean }
-      args = { x: 5, y: "hello", z: false }
-
-      out1 = combineFuns funs $ { x: 8, y: "hello", z: true }
-      out2 = combineFuns funs1 args
-
-  log $ "f: " <> out1.f
-  log $ "g: " <> show out1.g
-  log $ ""
-  log $ "f: " <> out2.f
-  log $ "g: " <> show out2.g
-
-  pure unit
-
-main' :: Foreign -> Effect Unit
-main' rawConfig = do
+main rawConfig = do
 
   el' <- do
     doc <- DOM.toDocument
@@ -616,9 +587,9 @@ main' rawConfig = do
             Just _ -> addTrack bc "gwas" cs.gwas *> pure unit
             Nothing -> pure unit
 
-          case c.urls.genes of
-            Just _ -> addTrack bc "gene" cs.gene *> pure unit
-            Nothing -> pure unit
+          -- case c.urls.genes of
+          --   Just _ -> addTrack bc "gene" cs.gene *> pure unit
+          --   Nothing -> pure unit
 
           log $ unsafeStringify c
           void $ runBrowser c bc

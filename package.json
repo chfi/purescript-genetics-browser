@@ -10,5 +10,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chfi/purescript-genetics-browser.git"
+  },
+  "devDependencies": {
+    "cssnano": "^4.1.10"
   }
 }

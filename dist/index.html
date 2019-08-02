@@ -7,8 +7,11 @@
   <script src="/style.e308ff8e.js"></script></head>
   <body style="margin: 0">
 
-    <h1 style="font: bold normal 1.8em sans-serif; margin: 20px">Genetics Genome Browser</h1>
+    <!-- <h1 style="font: bold normal 1.8em sans-serif; margin: 20px">Genetics Genome Browser</h1> -->
 
+    <div id="info-line">
+        Powered by <a href="https://github.com/genenetwork/purescript-genetics-browser">genenetwork/purescript-genetics-browser</a>
+    </div>
     <div id="browser">
       <div id="controls">
         <button id="scrollLeft" type="button">
@@ -25,20 +28,15 @@
         </button>
         <button id="reset" type="button">Reset</button>
       </div>
-      <div id="info-line">
-        Powered by <a href="https://github.com/chfi/purescript-genetics-browser">chfi/purescript-genetics-browser</a>
-      </div>
     </div>
 
     <script src="/purescript-genetics-browser.e31bb0bc.js"></script>
     <script>var localUrls = {
-  genes: "./mouse.json",
   snps: "./gwas.json",
   annotations: "./annotations.json"
 };
 var urlRoot = "https://raw.githubusercontent.com/chfi/genetics-browser-example/master/track/data/";
 var githubUrls = {
-  genes: urlRoot + "mouse.json",
   snps: urlRoot + "gwas.json",
   annotations: urlRoot + "annots_fake.json"
 };
@@ -55,17 +53,8 @@ var gwasPadding = {
   left: vscaleWidth,
   right: legendWidth
 };
-var gwasHeight = 220.0;
-var genePadding = {
-  top: 10.0,
-  bottom: 35.0,
-  left: vscaleWidth,
-  right: legendWidth
-};
-var geneHeight = 140.0;
+var gwasHeight = 320.0;
 var config = {
-  trackHeight: 400.0,
-  padding: gwasPadding,
   score: score,
   urls: localUrls,
   tracks: {
@@ -105,10 +94,6 @@ var config = {
           scaleSize: 16
         }
       }
-    },
-    gene: {
-      trackHeight: geneHeight,
-      padding: genePadding
     }
   },
   chrs: {
@@ -117,11 +102,8 @@ var config = {
     chrLabels: {
       fontSize: 16
     }
-  },
-  initialChrs: {
-    left: "1",
-    right: "5"
-  }
+  } // initialChrs: { left: "1", right: "5" }
+
 };
 GenomeBrowser.main(config)();
 document.getElementById("controls").style.visibility = "visible";</script>
