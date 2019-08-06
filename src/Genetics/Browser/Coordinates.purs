@@ -17,14 +17,17 @@ module Genetics.Browser.Coordinates
        , _Segments
        , pairsOverlap
        , coordSys
+       , parseCoordSys
        , scaleToScreen
        ) where
 
 import Prelude
 
+import Control.Monad.Except (except)
 import Data.Array as Array
 import Data.BigInt (BigInt)
 import Data.BigInt as BigInt
+import Data.Either (note)
 import Data.Foldable (foldMap)
 import Data.Generic.Rep (class Generic)
 import Data.Lens (Getter', Lens, to, (^.))
@@ -33,9 +36,13 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (fromJust)
 import Data.Monoid.Additive (Additive(..))
-import Data.Newtype (class Newtype, alaF, unwrap)
+import Data.Newtype (class Newtype, alaF, unwrap, wrap)
 import Data.Pair (Pair(..))
+import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple))
+import Foreign (F, Foreign, ForeignError(..), readArray, readString)
+import Foreign.Index ((!))
+import Genetics.Browser.Types (ChrId)
 import Global.Unsafe (unsafeStringify)
 import Partial.Unsafe (unsafePartial)
 
@@ -130,6 +137,24 @@ coordSys segs = CoordSys $ Map.fromFoldable
         offsets :: Array c -> Array (Pair c)
         offsets xs = let os = Array.scanl (\x y -> x + y) zero xs
                      in Array.zipWith Pair (zero `Array.cons` os) os
+
+
+parseCoordSys :: Foreign
+              -> F (CoordSys ChrId BigInt)
+parseCoordSys a = do
+  array <- readArray a
+
+  let f :: Foreign -> F (Tuple ChrId BigInt)
+      f o = do
+          name <- wrap <$> (readString =<< o ! "chr")
+          val  <- (except
+                   <<< note (pure $ ForeignError "error parsing size for chr")
+                   <<< BigInt.fromString) =<< readString =<< o ! "size"
+          pure $ Tuple name val
+
+  chrs <- traverse f array
+
+  pure $ coordSys chrs
 
 
 segmentsInPair :: ∀ i c.

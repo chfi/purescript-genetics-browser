@@ -2,6 +2,7 @@ module Genetics.Browser.UI where
 
 import Prelude
 
+import Control.Monad.Except (runExcept)
 import Data.Array as Array
 import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
@@ -36,7 +37,7 @@ import Foreign (Foreign, MultipleErrors, renderForeignError)
 import Genetics.Browser (HexColor, Peak, pixelSegments)
 import Genetics.Browser.Bed (getGenes)
 import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, _Container, addTrack, browserContainer, dragScrollTrack, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom)
-import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, _TotalSize, coordSys, pairsOverlap, scaleToScreen, viewScale)
+import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, _TotalSize, pairsOverlap, parseCoordSys, scaleToScreen, viewScale)
 import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), trackSlots)
 import Genetics.Browser.Track (class TrackRecord, fetchData, makeContainers, makeTrack)
@@ -482,9 +483,13 @@ runBrowser :: BrowserConfig { gwas :: _ }
            -> Effect (Fiber Unit)
 runBrowser config bc = launchAff $ do
 
-  let cSys :: CoordSys ChrId BigInt
-      cSys = coordSys mouseChrSizes
-      initialView = fromMaybe (wrap $ Pair zero (cSys^._TotalSize)) do
+
+  cSys <- liftEffect
+          case runExcept $ parseCoordSys config.coordinateSystem of
+    Left err -> throw $ foldMap ((_ <> " ") <<< renderForeignError) err
+    Right cs -> pure cs
+
+  let initialView = fromMaybe (wrap $ Pair zero (cSys^._TotalSize)) do
         v <- config.initialChrs
         (Pair l _) <- Map.lookup (wrap v.left) $ cSys^._Segments
         (Pair _ r) <- Map.lookup (wrap v.right) $ cSys^._Segments
@@ -551,6 +556,7 @@ type BrowserConfig a =
              , chrBG1 :: HexColor
              , chrBG2 :: HexColor }
   , tracks :: a
+  , coordinateSystem :: Foreign
   }
 
 foreign import setWindow :: ∀ a. String -> a -> Effect Unit
@@ -593,29 +599,3 @@ main rawConfig = do
 
           log $ unsafeStringify c
           void $ runBrowser c bc
-
-
-mouseChrSizes :: Array (Tuple ChrId BigInt)
-mouseChrSizes =
-  unsafePartial
-  $ map (bimap ChrId (fromJust <<< BigInt.fromString))
-      [ Tuple "1"   "195471971"
-      , Tuple "2"   "182113224"
-      , Tuple "3"   "160039680"
-      , Tuple "4"   "156508116"
-      , Tuple "5"   "151834684"
-      , Tuple "6"   "149736546"
-      , Tuple "7"   "145441459"
-      , Tuple "8"   "129401213"
-      , Tuple "9"   "124595110"
-      , Tuple "10"  "130694993"
-      , Tuple "11"  "122082543"
-      , Tuple "12"  "120129022"
-      , Tuple "13"  "120421639"
-      , Tuple "14"  "124902244"
-      , Tuple "15"  "104043685"
-      , Tuple "16"  "98207768"
-      , Tuple "17"  "94987271"
-      , Tuple "18"  "90702639"
-      , Tuple "19"  "61431566"
-      ]
