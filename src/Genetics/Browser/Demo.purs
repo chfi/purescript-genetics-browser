@@ -737,6 +737,7 @@ addGWASLayers coordinateSystem config trackData =
     rLegend <-
       newLayer bc "legend" $ annotationsUI legend
 
+    hotspotsOffset <- liftEffect $ Ref.new 0.0
 
     let fixedUI = do
           let uiConf = { rulerColor: wrap red, threshold }
@@ -748,12 +749,16 @@ addGWASLayers coordinateSystem config trackData =
           traverse_ render [rLegend, rVScale, rRuler]
 
 
-        snps o v = do
           rSNPs.run { snps: {threshold, render: config.snps }, view: v}
+        snps o@(Pair offset _) v = do
+          liftEffect $ Ref.write offset hotspotsOffset
           rSNPs.last.renderables >>= rSNPs.drawOnCanvas o
 
 
-        hotspots = rSNPs.last.hotspots
+        hotspots = do
+          offset <- liftEffect $ Ref.read hotspotsOffset
+          fun <- rSNPs.last.hotspots
+          pure \r p -> fun r (p { x = p.x + offset })
 
         annotations o v = do
           rAnnos.run { annotations: {threshold, render: config.annotations }, view: v}
