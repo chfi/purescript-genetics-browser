@@ -105,24 +105,21 @@ pixelSegmentsOpt conf cSys trackDim csView =
 
 
 
-trackLikeLayer :: ∀ a b l rC r1 r2.
-                  IsSymbol l
-               => Row.Cons  l b r1 ( view :: CoordSysView | r2 )
-               => { segmentPadding :: Number
+trackLikeLayer :: ∀ a rC.
+                  { segmentPadding :: Number
                   , coordinateSystem :: CoordSys ChrId BigInt | rC }
-               -> SProxy l
-               -> Component (b -> Map ChrId (Pair Number) -> Canvas.Dimensions -> a)
-               -> Layer (Tuple (Record ( view :: CoordSysView | r2 ))
+               -> Component (Map ChrId (Pair Number) -> Canvas.Dimensions -> a)
+               -> Layer (Tuple CoordSysView
                                Canvas.Dimensions
                       -> a)
-trackLikeLayer conf name com =
+trackLikeLayer conf com =
   let segs :: Canvas.Dimensions -> CoordSysView -> Map ChrId (Pair Number)
       segs = pixelSegments conf conf.coordinateSystem
 
-      fun :: (b -> Map ChrId (Pair Number) -> Canvas.Dimensions -> a) -> Tuple _ _ -> a
-      fun f (Tuple r d) = f (get name r) (segs d r.view) d
+      fun :: (Map ChrId (Pair Number) -> Canvas.Dimensions -> a) -> Tuple _ _ -> a
+      fun f (Tuple view d) = f (segs d view) d
 
-      com' :: Component (Tuple (Record (view :: CoordSysView | r2)) Canvas.Dimensions -> a)
+      com' :: Component (Tuple CoordSysView Canvas.Dimensions -> a)
       com' = fun <$> com
 
   in Layer Scrolling (Masked 5.0) com'
@@ -203,7 +200,7 @@ chrLabelsLayer trackConf {fontSize} =
 
 
   in Layer Scrolling (Masked 5.0)
-     $ CBottom \(Tuple {view} dim) ->
+     $ CBottom \(Tuple view dim) ->
          { renderables:
            map (inj _drawing <<< labelSeg dim view)
            $ Map.toUnfoldable

@@ -48,6 +48,7 @@ import Genetics.Browser.Bed (BedFeature)
 import Genetics.Browser.Canvas (BatchDrawing, BigDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, TrackContainer, _bigDrawing, _drawingBatch, _labels, newLayer)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, aroundPair, normalize, pairSize, pairsOverlap)
 import Genetics.Browser.Layer (Component(..), Layer(..), LayerMask(..), LayerType(..), TrackPadding)
+import Genetics.Browser.Track (LayerDef(..))
 import Genetics.Browser.Types (Bp(Bp), ChrId(ChrId), NegLog10(..), _NegLog10)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Point, circle, fillColor, filled, lineWidth, outlineColor, outlined, rectangle)
@@ -456,12 +457,14 @@ annotationsUI legend = fixedUILayer (CRight $ drawLegendInSlot legend)
 
 
 
-type SNPConfig
-  = { radius :: Number
+type SNPConfigRow
+  = ( radius :: Number
     , lineWidth :: Number
     , color :: { outline :: HexColor
                , fill    :: HexColor }
-    , pixelOffset :: Point }
+    , pixelOffset :: Point )
+
+type SNPConfig = Record SNPConfigRow
 
 defaultSNPConfig :: SNPConfig
 defaultSNPConfig =
@@ -470,6 +473,30 @@ defaultSNPConfig =
   , color: { outline: wrap darkblue, fill: wrap darkblue }
   , pixelOffset: {x: 0.0, y: 0.0}
   }
+
+
+snpLayer :: ∀ r1.
+            LayerDef (threshold :: {min :: Number, max :: Number | r1})
+                     (snps :: Map ChrId (Array (SNP ())))
+                     SNPConfigRow
+                     (Map ChrId (Pair Number)
+                   -> Canvas.Dimensions
+                   -> { renderables :: List Renderable
+                      , hotspots :: Number -> Point -> Array (SNP ()) })
+snpLayer = LayerDef f
+  where f :: { browserConfig :: Record (threshold :: {min :: Number, max :: Number | r1})
+             , trackConfig :: Record (snps :: Map ChrId (Array (SNP ())))
+             , layerConfig :: Record SNPConfigRow }
+          -> Map ChrId (Pair Number)
+          -> Canvas.Dimensions
+          -> { renderables :: List Renderable
+             , hotspots :: Number -> Point -> Array (SNP ()) }
+        f c = renderSNPs c.trackConfig.snps
+                         { threshold: c.browserConfig.threshold
+                         , render: c.layerConfig }
+
+
+
 
 
 renderSNPs :: ∀ r1.
@@ -674,20 +701,17 @@ addChrLayers :: ∀ r.
 addChrLayers trackConf {chrLabels, chrBG1, chrBG2} tc = do
 
   rBG  <- newLayer tc "chrBackground"
-          $ trackLikeLayer trackConf (SProxy :: _ "background")
-            (Center chrBackgroundLayer)
+          $ trackLikeLayer trackConf
+            (Center $ chrBackgroundLayer { chrBG1
+                                         , chrBG2
+                                         , segmentPadding: trackConf.segmentPadding })
 
   rChrLabels <- newLayer tc "chrLabels"
                 $ chrLabelsLayer trackConf { fontSize: chrLabels.fontSize }
 
   let chrs o v = do
-        let background = { chrBG1
-                         , chrBG2
-                         , segmentPadding: trackConf.segmentPadding }
-            bgConf = { background
-                     , view: v }
-            render = \l -> do
-                l.run bgConf
+        let render = \l -> do
+                l.run v
                 l.last.renderables >>= l.drawOnCanvas o
 
         traverse_ render
@@ -727,14 +751,18 @@ addGWASLayers coordinateSystem config trackData =
              , coordinateSystem }
       cSys = coordinateSystem
 
-      snpLayer :: Layer (Tuple _ Canvas.Dimensions -> {renderables :: _, hotspots :: _})
-      snpLayer = trackLikeLayer conf _snps
-                    (Center $ renderSNPs trackData.snps)
+      snpLayer' :: Layer (Tuple CoordSysView Canvas.Dimensions -> {renderables :: _, hotspots :: _})
+      snpLayer' =
+        trackLikeLayer conf
+                       (Center $ renderSNPs trackData.snps {threshold, render: config.snps })
 
 
       annotationLayer :: Layer (Tuple _ _ -> _)
-      annotationLayer = trackLikeLayer conf _annotations
-          (Center $ renderAnnotations cSys sigSnps trackData.annotations)
+      annotationLayer = trackLikeLayer conf
+          (Center $ renderAnnotations cSys
+                                      sigSnps
+                                      trackData.annotations
+                                      {threshold, render: config.annotations })
 
 
 
@@ -745,7 +773,7 @@ addGWASLayers coordinateSystem config trackData =
       newLayer bc "ruler" $ Layer Fixed NoMask (Center thresholdRuler)
 
     rSNPs <-
-      newLayer bc "snps" snpLayer
+      newLayer bc "snps" snpLayer'
 
     rAnnos <-
       newLayer bc "annotations" annotationLayer
@@ -768,9 +796,9 @@ addGWASLayers coordinateSystem config trackData =
           traverse_ render [rLegend, rVScale, rRuler]
 
 
-          rSNPs.run { snps: {threshold, render: config.snps }, view: v}
         snps o@(Pair offset _) v = do
           liftEffect $ Ref.write offset hotspotsOffset
+          rSNPs.run v
           rSNPs.last.renderables >>= rSNPs.drawOnCanvas o
 
 
@@ -780,7 +808,7 @@ addGWASLayers coordinateSystem config trackData =
           pure \r p -> fun r (p { x = p.x + offset })
 
         annotations o v = do
-          rAnnos.run { annotations: {threshold, render: config.annotations }, view: v}
+          rAnnos.run v
           rAnnos.last.renderables >>= rAnnos.drawOnCanvas o
 
 
@@ -807,13 +835,13 @@ addGeneLayers coordinateSystem config trackData tcont = do
              , coordinateSystem }
 
       geneLayer =
-        trackLikeLayer conf (SProxy :: _ "genes")
-          (Center $ renderGenes trackData.genes)
+        trackLikeLayer conf
+          (Center $ renderGenes trackData.genes {genes: {}})
 
   rGenes <- newLayer tcont "genes" geneLayer
 
   let genes o v = do
-        rGenes.run { genes: {}, view: v}
+        rGenes.run v
         rGenes.last.renderables >>= rGenes.drawOnCanvas o
 
 
