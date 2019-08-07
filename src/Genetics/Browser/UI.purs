@@ -4,9 +4,7 @@ import Prelude
 
 import Control.Monad.Except (runExcept)
 import Data.Array as Array
-import Data.Bifunctor (bimap)
 import Data.BigInt (BigInt)
-import Data.BigInt as BigInt
 import Data.Either (Either(Right, Left))
 import Data.Filterable (filterMap)
 import Data.Foldable (foldMap, length)
@@ -16,13 +14,12 @@ import Data.Int as Int
 import Data.Lens ((^.))
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Map as Map
-import Data.Maybe (Maybe(..), fromJust, fromMaybe)
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Newtype (unwrap, wrap)
 import Data.Pair (Pair(..))
 import Data.Pair as Pair
 import Data.Symbol (SProxy(SProxy))
 import Data.Traversable (for_, traverse_)
-import Data.Tuple (Tuple(Tuple))
 import Data.Variant (Variant, inj)
 import Data.Variant as V
 import Effect (Effect)
@@ -34,21 +31,21 @@ import Effect.Exception (error, throw)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Foreign (Foreign, MultipleErrors, renderForeignError)
+import Foreign.Object (Object)
 import Genetics.Browser (HexColor, Peak, pixelSegments)
 import Genetics.Browser.Bed (getGenes)
 import Genetics.Browser.Canvas (BrowserContainer, TrackContainer, _Container, addTrack, browserContainer, dragScrollTrack, getDimensions, getTrack, setElementStyle, setTrackContainerSize, trackClickHandler, wheelZoom)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, _Segments, _TotalSize, pairsOverlap, parseCoordSys, scaleToScreen, viewScale)
-import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
+import Genetics.Browser.Demo (Annotation, AnnotationField, SNP, AnnotationsURLConfig, addChrLayers, addGWASLayers, addGeneLayers, annotationsForScale, filterSig, getAnnotations, getSNPs, showAnnotationField)
 import Genetics.Browser.Layer (Component(Center), trackSlots)
 import Genetics.Browser.Track (class TrackRecord, fetchData, makeContainers, makeTrack)
-import Genetics.Browser.Types (ChrId(ChrId), _NegLog10, _prec)
+import Genetics.Browser.Types (ChrId, _NegLog10, _prec)
 import Genetics.Browser.UI.View (UpdateView(..), ViewManager)
 import Genetics.Browser.UI.View as View
 import Global.Unsafe (unsafeStringify)
 import Graphics.Canvas as Canvas
 import Graphics.Drawing (Point)
 import Math as Math
-import Partial.Unsafe (unsafePartial)
 import Prim.RowList (class RowToList)
 import Record as Record
 import Simple.JSON (read)
@@ -65,7 +62,6 @@ import Web.HTML.HTMLDocument (toDocument) as DOM
 import Web.HTML.Window (document) as DOM
 import Web.UIEvent.KeyboardEvent (KeyboardEvent)
 import Web.UIEvent.KeyboardEvent (key) as DOM
-
 
 
 {-
@@ -251,18 +247,16 @@ peakHTML disp peak =
 
 
 annoPeakHTML :: ∀ a b.
-                Peak a b (Annotation ())
+                Object String
+             -> Peak a b (Annotation ())
              -> String
-annoPeakHTML peak =
+annoPeakHTML urlConf peak =
   case Array.uncons peak.elements of
     Nothing               -> ""
-    Just {head, tail: []} -> annotationHTMLAll head
+    Just {head, tail: []} -> annotationHTMLAll urlConf head
     Just {head, tail}     -> wrapWith "div"
                              ( wrapWith "p" "Annotations:"
                              <> foldMap annotationHTMLShort peak.elements)
-
-
-
 
 
 -- | Given a function to transform the data in the annotation's "rest" field
@@ -271,40 +265,31 @@ annoPeakHTML peak =
 annotationHTML :: (AnnotationField -> Maybe String)
                 -> Annotation () -> String
 annotationHTML disp {feature} = wrapWith "div" contents
-  where url = fromMaybe "No URL"
-              $ map (\a -> "URL: <a target='_blank' href='"
-                           <> a <> "'>" <> a <> "</a>") feature.url
-
+  where
         name = fromMaybe ("Annotated SNP: " <> feature.name)
                          (("Gene: " <> _) <$> feature.gene)
 
-        showOther fv = fv.field <> ": " <> (unsafeCoerce fv.value)
+        header = case feature.url of
+          Nothing  -> name
+          Just url -> "<a target='_blank' href='"
+                      <> url <> "'>"
+                      <> name <> "</a>"
 
         contents = foldMap (wrapWith "p")
-          $ [ name
-            , url
-            ] <> (filterMap disp
-                  $ Array.fromFoldable feature.rest)
+          $ [ header ] <> (filterMap disp
+                          $ Array.fromFoldable feature.rest)
 
 -- | Shows all data in "rest" using the default showAnnotationField (which uses unsafeCoerce)
-annotationHTMLAll :: Annotation () -> String
-annotationHTMLAll =
-  annotationHTML (pure <<< showAnnotationField)
+annotationHTMLAll :: Object String -> Annotation () -> String
+annotationHTMLAll urlConf =
+  annotationHTML (pure <<< showAnnotationField urlConf)
 
-
-annotationHTMLDefault :: Annotation () -> String
-annotationHTMLDefault = annotationHTML \x -> pure case x of
-  {field: "p_lrt", value} ->
-     "p_lrt: " <> (unsafeCoerce value) ^. _NegLog10 <<< _Newtype <<< _prec 4
-  fv -> showAnnotationField fv
 
 annotationHTMLShort :: Annotation () -> String
 annotationHTMLShort {feature} = wrapWith "p" anchor
   where
         name' = fromMaybe (feature.name)
                           (feature.gene)
-
-        showOther fv = fv.field <> ": " <> (unsafeCoerce fv.value)
 
         anchor = case feature.url of
           Nothing  -> name'
@@ -399,7 +384,6 @@ mkGwas bs config = do
   gwasData <- fetchData gwasTC  { snps: getSNPs cSys
                                 , annotations: getAnnotations cSys } config.urls
 
-
   render <- do
     chrLayers <- addChrLayers { coordinateSystem: cSys
                               , segmentPadding: 12.0 }
@@ -442,7 +426,8 @@ mkGwas bs config = do
                   cmdInfoBox $ IBoxSetY $ Int.round p.y
                   cmdInfoBox $ IBoxSetContents
                     $ snpHTML g
-                    <> foldMap annoPeakHTML (annotAround annoPeaks g)
+                    <> foldMap (annoPeakHTML config.tracks.gwas.annotations.urls)
+                               (annotAround annoPeaks g)
 
 
       trackClickHandler gwasTC
@@ -596,6 +581,6 @@ main rawConfig = do
           -- case c.urls.genes of
           --   Just _ -> addTrack bc "gene" cs.gene *> pure unit
           --   Nothing -> pure unit
+          log $ unsafeCoerce c
 
-          log $ unsafeStringify c
           void $ runBrowser c bc

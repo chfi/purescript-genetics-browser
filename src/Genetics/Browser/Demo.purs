@@ -36,10 +36,13 @@ import Data.Variant (inj)
 import Effect.Aff (Aff, error)
 import Effect.Class (liftEffect)
 import Effect.Class.Console (log)
+import Effect.Ref as Ref
 import Foreign (F, Foreign, ForeignError(ForeignError))
 import Foreign (readArray) as Foreign
 import Foreign.Index (readProp) as Foreign
 import Foreign.Keys (keys) as Foreign
+import Foreign.Object (Object)
+import Foreign.Object as FO
 import Genetics.Browser (Feature, HexColor, LegendConfig, LegendEntry, Peak, Threshold, VScale, VScaleRow, chrBackgroundLayer, chrLabelsLayer, drawLegendInSlot, drawVScaleInSlot, featureNormX, groupToMap, fixedUILayer, thresholdRuler, trackLegend, trackLikeLayer)
 import Genetics.Browser.Bed (BedFeature)
 import Genetics.Browser.Canvas (BatchDrawing, BigDrawing, Label, LabelPlace(LLeft, LCenter), Renderable, TrackContainer, _bigDrawing, _drawingBatch, _labels, newLayer)
@@ -179,7 +182,6 @@ parseSNP cSys a = do
          , feature }
 
 
-
 type AnnotationRow chr pos r =
   ( "chr"  :: chr
   , "pos"  :: pos
@@ -244,15 +246,22 @@ parseAnnotationRest a = do
      { field, value: _ } <$> Foreign.readProp field a
 
 
--- | A completely dumb default way of rendering arbitrary annotation fields
-showAnnotationField :: AnnotationField -> String
-showAnnotationField fv = fv.field <> ": " <> unsafeCoerce fv.value
+-- | A less dumb default way of rendering arbitrary annotation fields
+showAnnotationField :: Object String -> AnnotationField -> String
+showAnnotationField urlConf fv =
+  case FO.lookup fv.field urlConf of
+     Nothing -> fv.field <> ": " <> unsafeCoerce fv.value
+     Just l  -> "<a target='_blank' href='"
+                <> unsafeCoerce fv.value <> "'>"
+                <> l
+                <> "</a>"
 
 
-showAnnotation :: Annotation ()
+showAnnotation :: Object String
+               -> Annotation ()
                -> List String
-showAnnotation a = (List.fromFoldable
-                    [ name, chr, pos ]) <> (map showAnnotationField annot.rest)
+showAnnotation urlConf a = (List.fromFoldable
+                    [ name, chr, pos ]) <> (map (showAnnotationField urlConf) annot.rest)
   where annot = a.feature
         name = fromMaybe ("SNP: " <> annot.name)
                          (("Gene: " <> _) <$> annot.gene)
@@ -320,13 +329,15 @@ getAnnotations cs url = do
         <> show (length parsed.right :: Int)
         <> " annotations."
 
-    -- logging with unsafeCoerce lets us examine the raw JS object in the console!
     log $ unsafeCoerce (parsed.right)
+
+  {-
   case Array.head parsed.right of
     Nothing -> pure unit
     Just an -> liftEffect do
       log "first annotation: "
       sequence_ (log <$> (("> " <> _) <$> showAnnotation an))
+  -}
 
   pure $ groupToMap _.feature.chr parsed.right
 
@@ -368,18 +379,26 @@ peaks :: ∀ rS.
       -> Array (Peak Bp Number (SNP rS))
 peaks r snps = unfoldr (peak1 r) snps
 
+type AnnotationsURLConfig = Object String
+
 type AnnotationsConfig =
   { radius    :: Number
   , outline   :: HexColor
   , snpColor  :: HexColor
-  , geneColor :: HexColor }
+  , geneColor :: HexColor
+  , urls :: Object String
+  }
+
 
 defaultAnnotationsConfig :: AnnotationsConfig
 defaultAnnotationsConfig =
   { radius:    5.5
   , outline:   wrap black
   , snpColor:  wrap blue
-  , geneColor: wrap red }
+  , geneColor: wrap red
+  , urls:      FO.empty
+  }
+
 
 annotationLegendEntry :: ∀ r. AnnotationsConfig -> Annotation r -> LegendEntry
 annotationLegendEntry conf a =

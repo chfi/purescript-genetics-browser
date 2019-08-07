@@ -19,6 +19,7 @@ You can edit this file as you like.
     , "filterable"
     , "foreign"
     , "foreign-generic"
+    , "foreign-object"
     , "functions"
     , "lists"
     , "newtype"
