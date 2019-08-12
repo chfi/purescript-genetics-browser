@@ -331,21 +331,19 @@ updateInfoBox el cmd =
       setElementContents el html
 
 infoBoxId :: String
-infoBoxId = "infoBox"
+infoBoxId = "#infoBox"
 
 initInfoBox :: Effect (InfoBoxF -> Effect Unit)
 initInfoBox = do
-  doc <- map DOM.toDocument
-           $ DOM.document =<< DOM.window
-  el <- DOM.createElement "div" doc
 
-  setId infoBoxId el
+  el <- do
+    doc <- DOM.toDocument
+           <$> (DOM.document =<< DOM.window)
+    DOM.querySelector (wrap infoBoxId) (toParentNode doc)
 
-  DOM.documentElement doc >>= case _ of
-    Nothing -> throw "Couldn't find document body!"
-    Just docBody -> void $ appendChild (Element.toNode el) (Element.toNode docBody)
-
-  pure $ updateInfoBox el
+  case el of
+    Nothing -> throw "Could not find element '#infoBox'"
+    Just el' -> pure $ updateInfoBox el'
 
 
 
