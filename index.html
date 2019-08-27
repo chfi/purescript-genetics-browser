@@ -36,13 +36,14 @@
 
       var localUrls =
       { snps:        "./gwas.json",
-        annotations: "./annotations.json"
+        annotations: "./annotations.json",
       };
 
       var urlRoot = "https://raw.githubusercontent.com/chfi/genetics-browser-example/master/track/data/";
 
       var githubUrls =
-      { snps:        urlRoot + "gwas.json",
+      { genes:       urlRoot + "mouse.json",
+        snps:        urlRoot + "gwas.json",
         annotations: urlRoot + "annots_fake.json"
       };
 
@@ -104,7 +105,8 @@
                         radius: 5.5,
                         outline:   "#000000",
                         snpColor:  "#0074D9",
-                        geneColor: "#FF4136"
+                        geneColor: "#FF4136",
+                        urls: {url: "Uniprot"},
                     },
 
                     score: score,
