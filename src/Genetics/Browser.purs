@@ -35,6 +35,7 @@ import Genetics.Browser.Canvas (Renderable, _drawing)
 import Genetics.Browser.Coordinates (CoordSys, CoordSysView, Normalized, aroundPair, normalize, scaledSegments, scaledSegments', viewScale, xPerPixel)
 import Genetics.Browser.Layer (Component(CBottom), Layer(Layer), LayerMask(NoMask, Masked), LayerType(Fixed, Scrolling))
 import Genetics.Browser.Types (Bp, ChrId, _exp)
+import Genetics.Browser.Track (LayerDef(..))
 import Graphics.Canvas (Dimensions) as Canvas
 import Graphics.Drawing (Drawing, Shape, fillColor, filled, lineWidth, outlineColor, outlined, translate)
 import Graphics.Drawing as Drawing
@@ -135,6 +136,19 @@ fixedUILayer com = Layer Fixed NoMask $ map f com
 
 
 
+thresholdLayer :: ∀ r.
+                  LayerDef (threshold :: Record (VScaleRow ()))
+                           ()
+                           (rulerColor :: HexColor | r)
+                           (Canvas.Dimensions
+                         -> { renderables :: List Renderable })
+thresholdLayer = LayerDef \c slot ->
+                   thresholdRuler
+                     $ Tuple { threshold: c.browserConfig.threshold
+                             , rulerColor: c.layerConfig.rulerColor }
+                             slot
+
+
 thresholdRuler :: ∀ r r1.
                   Tuple
                   { threshold :: Record (VScaleRow r1)
@@ -163,12 +177,25 @@ thresholdRuler (Tuple {threshold: {sig,min,max}, rulerColor} slot) =
        , inj _drawing label ] }
 
 
-chrLabelsLayer :: ∀ r1 r2 r3.
+chrLabelsLayerDef :: ∀ r1 r2.
+                     LayerDef ( segmentPadding :: Number
+                              , coordinateSystem :: CoordSys ChrId BigInt )
+                              ()
+                              ( fontSize :: Int )
+                              ( Tuple _ Canvas.Dimensions
+                             -> { renderables :: List Renderable } )
+chrLabelsLayerDef =
+  LayerDef \c ->
+    chrLabelsLayer c.browserConfig
+                   c.layerConfig
+
+chrLabelsLayer :: ∀ r1 r2.
                   { segmentPadding :: Number
-                  , coordinateSystem :: CoordSys ChrId BigInt | r3 }
+                  , coordinateSystem :: CoordSys ChrId BigInt | r2 }
                -> { fontSize :: Int | r1 }
-               -> Layer (Tuple _ Canvas.Dimensions -> { renderables :: List Renderable })
-chrLabelsLayer trackConf {fontSize} =
+               -> Tuple _ Canvas.Dimensions
+               -> { renderables :: List Renderable }
+chrLabelsLayer trackConf {fontSize} (Tuple view dim) =
   let
       labelOffset chrId = 0.3 *
         (Int.toNumber $ fontSize * (String.length $ show chrId))
@@ -198,15 +225,27 @@ chrLabelsLayer trackConf {fontSize} =
             r' = min vR sR
         in l' + ((r' - l') / 2.0)
 
-
-  in Layer Scrolling (Masked 5.0)
-     $ CBottom \(Tuple view dim) ->
-         { renderables:
+  in     { renderables:
            map (inj _drawing <<< labelSeg dim view)
            $ Map.toUnfoldable
            $ pixelSegments trackConf trackConf.coordinateSystem dim view
          }
 
+
+
+chrBackgroundLayerDef :: ∀ r.
+                         LayerDef (segmentPadding :: Number)
+                                  ()
+                                  ( chrBG1 :: HexColor
+                                  , chrBG2 :: HexColor)
+                                  ( Map ChrId (Pair Number)
+                                 -> Canvas.Dimensions
+                                 -> { renderables :: List Renderable } )
+chrBackgroundLayerDef =
+  LayerDef \c ->
+    chrBackgroundLayer { chrBG1: c.layerConfig.chrBG1
+                       , chrBG2: c.layerConfig.chrBG2
+                       , segmentPadding: c.browserConfig.segmentPadding }
 
 
 chrBackgroundLayer :: ∀ r.

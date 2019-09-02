@@ -382,13 +382,15 @@ peaks r snps = unfoldr (peak1 r) snps
 
 type AnnotationsURLConfig = Object String
 
-type AnnotationsConfig =
-  { radius    :: Number
+type AnnotationsConfigRow =
+  ( radius    :: Number
   , outline   :: HexColor
   , snpColor  :: HexColor
   , geneColor :: HexColor
   , urls :: Object String
-  }
+  )
+
+type AnnotationsConfig = Record AnnotationsConfigRow
 
 
 defaultAnnotationsConfig :: AnnotationsConfig
@@ -666,6 +668,24 @@ renderAnnotationPeaks cSys vScale conf annoPks cdim =
               in { drawingBatch, labels }
 
 
+
+annotationsLayer :: ∀ r1 r2 rC.
+                    LayerDef ( threshold :: { min :: Number, max :: Number | r2 }
+                             , coordinateSystem :: CoordSys ChrId BigInt )
+                             ( annotations :: Map ChrId (Array (Annotation r1))
+                             , snps :: Map ChrId (Array (SNP ())) )
+                             AnnotationsConfigRow
+                             (Map ChrId (Pair Number)
+                           -> Canvas.Dimensions
+                           -> { renderables :: List Renderable })
+annotationsLayer = LayerDef f
+  where f :: _
+        f c = renderAnnotations c.browserConfig.coordinateSystem
+                                c.trackConfig.snps
+                                c.trackConfig.annotations
+                                { threshold: c.browserConfig.threshold
+                                , render: c.layerConfig }
+
 renderAnnotations :: ∀ r1 r2 rC.
                      CoordSys ChrId BigInt
                   -> Map ChrId (Array (SNP ()))
@@ -707,7 +727,9 @@ addChrLayers trackConf {chrLabels, chrBG1, chrBG2} tc = do
                                          , segmentPadding: trackConf.segmentPadding })
 
   rChrLabels <- newLayer tc "chrLabels"
-                $ chrLabelsLayer trackConf { fontSize: chrLabels.fontSize }
+                $ Layer Scrolling (Masked 5.0)
+                  $ CBottom (\t ->
+                      chrLabelsLayer trackConf { fontSize: chrLabels.fontSize } t)
 
   let chrs o v = do
         let render = \l -> do

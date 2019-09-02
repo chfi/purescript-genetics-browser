@@ -34,7 +34,7 @@
     <script src="/purescript-genetics-browser.e31bb0bc.js"></script>
     <script>var localUrls = {
   snps: "./gwas.json",
-  annotations: null
+  annotations: "./annotations.json"
 };
 var urlRoot = "https://raw.githubusercontent.com/chfi/genetics-browser-example/master/track/data/";
 var githubUrls = {
@@ -166,6 +166,7 @@ var config = {
       fontSize: 16
     }
   },
+  // initialChrs: { left: "1", right: "5" }
   coordinateSystem: coordinateSystem
 };
 GenomeBrowser.main(config)();
