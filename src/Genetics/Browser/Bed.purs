@@ -2,7 +2,7 @@ module Genetics.Browser.Bed where
 
 import Prelude
 
-import Affjax (get, printResponseFormatError) as Affjax
+import Affjax (get, printError) as Affjax
 import Affjax.ResponseFormat (json) as Affjax
 import Control.Monad.Except (runExcept)
 import Data.Array as Array
@@ -185,8 +185,8 @@ getGenes cs url = do
 
   body <- either (throwError
                   <<< error
-                  <<< Affjax.printResponseFormatError)
-          pure resp.body
+                  <<< Affjax.printError)
+          (pure <<< _.body) resp
 
   let throwParseError = throwError <<< error <<< foldMap (_ <> ", ")
 

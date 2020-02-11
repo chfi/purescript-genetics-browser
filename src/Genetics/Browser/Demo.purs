@@ -2,7 +2,7 @@ module Genetics.Browser.Demo where
 
 import Prelude
 
-import Affjax (get, printResponseFormatError) as Affjax
+import Affjax (get, printError) as Affjax
 import Affjax.ResponseFormat (json) as Affjax
 import Color (black)
 import Color.Scheme.Clrs (blue, red)
@@ -276,12 +276,12 @@ getSNPs :: CoordSys ChrId BigInt
 getSNPs cs url = do
   resp <- Affjax.get Affjax.json url
 
-  liftEffect $ log $ unsafeCoerce resp.body
+  -- liftEffect $ log $ unsafeCoerce resp.body
 
   body <- either (throwError
                   <<< error
-                  <<< Affjax.printResponseFormatError)
-          pure resp.body
+                  <<< Affjax.printError)
+          (pure <<< _.body) resp
 
   rawSNPs <-
     case runExcept
@@ -307,8 +307,8 @@ getAnnotations cs url = do
 
   body <- either (throwError
                   <<< error
-                  <<< Affjax.printResponseFormatError)
-          pure resp.body
+                  <<< Affjax.printError)
+          (pure <<< _.body) resp
 
   rawAnnots <- case runExcept
                     $ Foreign.readArray
