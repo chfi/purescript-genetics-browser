@@ -4,6 +4,7 @@
   "description": "Genetics network browser written in Purescript",
   "dependencies": {
     "big-integer": "^1.6.26",
+    "idb-keyval": "^3.2.0",
     "parcel-plugin-static-files-copy": "^2.1.2"
   },
   "license": "MIT",
@@ -12,6 +13,10 @@
     "url": "git+https://github.com/chfi/purescript-genetics-browser.git"
   },
   "devDependencies": {
-    "cssnano": "^4.1.10"
+    "cssnano": "^4.1.10",
+    "parcel": "^1.12.4"
+  },
+  "scripts": {
+    "dev": "spago build --watch & parcel index.html"
   }
 }
