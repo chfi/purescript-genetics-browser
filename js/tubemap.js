@@ -76,8 +76,9 @@ let forwardReadColors = [];
 let reverseReadColors = [];
 let exonColors = [];
 
-let svgID; // the (html-tag) ID of the svg
-let svg; // the svg
+let svgID; // the HTML ID of the SVG element; *without* preceding #
+let svg; // the main SVG element
+
 export let zoom; // eslint-disable-line import/no-mutable-exports
 let inputNodes = [];
 let inputTracks = [];
@@ -130,13 +131,24 @@ let trackForRuler;
 
 let bed;
 
+// D3 select the SVG element
+function d3SelectSVG() {
+  return d3.select("#" + svgID);
+}
+
+function domSelectSVG() {
+  return document.getElementById(svgID);
+}
+
 // main function to call from outside
 // which starts the process of creating a tube map visualization
 export function create(params) {
   // mandatory parameters: svgID, nodes, tracks
   // optional parameters: bed, clickableNodes, reads, showLegend
   svgID = params.svgID;
-  svg = d3.select(params.svgID);
+  // svg = d3.select(params.svgID);
+  svg = d3SelectSVG();
+
   inputNodes = JSON.parse(JSON.stringify(params.nodes)); // deep copy
   inputTracks = JSON.parse(JSON.stringify(params.tracks)); // deep copy
   inputReads = params.reads || null;
@@ -225,7 +237,7 @@ export function changeExonVisibility() {
 export function setMergeNodesFlag(value) {
   if (config.mergeNodesFlag !== value) {
     config.mergeNodesFlag = value;
-    svg = d3.select(svgID);
+    svg = d3SelectSVG();
     createTubeMap();
   }
 }
@@ -234,7 +246,7 @@ export function setMergeNodesFlag(value) {
 export function setTransparentNodesFlag(value) {
   if (config.transparentNodesFlag !== value) {
     config.transparentNodesFlag = value;
-    svg = d3.select(svgID);
+    svg = d3SelectSVG();
     createTubeMap();
   }
 }
@@ -243,7 +255,7 @@ export function setTransparentNodesFlag(value) {
 export function setSoftClipsFlag(value) {
   if (config.showSoftClips !== value) {
     config.showSoftClips = value;
-    svg = d3.select(svgID);
+    svg = d3SelectSVG();
     createTubeMap();
   }
 }
@@ -252,7 +264,7 @@ export function setSoftClipsFlag(value) {
 export function setShowReadsFlag(value) {
   if (config.showReads !== value) {
     config.showReads = value;
-    svg = d3.select(svgID);
+    svg = d3SelectSVG();
     createTubeMap();
   }
 }
@@ -271,7 +283,7 @@ export function setNodeWidthOption(value) {
     if (config.nodeWidthOption !== value) {
       config.nodeWidthOption = value;
       if (svg !== undefined) {
-        svg = d3.select(svgID);
+        svg = d3SelectSVG();
         createTubeMap();
       }
     }
@@ -281,7 +293,7 @@ export function setNodeWidthOption(value) {
 export function setColorReadsByMappingQualityFlag(value) {
   if (config.colorReadsByMappingQuality !== value) {
     config.colorReadsByMappingQuality = value;
-    svg = d3.select(svgID);
+    svg = d3SelectSVG();
     createTubeMap();
   }
 }
@@ -290,7 +302,7 @@ export function setMappingQualityCutoff(value) {
   if (config.mappingQualityCutoff !== value) {
     config.mappingQualityCutoff = value;
     if (svg !== undefined) {
-      svg = d3.select(svgID);
+      svg = d3SelectSVG();
       createTubeMap();
     }
   }
@@ -310,7 +322,7 @@ function createTubeMap() {
   minYCoordinate = 0;
   maxXCoordinate = 0;
   trackForRuler = undefined;
-  svg = d3.select(svgID);
+  svg = d3SelectSVG();
   svg.selectAll('*').remove(); // clear svg for (re-)drawing
 
   // early exit is necessary when visualization options such as colors are
@@ -1013,7 +1025,7 @@ function alignSVG() {
   svg.attr('height', maxYCoordinate - minYCoordinate + 50);
   svg.attr(
     'width',
-    document.getElementById(svgID.substring(1)).parentNode.offsetWidth
+    domSelectSVG().parentNode.offsetWidth
   );
 
   function zoomed() {
@@ -1022,19 +1034,23 @@ function alignSVG() {
     // otherwise would violate translateExtent, which leads to graph "jumping" on next pan
     transform.y = (25 - minYCoordinate) * transform.k;
     svg.attr('transform', transform);
-    const svg2 = d3.select(svgID);
+    const svg2 = d3SelectSVG();
     // adjust height, so that vertical scroll bar is shown when necessary
     svg2.attr(
       'height',
       (maxYCoordinate - minYCoordinate + 50) * d3.event.transform.k
     );
     // adjust width to compensate for verical scroll bar appearing
-    svg2.attr('width', document.getElementById('tubeMapSVG').clientWidth);
+    svg2.attr('width',
+              document
+              .getElementById(svgID)
+              .parentNode
+              .clientWidth);
   }
 
   const minZoom = Math.min(
     1,
-    document.getElementById(svgID.substring(1)).parentNode.offsetWidth /
+    domSelectSVG().parentNode.offsetWidth /
       (maxXCoordinate + 10)
   );
   zoom = d3
@@ -1052,13 +1068,13 @@ function alignSVG() {
     .append('g');
 
   // translate to correct position on initial draw
-  const containerWidth = document.getElementById(svgID.substring(1)).parentNode
+  const containerWidth = domSelectSVG().parentNode
     .offsetWidth;
   const xOffset =
     maxXCoordinate + 10 < containerWidth
       ? (containerWidth - maxXCoordinate - 10) / 2
       : 0;
-  d3.select(svgID).call(
+  d3SelectSVG().call(
     zoom.transform,
     d3.zoomIdentity.translate(xOffset, 25 - minYCoordinate)
   );
@@ -1067,14 +1083,14 @@ function alignSVG() {
 export function zoomBy(zoomFactor) {
   const minZoom = Math.min(
     1,
-    document.getElementById(svgID.substring(1)).parentNode.offsetWidth /
+    domSelectSVG().parentNode.offsetWidth /
       (maxXCoordinate + 10)
   );
   const maxZoom = 8;
-  const width = document.getElementById(svgID.substring(1)).parentElement
+  const width = domSelectSVG().parentElement
     .clientWidth;
 
-  const transform = d3.zoomTransform(d3.select(svgID).node());
+  const transform = d3.zoomTransform(d3SelectSVG().node());
   const translateK = Math.min(
     maxZoom,
     Math.max(transform.k * zoomFactor, minZoom)
@@ -1084,7 +1100,7 @@ export function zoomBy(zoomFactor) {
   translateX = Math.min(translateX, 1 * translateK);
   translateX = Math.max(translateX, width - (maxXCoordinate + 2) * translateK);
   const translateY = (25 - minYCoordinate) * translateK;
-  d3.select(svgID)
+  d3SelectSVG()
     .transition()
     .duration(750)
     .call(
@@ -2196,7 +2212,7 @@ function calculateTrackWidth() {
 
 export function useColorScheme(x) {
   config.colorScheme = x;
-  svg = d3.select(svgID);
+  svg = d3SelectSVG();
   const tr = createTubeMap();
   if (!config.hideLegendFlag) drawLegend(tr);
 }
