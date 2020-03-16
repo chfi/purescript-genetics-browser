@@ -3,6 +3,8 @@
   "version": "0.0.1",
   "description": "Genetics network browser written in Purescript",
   "dependencies": {
+    "d3": "^5.9.2",
+    "d3-selection-multi": "^1.0.1",
     "big-integer": "^1.6.26",
     "idb-keyval": "^3.2.0",
     "parcel-plugin-static-files-copy": "^2.1.2"
