@@ -68,6 +68,7 @@ import Effect.Ref as Ref
 import Effect.Uncurried (EffectFn2, EffectFn3, EffectFn5, runEffectFn2, runEffectFn3, runEffectFn5)
 import Genetics.Browser.Cacher (class CacherAff)
 import Genetics.Browser.Cacher as Cacher
+import Genetics.Browser.DOM (unsafeCreateElement, appendElem)
 import Genetics.Browser.Layer (Component, Layer(Layer), TrackDimensions, TrackPadding, _Component, asSlot, setContextTranslation, slotContext, slotOffset, slotSize, trackSlots)
 import Genetics.Browser.Layer as Layer
 import Graphics.Canvas (CanvasElement, Context2D)
@@ -86,17 +87,17 @@ import Web.DOM.Node as DOM
 
 
 
-foreign import unsafeCreateElementImpl
-  :: EffectFn2 String String Element
+-- foreign import unsafeCreateElementImpl
+--   :: EffectFn2 String String Element
 
 
-unsafeCreateElement :: { elementType :: String
-                       , id :: String }
-                    -> Effect Element
-unsafeCreateElement args =
-  runEffectFn2
-    unsafeCreateElementImpl
-    args.elementType args.id
+-- unsafeCreateElement :: { elementType :: String
+--                        , id :: String }
+--                     -> Effect Element
+-- unsafeCreateElement args =
+--   runEffectFn2
+--     unsafeCreateElementImpl
+--     args.elementType args.id
 
 
 foreign import initializeCanvasImpl
@@ -154,9 +155,9 @@ setCanvasPosition {left, top} ce =
     , Tuple "left" (show left <> "px") ]
 
 
-foreign import appendElem :: Element
-                          -> Element
-                          -> Effect Unit
+-- foreign import appendElem :: Element
+--                           -> Element
+--                           -> Effect Unit
 
 appendCanvasElem :: Element -> CanvasElement -> Effect Unit
 appendCanvasElem e c = appendElem e (unsafeCoerce c)

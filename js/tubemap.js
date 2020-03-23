@@ -140,13 +140,29 @@ function domSelectSVG() {
   return document.getElementById(svgID);
 }
 
+// Neater exported wrappers for controlling the viewport externally
+export function translateBy(x) {
+  if (zoom) {
+    zoom.translateBy(d3SelectSVG(), x);
+  }
+}
+
+export function scaleBy(k, p) {
+  if (zoom) {
+    zoom.scaleBy(d3SelectSVG(), k, p);
+  }
+}
+
+// export function translateTo(
+
 // main function to call from outside
 // which starts the process of creating a tube map visualization
 export function create(params) {
+
   // mandatory parameters: svgID, nodes, tracks
   // optional parameters: bed, clickableNodes, reads, showLegend
+
   svgID = params.svgID;
-  // svg = d3.select(params.svgID);
   svg = d3SelectSVG();
 
   inputNodes = JSON.parse(JSON.stringify(params.nodes)); // deep copy
@@ -1019,7 +1035,8 @@ function getImageDimensions() {
   });
 }
 
-// align visualization to the top and left within svg and resize svg to correct size
+// align visualization to the top and left within svg and resize svg
+// to correct size
 // enable zooming and panning
 function alignSVG() {
   svg.attr('height', maxYCoordinate - minYCoordinate + 50);
@@ -1042,8 +1059,7 @@ function alignSVG() {
     );
     // adjust width to compensate for verical scroll bar appearing
     svg2.attr('width',
-              document
-              .getElementById(svgID)
+              domSelectSVG()
               .parentNode
               .clientWidth);
   }
@@ -1062,9 +1078,10 @@ function alignSVG() {
     ])
     .on('zoom', zoomed);
 
+
   svg = svg
-    .call(zoom)
-    .on('dblclick.zoom', null)
+    .call(zoom)   // this is what adds zooming and scrolling
+    .on('dblclick.zoom', null)  // this needs
     .append('g');
 
   // translate to correct position on initial draw
